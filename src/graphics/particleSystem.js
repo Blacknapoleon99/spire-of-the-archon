@@ -140,6 +140,9 @@ export class ParticleSystem {
     this.vortexLight = new THREE.PointLight(0xff5722, 0, 24);
     this.scene.add(this.vortexLight);
 
+    // Pre-allocated reusable physical coin geometry to eliminate runtime GC allocations & disposal crashes
+    this.geoCoin = new THREE.CylinderGeometry(0.18, 0.18, 0.04, 16);
+
     // Pre-allocated Vortex Geometries for Zero-Allocation Ultimate Casting
     this.geoVortexFunnel = new THREE.CylinderGeometry(3.6, 0.4, 7.5, 24, 8, true);
     this.geoVortexCore = new THREE.CylinderGeometry(1.5, 0.25, 7.0, 16, 4, true);
@@ -954,7 +957,7 @@ export class ParticleSystem {
    */
   spawnPhysicalCoins(origin, count = 5, totalGold = 25, onCollect = null) {
     const coinPBR = TextureGenerator.createGoldCoinPBR();
-    const geo = new THREE.CylinderGeometry(0.18, 0.18, 0.04, 16);
+    const geo = this.geoCoin || new THREE.CylinderGeometry(0.18, 0.18, 0.04, 16);
     const valuePerCoin = Math.max(1, Math.floor(totalGold / Math.max(1, count)));
 
     for (let c = 0; c < count; c++) {
@@ -1263,8 +1266,8 @@ export class ParticleSystem {
 
         if (dist < 0.95) {
           // Player collected coin!
+          if (c.light) c.mesh.remove(c.light);
           this.scene.remove(c.mesh);
-          if (c.mesh.geometry) c.mesh.geometry.dispose();
           this.spawnBurst(c.mesh.position, 'light', 10);
           if (c.onCollect) c.onCollect(c.value);
           this.spawnFloatingText(c.mesh.position, `+${c.value} Gold 🪙`, '#ffd700');
@@ -1274,8 +1277,8 @@ export class ParticleSystem {
       }
 
       if (c.life <= 0) {
+        if (c.light) c.mesh.remove(c.light);
         this.scene.remove(c.mesh);
-        if (c.mesh.geometry) c.mesh.geometry.dispose();
         this.physicalCoins.splice(i, 1);
       }
     }

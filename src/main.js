@@ -291,6 +291,15 @@ class GameApp {
       }));
       playersList.push(data.player);
       this.ui.updateLobbyPlayerList(playersList);
+
+      // Spawn remote wizard character immediately if joined during active ascent
+      if (this.isGameActive && data.player && data.player.id !== onlineNetwork.localPlayerId) {
+        if (!this.players.has(data.player.id)) {
+          const newPlayer = new PlayerEntity(this.engineScene.scene, data.player, false);
+          this.players.set(data.player.id, newPlayer);
+          this.ui.addKillFeedEntry(`🧙 ${newPlayer.name} ([${newPlayer.wizardClass}]) has entered the Spire!`);
+        }
+      }
     });
 
     onlineNetwork.on('player_left', (data) => {
@@ -379,6 +388,9 @@ class GameApp {
           existing.talents = pData.talents;
           existing.isAlive = pData.isAlive;
           existing.score = pData.score;
+          if (existing.syncHealth) {
+            existing.syncHealth(pData.health, pData.maxHealth);
+          }
 
           // Handle death detection for local player
           if (isLocal && !pData.isAlive && !this.isDead) {

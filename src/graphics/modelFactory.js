@@ -11,25 +11,6 @@ export class ModelFactory {
    * Builds a high-detail realistic Sorcerer / Magician character model with class-specific staves
    */
   static createWizardMesh(wizardClass = 'pyromancer', customColor = null) {
-    let modelUrl = '/models/sorcerer.glb';
-    if (wizardClass === 'luminary') modelUrl = '/models/druid.glb';
-    else if (wizardClass === 'cryomancer') modelUrl = '/models/knight.glb';
-
-    const glb = assetLoader.getModel(modelUrl);
-    if (glb) {
-      const group = new THREE.Group();
-      group.name = `RealisticWizard_${wizardClass}_GLTF`;
-      glb.scale.set(1.0, 1.0, 1.0);
-      group.add(glb);
-
-      const staffLight = new THREE.PointLight(0x00e5ff, 1.6, 6);
-      staffLight.position.set(0.4, 1.4, 0.2);
-      group.add(staffLight);
-
-      group.userData = { isGltf: true, staffLight };
-      return group;
-    }
-
     const classConfigs = {
       pyromancer: { hex: '#c62828', color: 0xc62828, light: 0xff5722, staff: 'dragon_flame' },
       cryomancer: { hex: '#0288d1', color: 0x0288d1, light: 0x00e5ff, staff: 'frost_lotus' },
@@ -49,80 +30,98 @@ export class ModelFactory {
     const group = new THREE.Group();
     group.name = `RealisticSorcerer_${wizardClass}`;
 
+    // Ground Arcane Rune Ring at feet
+    const runeRingGeo = new THREE.RingGeometry(0.5, 0.95, 32);
+    const runeRingMat = new THREE.MeshBasicMaterial({
+      color: config.light,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.75,
+      blending: THREE.AdditiveBlending
+    });
+    const runeRing = new THREE.Mesh(runeRingGeo, runeRingMat);
+    runeRing.rotation.x = -Math.PI / 2;
+    runeRing.position.y = 0.02;
+    group.add(runeRing);
+
+    // Inner Visual Offset Group (Allows breathing/walking bobbing without overriding world position)
+    const visualOffsetGroup = new THREE.Group();
+    group.add(visualOffsetGroup);
+
     // Flowing Robe Skirt (High-segment curved drape)
     const skirtGeo = new THREE.CylinderGeometry(0.45, 0.75, 1.3, 24, 4);
     const skirt = new THREE.Mesh(skirtGeo, clothPBR.material);
     skirt.position.y = 0.65;
     skirt.castShadow = true;
     skirt.receiveShadow = true;
-    group.add(skirt);
+    visualOffsetGroup.add(skirt);
 
     // Torso / Surcoat with Gilded Trim
     const torsoGeo = new THREE.CylinderGeometry(0.38, 0.45, 0.75, 20);
     const torso = new THREE.Mesh(torsoGeo, clothPBR.material);
     torso.position.y = 1.35;
     torso.castShadow = true;
-    group.add(torso);
+    visualOffsetGroup.add(torso);
 
     // Golden Pauldrons (Shoulder Guards)
     const pauldronGeo = new THREE.SphereGeometry(0.18, 12, 12, 0, Math.PI * 2, 0, Math.PI * 0.6);
     const leftPauldron = new THREE.Mesh(pauldronGeo, goldMat);
     leftPauldron.position.set(-0.42, 1.62, 0);
     leftPauldron.rotation.z = 0.4;
-    group.add(leftPauldron);
+    visualOffsetGroup.add(leftPauldron);
 
     const rightPauldron = new THREE.Mesh(pauldronGeo, goldMat);
     rightPauldron.position.set(0.42, 1.62, 0);
     rightPauldron.rotation.z = -0.4;
-    group.add(rightPauldron);
+    visualOffsetGroup.add(rightPauldron);
 
     // Leather Belt & Golden Buckle
     const beltGeo = new THREE.CylinderGeometry(0.43, 0.43, 0.08, 20);
     const beltMat = new THREE.MeshStandardMaterial({ color: 0x2b1d14, roughness: 0.7 });
     const belt = new THREE.Mesh(beltGeo, beltMat);
     belt.position.y = 1.05;
-    group.add(belt);
+    visualOffsetGroup.add(belt);
 
     const buckleGeo = new THREE.BoxGeometry(0.12, 0.1, 0.04);
     const buckle = new THREE.Mesh(buckleGeo, goldMat);
     buckle.position.set(0, 1.05, 0.43);
-    group.add(buckle);
+    visualOffsetGroup.add(buckle);
 
     // Sorcerer Head / Face
     const headGeo = new THREE.SphereGeometry(0.24, 20, 20);
     const head = new THREE.Mesh(headGeo, skinPBR.material);
     head.position.y = 1.82;
-    group.add(head);
+    visualOffsetGroup.add(head);
 
     // Detailed Sorcerer Cowl / Hood
     const hoodGeo = new THREE.SphereGeometry(0.32, 20, 20, 0, Math.PI * 2, 0, Math.PI * 0.7);
     const hood = new THREE.Mesh(hoodGeo, clothPBR.material);
     hood.position.set(0, 1.85, -0.04);
-    group.add(hood);
+    visualOffsetGroup.add(hood);
 
     // Ornate Conical Archmage Hat
     const hatBrimGeo = new THREE.CylinderGeometry(0.65, 0.65, 0.04, 24);
     const hatBrim = new THREE.Mesh(hatBrimGeo, clothPBR.material);
     hatBrim.position.y = 1.96;
     hatBrim.rotation.x = 0.05;
-    group.add(hatBrim);
+    visualOffsetGroup.add(hatBrim);
 
     const hatConeGeo = new THREE.ConeGeometry(0.36, 0.85, 20);
     const hatCone = new THREE.Mesh(hatConeGeo, clothPBR.material);
     hatCone.position.set(0, 2.38, -0.06);
     hatCone.rotation.x = -0.15;
-    group.add(hatCone);
+    visualOffsetGroup.add(hatCone);
 
     // Glowing Sorcerer Eyes
     const eyeGeo = new THREE.SphereGeometry(0.04, 10, 10);
     const eyeMat = new THREE.MeshBasicMaterial({ color: config.light });
     const eyeL = new THREE.Mesh(eyeGeo, eyeMat);
     eyeL.position.set(-0.08, 1.83, 0.22);
-    group.add(eyeL);
+    visualOffsetGroup.add(eyeL);
 
     const eyeR = new THREE.Mesh(eyeGeo, eyeMat);
     eyeR.position.set(0.08, 1.83, 0.22);
-    group.add(eyeR);
+    visualOffsetGroup.add(eyeR);
 
     // Right Arm & Class-Specific Ornate Staff
     const armGroup = new THREE.Group();
@@ -180,9 +179,9 @@ export class ModelFactory {
     staffGroup.add(staffLight);
 
     armGroup.add(staffGroup);
-    group.add(armGroup);
+    visualOffsetGroup.add(armGroup);
 
-    group.userData = { armGroup, staffGroup, crystal, skirt, staffLight };
+    group.userData = { armGroup, staffGroup, crystal, skirt, staffLight, runeRing, visualOffsetGroup };
     return group;
   }
 

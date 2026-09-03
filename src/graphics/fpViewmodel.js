@@ -486,16 +486,20 @@ export class FPViewmodel {
         model.scale.set(0.68, 0.68, 0.68);
         model.position.set(0.04, -0.28, -0.32);
 
-        // Customize materials and glowing crystal / runes
+        // Customize materials and glowing crystal / runes safely
         model.traverse((child) => {
           if (child.isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
-            if (child.name.includes('Crystal') || child.name.includes('Gem') || child.name.includes('Shard') || child.name.includes('Rune')) {
-              child.material = child.material.clone();
-              child.material.emissive = new THREE.Color(colorConfig.light);
-              child.material.emissiveIntensity = 4.2;
-              child.material.color = new THREE.Color(colorConfig.color);
+            if (child.material && (child.name.includes('Crystal') || child.name.includes('Gem') || child.name.includes('Shard') || child.name.includes('Rune'))) {
+              const mats = Array.isArray(child.material) ? child.material : [child.material];
+              mats.forEach(m => {
+                if (m.emissive) {
+                  m.emissive.set(colorConfig.light);
+                  m.emissiveIntensity = 4.2;
+                }
+                if (m.color) m.color.set(colorConfig.color);
+              });
             }
           }
         });
@@ -554,6 +558,15 @@ export class FPViewmodel {
             this.currentAction = this.actions['Idle'];
             this.currentAction.play();
           }
+
+          // Smoothly crossfade back to current locomotion action when cast animation finishes
+          this.mixer.addEventListener('finished', (e) => {
+            if (this.actions['Cast_Basic'] && e.action === this.actions['Cast_Basic']) {
+              if (this.currentAction) {
+                this.currentAction.reset().fadeIn(0.14).play();
+              }
+            }
+          });
         }
 
         this.riggedGroup.add(model);

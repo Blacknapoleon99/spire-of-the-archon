@@ -23,7 +23,9 @@ export class AnimationController {
       // Walk cycle bobbing and sway
       const walkSpeed = 12;
       const bob = Math.sin(this.time * walkSpeed) * 0.08;
-      wizardGroup.position.y = bob;
+      if (wizardGroup.userData.visualOffsetGroup) {
+        wizardGroup.userData.visualOffsetGroup.position.y = bob;
+      }
 
       // Body tilt in movement
       wizardGroup.rotation.z = Math.sin(this.time * walkSpeed) * 0.05;
@@ -36,7 +38,9 @@ export class AnimationController {
       // Idle breathing
       const idleSpeed = 3;
       const breath = Math.sin(this.time * idleSpeed) * 0.03;
-      wizardGroup.position.y = breath;
+      if (wizardGroup.userData.visualOffsetGroup) {
+        wizardGroup.userData.visualOffsetGroup.position.y = breath;
+      }
       wizardGroup.rotation.z = 0;
 
       if (armGroup && !isCasting) {
@@ -44,14 +48,19 @@ export class AnimationController {
       }
     }
 
+    // Ground Rune Circle rotation
+    if (wizardGroup.userData.runeRing) {
+      wizardGroup.userData.runeRing.rotation.z += deltaTime * 2.0;
+    }
+
     // Spellcast recoil & raise staff
     if (isCasting && armGroup) {
-      armGroup.rotation.x = -Math.PI / 3; // Raise staff high
+      armGroup.rotation.x = -Math.PI / 2.8; // Raise staff high
       if (crystal) {
-        crystal.rotation.y += deltaTime * 15;
+        crystal.rotation.y += deltaTime * 18;
       }
     } else if (crystal) {
-      crystal.rotation.y += deltaTime * 2;
+      crystal.rotation.y += deltaTime * 2.5;
     }
   }
 

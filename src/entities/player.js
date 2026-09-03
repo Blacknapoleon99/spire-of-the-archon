@@ -30,70 +30,94 @@ export class PlayerEntity {
     this.isCasting = false;
     this.castTimer = 0;
 
-    // Build 3D Mesh
+    // Build 3D Wizard Mesh with class robes, glowing staff and ground rune
     this.mesh = ModelFactory.createWizardMesh(this.wizardClass, data.color);
     this.mesh.position.copy(this.position);
     this.mesh.rotation.y = this.rotationY;
     this.mesh.visible = !this.isLocal;
     this.scene.add(this.mesh);
 
-    // Asynchronously upgrade to high-poly GLTF character model once preloader finishes
-    let modelUrl = '/models/sorcerer.glb';
-    if (this.wizardClass === 'luminary') modelUrl = '/models/druid.glb';
-    else if (this.wizardClass === 'cryomancer') modelUrl = '/models/knight.glb';
-    else if (this.wizardClass === 'chronomancer') modelUrl = '/models/sorcerer.glb';
-
-    import('../graphics/assetLoader.js').then(({ assetLoader }) => {
-      assetLoader.loadGLTF(modelUrl).then(gltfMesh => {
-        if (!this.mesh || this.mesh.userData?.isGltf) return;
-        this.scene.remove(this.mesh);
-        const group = new THREE.Group();
-        group.name = `RealisticWizard_${this.wizardClass}_GLTF`;
-        gltfMesh.scale.set(1.0, 1.0, 1.0);
-        group.add(gltfMesh);
-
-        const staffLight = new THREE.PointLight(
-          this.wizardClass === 'luminary' ? 0xffd700 : (this.wizardClass === 'cryomancer' ? 0x00e5ff : 0xff5722),
-          1.8,
-          6
-        );
-        staffLight.position.set(0.4, 1.4, 0.2);
-        group.add(staffLight);
-        group.userData = { isGltf: true, staffLight };
-
-        group.position.copy(this.position);
-        group.rotation.y = this.rotationY;
-        group.visible = !this.isLocal;
-        if (this.nameplate) group.add(this.nameplate);
-        this.mesh = group;
-        this.scene.add(this.mesh);
-      }).catch(() => {});
-    });
-
-    // Name billboard above head
+    // Name billboard & overhead team health bar above head
     this.nameplate = this.createNameplate();
     this.mesh.add(this.nameplate);
   }
 
   createNameplate() {
     const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 64;
-    const ctx = canvas.getContext('2d');
+    canvas.width = 512;
+    canvas.height = 128;
+    this.nameplateCanvas = canvas;
+    this.nameplateCtx = canvas.getContext('2d');
+    this.nameplateTexture = new THREE.CanvasTexture(canvas);
 
-    ctx.font = 'bold 28px Outfit, sans-serif';
-    ctx.fillStyle = this.isLocal ? '#ffd700' : '#00e5ff';
-    ctx.textAlign = 'center';
-    ctx.shadowColor = '#000000';
-    ctx.shadowBlur = 6;
-    ctx.fillText(this.name, 128, 42);
+    this.renderNameplate();
 
-    const texture = new THREE.CanvasTexture(canvas);
-    const mat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    const mat = new THREE.SpriteMaterial({ map: this.nameplateTexture, depthTest: false, transparent: true });
     const sprite = new THREE.Sprite(mat);
-    sprite.position.y = 2.9;
-    sprite.scale.set(2.0, 0.5, 1);
+    sprite.position.y = 2.95;
+    sprite.scale.set(2.8, 0.7, 1);
     return sprite;
+  }
+
+  renderNameplate() {
+    if (!this.nameplateCtx) return;
+    const ctx = this.nameplateCtx;
+    const w = 512, h = 128;
+    ctx.clearRect(0, 0, w, h);
+
+    const classColors = {
+      pyromancer: '#ff5722',
+      cryomancer: '#00e5ff',
+      luminary: '#ffd700',
+      stormcaller: '#ffea00',
+      chronomancer: '#d500f9'
+    };
+    const classCol = classColors[this.wizardClass] || '#ffd700';
+    const className = this.wizardClass.toUpperCase();
+
+    // Dark pill background with subtle glow border
+    ctx.fillStyle = 'rgba(12, 10, 18, 0.78)';
+    ctx.strokeStyle = classCol;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.roundRect(40, 10, 432, 108, 16);
+    ctx.fill();
+    ctx.stroke();
+
+    // Class Tag & Player Name
+    ctx.font = 'bold 22px Outfit, sans-serif';
+    ctx.fillStyle = classCol;
+    ctx.textAlign = 'center';
+    ctx.fillText(`[${className}]`, 256, 38);
+
+    ctx.font = 'bold 30px Outfit, sans-serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(this.name, 256, 72);
+
+    // Overhead Team Health Bar
+    const barWidth = 320;
+    const barHeight = 10;
+    const barX = (w - barWidth) / 2;
+    const barY = 88;
+
+    // Bar background
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(barX, barY, barWidth, barHeight);
+
+    // Current Health fill
+    const pct = Math.max(0, Math.min(1, (this.health || 1) / (this.maxHealth || 1)));
+    ctx.fillStyle = pct > 0.5 ? '#00e676' : (pct > 0.25 ? '#ffab00' : '#ff1744');
+    ctx.fillRect(barX, barY, barWidth * pct, barHeight);
+
+    if (this.nameplateTexture) {
+      this.nameplateTexture.needsUpdate = true;
+    }
+  }
+
+  syncHealth(health, maxHealth) {
+    this.health = health;
+    if (maxHealth) this.maxHealth = maxHealth;
+    this.renderNameplate();
   }
 
   setSpeaking(isSpeaking) {

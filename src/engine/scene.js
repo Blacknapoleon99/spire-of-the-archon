@@ -305,7 +305,7 @@ export class EngineScene {
     }
 
     this.camera.position.x = playerPos.x + this.shakeOffset.x;
-    this.camera.position.y = 1.7 + this.shakeOffset.y;
+    this.camera.position.y = (playerPos.y || 0) + 1.7 + this.shakeOffset.y;
     this.camera.position.z = playerPos.z + this.shakeOffset.z;
 
     // Torch light flicker modulation
