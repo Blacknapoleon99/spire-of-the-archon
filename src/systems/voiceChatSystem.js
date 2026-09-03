@@ -5,10 +5,11 @@ import { soundEngine } from '../engine/audio.js';
  * Studio-Quality 3D Spatial Proximity Voice Chat System.
  * Features:
  * - Studio audio constraints: echo cancellation, noise suppression, 48kHz sampling.
+ * - Modes: Open Mic (voice activity detection with smooth noise gate) and Push-to-Talk / Toggle [V].
+ * - Configurable noise gate sensitivity threshold (default 14).
  * - Web Audio API spatial distance attenuation (full volume <4m, drops off to 25m).
  * - Real-time horizontal stereo panning based on listener camera orientation.
  * - RMS volume metering for active speech detection.
- * - Push-to-talk / toggle mute [V key] with audio feedback.
  * - 3D speech indicator hooks for player nameplates and HUD.
  */
 export class VoiceChatSystem {
@@ -19,7 +20,11 @@ export class VoiceChatSystem {
 
     this.audioCtx = null;
     this.localStream = null;
-    this.isMuted = false;
+    this.voiceMode = 'open_mic'; // 'open_mic' | 'push_to_talk'
+    this.noiseGateThreshold = 14;
+    this.isHardwareMuted = false;
+    this.isGatedOpen = false;
+    this.gateCloseTimer = 0;
     this.isInitialized = false;
     this.masterVoiceVolume = 1.0;
 
@@ -33,6 +38,7 @@ export class VoiceChatSystem {
 
     // Callbacks for UI updates
     this.onLocalMuteChange = null;
+    this.onLocalSpeakingChange = null;
     this.onPeerSpeakingChange = null;
   }
 
@@ -80,7 +86,7 @@ export class VoiceChatSystem {
       }
 
       this.isInitialized = true;
-      console.log('[VoiceChat] Microphone captured with studio noise suppression.');
+      console.log(`[VoiceChat] Microphone captured with studio noise suppression (Mode: ${this.voiceMode}).`);
 
       // Setup PeerJS call receiver
       if (this.network && this.network.peer) {
@@ -195,21 +201,47 @@ export class VoiceChatSystem {
     }
   }
 
+  setVoiceMode(mode) {
+    if (mode === 'open_mic' || mode === 'push_to_talk') {
+      this.voiceMode = mode;
+      console.log(`[VoiceChat] Voice mode set to: ${mode}`);
+      if (this.onLocalMuteChange) {
+        this.onLocalMuteChange(this.isHardwareMuted, this.voiceMode, this.isLocalSpeaking);
+      }
+    }
+  }
+
+  setNoiseGateThreshold(threshold) {
+    this.noiseGateThreshold = Math.max(0, Math.min(80, threshold));
+  }
+
   toggleMute() {
     if (!this.localStream) {
       this.init();
       return;
     }
-    this.isMuted = !this.isMuted;
-    this.localStream.getAudioTracks().forEach(track => {
-      track.enabled = !this.isMuted;
-    });
+    this.isHardwareMuted = !this.isHardwareMuted;
+
+    // Apply immediate mute state to audio tracks
+    if (this.isHardwareMuted) {
+      this.localStream.getAudioTracks().forEach(track => { track.enabled = false; });
+      this.isGatedOpen = false;
+      this.isLocalSpeaking = false;
+    } else {
+      if (this.voiceMode === 'push_to_talk') {
+        this.localStream.getAudioTracks().forEach(track => { track.enabled = true; });
+      }
+    }
 
     soundEngine.playMenuOpen();
     if (this.onLocalMuteChange) {
-      this.onLocalMuteChange(this.isMuted);
+      this.onLocalMuteChange(this.isHardwareMuted, this.voiceMode, this.isLocalSpeaking);
     }
-    return this.isMuted;
+    return this.isHardwareMuted;
+  }
+
+  get isMuted() {
+    return this.isHardwareMuted;
   }
 
   setMasterVoiceVolume(val) {
@@ -217,20 +249,51 @@ export class VoiceChatSystem {
   }
 
   /**
-   * Updates 3D spatial attenuation and stereo panning every frame
+   * Updates 3D spatial attenuation, open mic noise gate, and stereo panning every frame
    */
   update(localPlayerPos, remotePlayersMap) {
     if (!this.audioCtx || !localPlayerPos || !this.camera) return;
 
-    // 1. Check local speaking status
-    if (this.localAnalyser && this.localDataArray && !this.isMuted) {
+    // 1. Process Local Microphone (Open Mic Noise Gate & Speaking Detection)
+    if (this.localAnalyser && this.localDataArray && !this.isHardwareMuted) {
       this.localAnalyser.getByteFrequencyData(this.localDataArray);
       let sum = 0;
       for (let i = 0; i < this.localDataArray.length; i++) sum += this.localDataArray[i];
       const avg = sum / this.localDataArray.length;
-      this.isLocalSpeaking = avg > 14;
+
+      const isAboveThreshold = avg > this.noiseGateThreshold;
+
+      if (this.voiceMode === 'open_mic') {
+        if (isAboveThreshold) {
+          this.gateCloseTimer = 0.28; // Hold gate open for 280ms to prevent clipping word endings
+          this.isGatedOpen = true;
+        } else if (this.gateCloseTimer > 0) {
+          this.gateCloseTimer -= 0.016;
+          this.isGatedOpen = true;
+        } else {
+          this.isGatedOpen = false;
+        }
+
+        // Gate tracks smoothly
+        if (this.localStream) {
+          this.localStream.getAudioTracks().forEach(track => {
+            if (track.enabled !== this.isGatedOpen) {
+              track.enabled = this.isGatedOpen;
+            }
+          });
+        }
+        this.isLocalSpeaking = this.isGatedOpen;
+      } else {
+        // Push to Talk / Toggle mode: tracks stay on unless hardware muted
+        this.isLocalSpeaking = isAboveThreshold;
+      }
     } else {
       this.isLocalSpeaking = false;
+      this.isGatedOpen = false;
+    }
+
+    if (this.onLocalSpeakingChange) {
+      this.onLocalSpeakingChange(this.isLocalSpeaking);
     }
 
     // Get camera forward heading in XZ plane

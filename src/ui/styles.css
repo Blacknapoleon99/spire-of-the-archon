@@ -257,13 +257,54 @@ body, html {
   transform: scale(1.04);
   box-shadow: 0 0 20px rgba(0, 230, 118, 0.45);
 }
+.voice-hud-badge.speaking {
+  border-color: #00e676;
+  color: #ffffff;
+  background: rgba(0, 230, 118, 0.25);
+  box-shadow: 0 0 24px rgba(0, 230, 118, 0.7);
+  animation: voiceGlowPulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes voiceGlowPulse {
+  0% { transform: scale(1.0); box-shadow: 0 0 14px rgba(0, 230, 118, 0.4); }
+  100% { transform: scale(1.06); box-shadow: 0 0 28px rgba(0, 230, 118, 0.85); }
+}
 .voice-hud-badge.muted {
   border-color: rgba(255, 82, 82, 0.6);
   color: #ff5252;
   box-shadow: 0 0 14px rgba(255, 82, 82, 0.25);
+  animation: none;
 }
 .voice-hud-badge.muted:hover {
   box-shadow: 0 0 20px rgba(255, 82, 82, 0.45);
+}
+
+/* Settings Pill Selector */
+.setting-pill-group {
+  display: flex;
+  gap: 8px;
+}
+.setting-pill {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(212, 175, 55, 0.3);
+  color: #c4a962;
+  padding: 6px 14px;
+  border-radius: 14px;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.setting-pill:hover {
+  border-color: var(--gold);
+  color: #fff;
+}
+.setting-pill.active {
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.35), rgba(191, 90, 242, 0.35));
+  border-color: var(--gold);
+  color: #ffd700;
+  box-shadow: 0 0 12px rgba(212, 175, 55, 0.3);
 }
 
 /* =============================================

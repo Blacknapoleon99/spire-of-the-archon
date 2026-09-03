@@ -408,6 +408,18 @@
           <span id="label-voice-vol" class="setting-val">90%</span>
         </div>
         <div class="setting-row">
+          <label>Proximity Mic Mode</label>
+          <div class="setting-pill-group">
+            <button type="button" id="btn-mic-mode-open" class="setting-pill active">OPEN MIC</button>
+            <button type="button" id="btn-mic-mode-push" class="setting-pill">TOGGLE [V]</button>
+          </div>
+        </div>
+        <div class="setting-row" id="row-mic-threshold">
+          <label>Voice Sensitivity / Noise Gate</label>
+          <input type="range" id="setting-mic-threshold" min="2" max="50" value="14" />
+          <span id="label-mic-threshold" class="setting-val">14</span>
+        </div>
+        <div class="setting-row">
           <label>Mouse Sensitivity</label>
           <input type="range" id="setting-sensitivity" min="10" max="300" value="100" />
           <span id="label-sensitivity" class="setting-val">1.0</span>

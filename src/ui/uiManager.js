@@ -32,6 +32,7 @@ export class UIManager {
   loadSettings() {
     const defaults = {
       masterVol: 70, sfxVol: 80, musicVol: 35, voiceVol: 90,
+      micMode: 'open_mic', micThreshold: 14,
       sensitivity: 100, fov: 75,
       showFps: false, showDmgNumbers: true
     };
@@ -421,8 +422,35 @@ export class UIManager {
     bindSlider('setting-sfx-vol', 'label-sfx-vol', 'sfxVol', v => `${v}%`);
     bindSlider('setting-music-vol', 'label-music-vol', 'musicVol', v => `${v}%`);
     bindSlider('setting-voice-vol', 'label-voice-vol', 'voiceVol', v => `${v}%`);
+    bindSlider('setting-mic-threshold', 'label-mic-threshold', 'micThreshold', v => `${v}`);
     bindSlider('setting-sensitivity', 'label-sensitivity', 'sensitivity', v => (v / 100).toFixed(1));
     bindSlider('setting-fov', 'label-fov', 'fov', v => `${v}°`);
+
+    // Mic Mode Selector Pills
+    const btnMicOpen = document.getElementById('btn-mic-mode-open');
+    const btnMicPush = document.getElementById('btn-mic-mode-push');
+    if (btnMicOpen && btnMicPush) {
+      const applyMicPills = (mode) => {
+        this.settings.micMode = mode;
+        if (mode === 'open_mic') {
+          btnMicOpen.classList.add('active');
+          btnMicPush.classList.remove('active');
+        } else {
+          btnMicOpen.classList.remove('active');
+          btnMicPush.classList.add('active');
+        }
+        this.saveSettings();
+        if (this._onMicModeChange) this._onMicModeChange(mode);
+      };
+
+      btnMicOpen.addEventListener('click', () => applyMicPills('open_mic'));
+      btnMicPush.addEventListener('click', () => applyMicPills('push_to_talk'));
+
+      if (this.settings.micMode === 'push_to_talk') {
+        btnMicOpen.classList.remove('active');
+        btnMicPush.classList.add('active');
+      }
+    }
 
     // Toggles
     const fpsToggle = document.getElementById('setting-show-fps');
@@ -533,14 +561,35 @@ export class UIManager {
     });
   }
 
-  updateVoiceStatus(isActive) {
+  registerMicModeChange(fn) {
+    this._onMicModeChange = fn;
+  }
+
+  registerMicThresholdChange(fn) {
+    this._onMicThresholdChange = fn;
+  }
+
+  updateVoiceStatus(isHardwareMuted, mode = 'open_mic', isSpeaking = false) {
     if (!this.voiceHudIndicator || !this.voiceStatusText) return;
-    if (isActive) {
-      this.voiceHudIndicator.classList.remove('muted');
-      this.voiceStatusText.textContent = 'PROXIMITY MIC: ON [V]';
-    } else {
-      this.voiceHudIndicator.classList.add('muted');
+    if (isHardwareMuted) {
+      this.voiceHudIndicator.className = 'voice-hud-badge muted';
       this.voiceStatusText.textContent = 'PROXIMITY MIC: MUTED [V]';
+    } else if (mode === 'open_mic') {
+      if (isSpeaking) {
+        this.voiceHudIndicator.className = 'voice-hud-badge speaking';
+        this.voiceStatusText.textContent = '🎙️ TRANSMITTING (OPEN MIC)';
+      } else {
+        this.voiceHudIndicator.className = 'voice-hud-badge';
+        this.voiceStatusText.textContent = '🎙️ OPEN MIC [V: Mute]';
+      }
+    } else {
+      if (isSpeaking) {
+        this.voiceHudIndicator.className = 'voice-hud-badge speaking';
+        this.voiceStatusText.textContent = '🎙️ TALKING [V]';
+      } else {
+        this.voiceHudIndicator.className = 'voice-hud-badge';
+        this.voiceStatusText.textContent = '🎙️ TOGGLE [V]';
+      }
     }
   }
 

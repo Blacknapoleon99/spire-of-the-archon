@@ -1967,5 +1967,349 @@ export class TextureGenerator {
     this.cache[key] = { material, diffuseMap };
     return this.cache[key];
   }
+
+  /**
+   * Incandescent High-Energy Flame Plasma with Solar Corona & Sobel Normals
+   */
+  static createFlamePlasmaPBR(width = 512, height = 512) {
+    if (this.cache.flamePlasma) return this.cache.flamePlasma;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    // Deep burning ember background
+    const bgGrad = ctx.createRadialGradient(width / 2, height / 2, 10, width / 2, height / 2, width / 2);
+    bgGrad.addColorStop(0, '#ffffff');
+    bgGrad.addColorStop(0.25, '#ffe082');
+    bgGrad.addColorStop(0.55, '#ff6d00');
+    bgGrad.addColorStop(0.85, '#d50000');
+    bgGrad.addColorStop(1.0, '#3e0000');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, width, height);
+
+    // Heightmap canvas for dynamic normal relief
+    const heightCanvas = document.createElement('canvas');
+    heightCanvas.width = width;
+    heightCanvas.height = height;
+    const hCtx = heightCanvas.getContext('2d');
+    hCtx.fillStyle = '#202020';
+    hCtx.fillRect(0, 0, width, height);
+
+    // Turbulent solar plasma filaments
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 70; i++) {
+      const angle = (i / 70) * Math.PI * 2;
+      const r1 = 30 + Math.random() * (width / 3);
+      const r2 = r1 + 25 + Math.random() * 45;
+      const x1 = width / 2 + Math.cos(angle) * r1;
+      const y1 = height / 2 + Math.sin(angle) * r1;
+      const x2 = width / 2 + Math.cos(angle + 0.3) * r2;
+      const y2 = height / 2 + Math.sin(angle + 0.3) * r2;
+
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 235, 59, 0.75)' : 'rgba(255, 87, 34, 0.65)';
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(width / 2 + Math.cos(angle + 0.15) * (r1 + 20), height / 2 + Math.sin(angle + 0.15) * (r1 + 20), x2, y2);
+      ctx.stroke();
+
+      hCtx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      hCtx.lineWidth = 4;
+      hCtx.beginPath();
+      hCtx.moveTo(x1, y1);
+      hCtx.lineTo(x2, y2);
+      hCtx.stroke();
+    }
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    diffuseMap.wrapS = THREE.RepeatWrapping;
+    diffuseMap.wrapT = THREE.RepeatWrapping;
+
+    const normalMap = this.generateNormalMapFromHeight(heightCanvas, 2.2);
+
+    const material = new THREE.MeshStandardMaterial({
+      map: diffuseMap,
+      normalMap,
+      normalScale: new THREE.Vector2(1.2, 1.2),
+      color: 0xffffff,
+      emissive: new THREE.Color(0xff4500),
+      emissiveMap: diffuseMap,
+      emissiveIntensity: 2.4,
+      roughness: 0.15,
+      metalness: 0.1
+    });
+
+    this.cache.flamePlasma = { material, diffuseMap, normalMap };
+    return this.cache.flamePlasma;
+  }
+
+  /**
+   * Faceted Sub-Zero Glacial Ice Crystals with Veins & Specular Sheen
+   */
+  static createFrostCrystallinePBR(width = 512, height = 512) {
+    if (this.cache.frostCrystalline) return this.cache.frostCrystalline;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    // Deep glacial blue gradient
+    const grad = ctx.createLinearGradient(0, 0, width, height);
+    grad.addColorStop(0, '#00b0ff');
+    grad.addColorStop(0.5, '#e0f7fa');
+    grad.addColorStop(1, '#00e5ff');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    const heightCanvas = document.createElement('canvas');
+    heightCanvas.width = width;
+    heightCanvas.height = height;
+    const hCtx = heightCanvas.getContext('2d');
+    hCtx.fillStyle = '#808080';
+    hCtx.fillRect(0, 0, width, height);
+
+    // Crystalline faceted fissures
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.lineWidth = 2.5;
+    hCtx.strokeStyle = '#ffffff';
+    hCtx.lineWidth = 3;
+
+    for (let f = 0; f < 35; f++) {
+      let x = Math.random() * width;
+      let y = Math.random() * height;
+      ctx.beginPath();
+      hCtx.beginPath();
+      ctx.moveTo(x, y);
+      hCtx.moveTo(x, y);
+      for (let s = 0; s < 4; s++) {
+        x += (Math.random() - 0.5) * 80;
+        y += (Math.random() - 0.5) * 80;
+        ctx.lineTo(x, y);
+        hCtx.lineTo(x, y);
+      }
+      ctx.stroke();
+      hCtx.stroke();
+    }
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    diffuseMap.wrapS = THREE.RepeatWrapping;
+    diffuseMap.wrapT = THREE.RepeatWrapping;
+
+    const normalMap = this.generateNormalMapFromHeight(heightCanvas, 3.0);
+
+    const material = new THREE.MeshStandardMaterial({
+      map: diffuseMap,
+      normalMap,
+      normalScale: new THREE.Vector2(1.5, 1.5),
+      color: 0x80d8ff,
+      emissive: new THREE.Color(0x00e5ff),
+      emissiveIntensity: 1.8,
+      roughness: 0.08,
+      metalness: 0.35,
+      transparent: true,
+      opacity: 0.92
+    });
+
+    this.cache.frostCrystalline = { material, diffuseMap, normalMap };
+    return this.cache.frostCrystalline;
+  }
+
+  /**
+   * Divine Solar Halo & Sacred Sunburst Glyph Map
+   */
+  static createSolarHaloPBR(width = 512, height = 512) {
+    if (this.cache.solarHalo) return this.cache.solarHalo;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    ctx.clearRect(0, 0, width, height);
+    const cx = width / 2;
+    const cy = height / 2;
+
+    // Concentric golden rings
+    ctx.strokeStyle = '#ffd700';
+    ctx.shadowColor = '#ffd700';
+    ctx.shadowBlur = 18;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(cx, cy, width * 0.42, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = '#fff9c4';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, width * 0.35, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 8-Point Sacred Sunburst Rays
+    ctx.fillStyle = 'rgba(255, 238, 88, 0.85)';
+    for (let r = 0; r < 8; r++) {
+      const angle = (r / 8) * Math.PI * 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(-6, width * 0.28);
+      ctx.lineTo(0, width * 0.48);
+      ctx.lineTo(6, width * 0.28);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Archon Solar Runes
+    const runes = ['ᛟ', 'ᛋ', 'ᛏ', 'ᚱ', 'ᛗ', 'ᛚ', 'ᛞ', 'ᚨ'];
+    ctx.font = 'bold 26px serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    runes.forEach((rune, idx) => {
+      const angle = (idx / runes.length) * Math.PI * 2;
+      const rx = cx + Math.cos(angle) * (width * 0.38);
+      const ry = cy + Math.sin(angle) * (width * 0.38);
+      ctx.fillText(rune, rx, ry);
+    });
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    const material = new THREE.MeshBasicMaterial({
+      map: diffuseMap,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    this.cache.solarHalo = { material, diffuseMap };
+    return this.cache.solarHalo;
+  }
+
+  /**
+   * Chronomantic Clockwork Astrolabe Dial Map
+   */
+  static createChronoClockworkPBR(width = 512, height = 512) {
+    if (this.cache.chronoClockwork) return this.cache.chronoClockwork;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    ctx.clearRect(0, 0, width, height);
+    const cx = width / 2;
+    const cy = height / 2;
+
+    // Outer Gear Cogs
+    ctx.strokeStyle = '#bf5af2';
+    ctx.shadowColor = '#bf5af2';
+    ctx.shadowBlur = 16;
+    ctx.fillStyle = 'rgba(191, 90, 242, 0.4)';
+    const cogs = 24;
+    for (let c = 0; c < cogs; c++) {
+      const angle = (c / cogs) * Math.PI * 2;
+      const x = cx + Math.cos(angle) * (width * 0.44);
+      const y = cy + Math.sin(angle) * (width * 0.44);
+      ctx.beginPath();
+      ctx.arc(x, y, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Dial ring
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#e040fb';
+    ctx.beginPath();
+    ctx.arc(cx, cy, width * 0.38, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // 12 Roman Numerals
+    const numerals = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
+    ctx.font = 'bold 20px serif';
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    numerals.forEach((num, idx) => {
+      const angle = (idx / 12) * Math.PI * 2 - Math.PI / 2;
+      const rx = cx + Math.cos(angle) * (width * 0.32);
+      const ry = cy + Math.sin(angle) * (width * 0.32);
+      ctx.fillText(num, rx, ry);
+    });
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    const material = new THREE.MeshBasicMaterial({
+      map: diffuseMap,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    this.cache.chronoClockwork = { material, diffuseMap };
+    return this.cache.chronoClockwork;
+  }
+
+  /**
+   * Concentric Arcane Summoning Ring with Elemental Runes
+   */
+  static createSpellRuneRing(element = 'fire', width = 512, height = 512) {
+    const key = `spellRuneRing_${element}`;
+    if (this.cache[key]) return this.cache[key];
+
+    const colors = {
+      fire: '#ff5722',
+      frost: '#00e5ff',
+      light: '#ffd700',
+      chrono: '#bf5af2',
+      storm: '#ffd60a'
+    };
+    const col = colors[element] || '#ff5722';
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, width, height);
+
+    const cx = width / 2;
+    const cy = height / 2;
+
+    // Dual Concentric Circles
+    ctx.strokeStyle = col;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = 14;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(cx, cy, width * 0.44, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, width * 0.36, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Radial tick marks
+    for (let t = 0; t < 36; t++) {
+      const angle = (t / 36) * Math.PI * 2;
+      const r1 = width * 0.36;
+      const r2 = width * (t % 3 === 0 ? 0.44 : 0.40);
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(angle) * r1, cy + Math.sin(angle) * r1);
+      ctx.lineTo(cx + Math.cos(angle) * r2, cy + Math.sin(angle) * r2);
+      ctx.stroke();
+    }
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    const material = new THREE.MeshBasicMaterial({
+      map: diffuseMap,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    });
+
+    this.cache[key] = { material, diffuseMap };
+    return this.cache[key];
+  }
 }
 

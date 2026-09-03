@@ -16,35 +16,86 @@ export class ParticleSystem {
     this.physicalCoins = [];
     this.decalManager = new DecalManager(this.scene);
 
-    // Pre-allocated static geometries for zero-allocation combat casting
-    this.geoCore = new THREE.SphereGeometry(0.42, 10, 10);
-    this.geoTorusFire = new THREE.TorusGeometry(0.68, 0.08, 8, 16);
-    this.geoFlameWave = new THREE.TorusGeometry(1.1, 0.2, 8, 20, Math.PI);
-    this.geoEmberBolt = new THREE.ConeGeometry(0.16, 0.7, 8);
-    this.geoIceLance = new THREE.ConeGeometry(0.24, 1.8, 6);
-    this.geoIceShard = new THREE.OctahedronGeometry(0.12, 0);
-    this.geoFrostDiamond = new THREE.OctahedronGeometry(0.26, 0);
-    this.geoSparkSphere = new THREE.SphereGeometry(0.32, 8, 8);
-    this.geoHaloRing = new THREE.RingGeometry(0.45, 0.58, 16);
-    this.geoChronoDodeca = new THREE.DodecahedronGeometry(0.28, 0);
-    this.geoChronoRing = new THREE.TorusGeometry(0.5, 0.03, 8, 16);
-    this.geoMuzzleSpark = new THREE.TetrahedronGeometry(0.06, 0);
-    this.geoTrailOcta = new THREE.OctahedronGeometry(0.065, 0);
-    this.geoBurstDodeca = new THREE.DodecahedronGeometry(0.12, 0);
-    this.geoBurstOcta = new THREE.OctahedronGeometry(0.15, 0);
+    // High-Fidelity Pre-allocated Geometries for Upgraded Spells
+    this.geoCore = new THREE.SphereGeometry(0.38, 14, 14);
+    this.geoCoreHighPoly = new THREE.SphereGeometry(0.48, 18, 18);
+    this.geoTorusFire = new THREE.TorusGeometry(0.68, 0.08, 8, 20);
+    this.geoFlameWave = new THREE.TorusGeometry(1.2, 0.22, 8, 24, Math.PI);
+    this.geoEmberBolt = new THREE.ConeGeometry(0.18, 0.8, 8);
+    this.geoIceLance = new THREE.ConeGeometry(0.24, 2.0, 8);
+    this.geoIceShard = new THREE.OctahedronGeometry(0.14, 0);
+    this.geoFrostDiamond = new THREE.OctahedronGeometry(0.34, 1);
+    this.geoSparkSphere = new THREE.SphereGeometry(0.35, 12, 12);
+    this.geoHaloRing = new THREE.RingGeometry(0.45, 0.65, 24);
+    this.geoRuneRingPlane = new THREE.PlaneGeometry(1.3, 1.3);
+    this.geoAstrolabeOuter = new THREE.TorusGeometry(0.66, 0.04, 8, 24);
+    this.geoAstrolabeInner = new THREE.TorusGeometry(0.48, 0.03, 8, 24);
+    this.geoEmberSpiral = new THREE.TorusKnotGeometry(0.22, 0.04, 32, 6, 2, 3);
+    this.geoCrossFlare = new THREE.PlaneGeometry(0.85, 0.14);
+    this.geoChronoDodeca = new THREE.DodecahedronGeometry(0.32, 0);
+    this.geoChronoRing = new THREE.TorusGeometry(0.55, 0.04, 8, 20);
+    this.geoMuzzleSpark = new THREE.TetrahedronGeometry(0.08, 0);
+    this.geoTrailOcta = new THREE.OctahedronGeometry(0.075, 0);
+    this.geoBurstDodeca = new THREE.DodecahedronGeometry(0.14, 0);
+    this.geoBurstOcta = new THREE.OctahedronGeometry(0.16, 0);
     this.geoShockwaveRing = new THREE.RingGeometry(0.2, 0.6, 24);
 
-    // Pre-allocated shared materials
-    this.matFireCore = new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff4500, emissiveIntensity: 2.2, roughness: 0.2 });
+    // Pre-generate Procedural PBR Spell Textures
+    const flamePBR = TextureGenerator.createFlamePlasmaPBR();
+    const frostPBR = TextureGenerator.createFrostCrystallinePBR();
+    const solarPBR = TextureGenerator.createSolarHaloPBR();
+    const chronoPBR = TextureGenerator.createChronoClockworkPBR();
+    const fireRunePBR = TextureGenerator.createSpellRuneRing('fire');
+    const frostRunePBR = TextureGenerator.createSpellRuneRing('frost');
+
+    // Upgraded PBR Materials
+    this.matFirePlasmaCore = flamePBR.material;
+    this.matFireRuneRing = fireRunePBR.material;
+    this.matFrostCrystal = frostPBR.material;
+    this.matFrostRuneRing = frostRunePBR.material;
+    this.matSolarCore = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: new THREE.Color(0xffd700),
+      emissiveIntensity: 3.0,
+      roughness: 0.1
+    });
+    this.matSolarHalo = solarPBR.material;
+    this.matSolarFlare = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide
+    });
+    this.matChronoDial = chronoPBR.material;
+    this.matChronoRingTorus = new THREE.MeshStandardMaterial({
+      color: 0xbf5af2,
+      emissive: new THREE.Color(0xaa00ff),
+      emissiveIntensity: 2.2,
+      metalness: 0.6,
+      roughness: 0.2
+    });
+
+    // Base materials
+    this.matFireCore = this.matFirePlasmaCore;
     this.matFireRing = new THREE.MeshBasicMaterial({ color: 0xffd600 });
-    this.matFireWave = new THREE.MeshBasicMaterial({ color: 0xff3d00, side: THREE.DoubleSide });
-    this.matFireBolt = new THREE.MeshBasicMaterial({ color: 0xff5722 });
-    this.matIceLance = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x0091ea, emissiveIntensity: 1.8, roughness: 0.1, metalness: 0.3 });
-    this.matFrostDiamond = new THREE.MeshStandardMaterial({ color: 0x80d8ff, emissive: 0x00e5ff, emissiveIntensity: 1.2, roughness: 0.1 });
-    this.matLightCore = new THREE.MeshBasicMaterial({ color: 0xffea00 });
-    this.matLightHalo = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-    this.matChronoCore = new THREE.MeshStandardMaterial({ color: 0xbf5af2, emissive: 0xaa00ff, emissiveIntensity: 2.0 });
-    this.matChronoRing = new THREE.MeshBasicMaterial({ color: 0xd500f9 });
+    this.matFireWave = new THREE.MeshStandardMaterial({
+      map: flamePBR.diffuseMap,
+      emissive: new THREE.Color(0xff3d00),
+      emissiveIntensity: 2.5,
+      side: THREE.DoubleSide
+    });
+    this.matFireBolt = this.matFirePlasmaCore;
+    this.matIceLance = this.matFrostCrystal;
+    this.matFrostDiamond = this.matFrostCrystal;
+    this.matLightCore = this.matSolarCore;
+    this.matLightHalo = this.matSolarHalo;
+    this.matChronoCore = new THREE.MeshStandardMaterial({
+      color: 0xbf5af2,
+      emissive: new THREE.Color(0xaa00ff),
+      emissiveIntensity: 2.5,
+      roughness: 0.1
+    });
+    this.matChronoRing = this.matChronoDial;
 
     this.trailWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.trailMats = {
@@ -121,61 +172,111 @@ export class ParticleSystem {
 
     if (element === 'fire') {
       if (spellType === 'skill1') {
-        // Fireball: Molten core with orbiting flaming spark ring & coronal spikes
-        const core = new THREE.Mesh(this.geoCore, this.matFireCore);
+        // Fireball: Molten core with dual counter-rotating coronal flare rings & 4 orbiting plasma embers
+        const core = new THREE.Mesh(this.geoCoreHighPoly, this.matFirePlasmaCore);
         group.add(core);
 
-        const ring = new THREE.Mesh(this.geoTorusFire, this.matFireRing);
-        ring.rotation.x = Math.PI / 2;
-        group.add(ring);
-        group.userData = { ring };
+        const ringOuter = new THREE.Mesh(this.geoAstrolabeOuter, this.matFireRuneRing);
+        ringOuter.rotation.x = Math.PI / 2;
+        group.add(ringOuter);
+
+        const ringInner = new THREE.Mesh(this.geoAstrolabeInner, this.matFireRuneRing);
+        ringInner.rotation.y = Math.PI / 2;
+        group.add(ringInner);
+
+        const orbiters = [];
+        for (let o = 0; o < 4; o++) {
+          const orb = new THREE.Mesh(this.geoBurstOcta, this.matFirePlasmaCore);
+          group.add(orb);
+          orbiters.push(orb);
+        }
+        group.userData = { ringOuter, ringInner, orbiters, orbitRadius: 0.72 };
       } else if (spellType === 'skill2') {
-        // Flame Wave: Horizontal crescent arc of fire
+        // Flame Wave: Tiered crescent magma wave with forward thermal crest
         const wave = new THREE.Mesh(this.geoFlameWave, this.matFireWave);
         wave.quaternion.copy(rotQuat);
         wave.rotation.z = Math.PI / 2;
         group.add(wave);
+
+        const crest = new THREE.Mesh(this.geoAstrolabeInner, this.matFireRuneRing);
+        crest.quaternion.copy(rotQuat);
+        group.add(crest);
+        group.userData = { ringOuter: crest };
       } else {
-        // Basic Ember Bolt
-        const bolt = new THREE.Mesh(this.geoEmberBolt, this.matFireBolt);
+        // Basic Ember Bolt: High-energy plasma teardrop with spinning flame spiral knot
+        const bolt = new THREE.Mesh(this.geoEmberBolt, this.matFirePlasmaCore);
         bolt.quaternion.copy(rotQuat);
         group.add(bolt);
+
+        const spiral = new THREE.Mesh(this.geoEmberSpiral, this.matFireRuneRing);
+        spiral.quaternion.copy(rotQuat);
+        group.add(spiral);
+        group.userData = { spiral };
       }
     } else if (element === 'frost') {
       if (spellType === 'skill1') {
-        // Ice Lance: Elongated crystalline spear
-        const lance = new THREE.Mesh(this.geoIceLance, this.matIceLance);
+        // Ice Lance: Faceted crystalline spear with base frost rune disc & orbiting ice shards
+        const lance = new THREE.Mesh(this.geoLanceHighPoly, this.matFrostCrystal);
         lance.quaternion.copy(rotQuat);
         group.add(lance);
 
-        // Orbiting ice shards
-        for (let s = 0; s < 3; s++) {
-          const sMesh = new THREE.Mesh(this.geoIceShard, this.matIceLance);
-          sMesh.position.set(Math.cos(s * 2.1) * 0.4, 0, Math.sin(s * 2.1) * 0.4);
+        const runeBase = new THREE.Mesh(this.geoRuneRingPlane, this.matFrostRuneRing);
+        runeBase.quaternion.copy(rotQuat);
+        group.add(runeBase);
+
+        const orbiters = [];
+        for (let s = 0; s < 4; s++) {
+          const sMesh = new THREE.Mesh(this.geoIceShard, this.matFrostCrystal);
           group.add(sMesh);
+          orbiters.push(sMesh);
         }
+        group.userData = { dial: runeBase, orbiters, orbitRadius: 0.62 };
       } else {
-        // Frost Shard: Faceted crystal diamond
-        const shard = new THREE.Mesh(this.geoFrostDiamond, this.matFrostDiamond);
+        // Frost Shard: Faceted shimmering crystal diamond with frost halo
+        const shard = new THREE.Mesh(this.geoFrostDiamond, this.matFrostCrystal);
         group.add(shard);
+
+        const halo = new THREE.Mesh(this.geoHaloRing, this.matFrostRuneRing);
+        halo.quaternion.copy(rotQuat);
+        group.add(halo);
+        group.userData = { halo };
       }
     } else if (element === 'light') {
-      const spark = new THREE.Mesh(this.geoSparkSphere, this.matLightCore);
+      // Sacred Spark: Pulsing solar orb with rotating celestial halo & radiant cross glints
+      const spark = new THREE.Mesh(this.geoSparkSphere, this.matSolarCore);
       group.add(spark);
 
-      // Holy halo
-      const halo = new THREE.Mesh(this.geoHaloRing, this.matLightHalo);
+      const halo = new THREE.Mesh(this.geoRuneRingPlane, this.matSolarHalo);
       halo.quaternion.copy(rotQuat);
       group.add(halo);
+
+      const flareH = new THREE.Mesh(this.geoCrossFlare, this.matSolarFlare);
+      flareH.quaternion.copy(rotQuat);
+      group.add(flareH);
+
+      const flareV = new THREE.Mesh(this.geoCrossFlare, this.matSolarFlare);
+      flareV.quaternion.copy(rotQuat);
+      flareV.rotation.z += Math.PI / 2;
+      group.add(flareV);
+
+      group.userData = { halo, flareH, flareV };
     } else {
-      // Chrono
+      // Chronomancer: Astral stardrop with dual astrolabe gimbal rings & clockwork dial
       const chrono = new THREE.Mesh(this.geoChronoDodeca, this.matChronoCore);
       group.add(chrono);
 
-      // Orbiting time ring
-      const tRing = new THREE.Mesh(this.geoChronoRing, this.matChronoRing);
-      group.add(tRing);
-      group.userData = { ring: tRing };
+      const ringOuter = new THREE.Mesh(this.geoAstrolabeOuter, this.matChronoRingTorus);
+      group.add(ringOuter);
+
+      const ringInner = new THREE.Mesh(this.geoAstrolabeInner, this.matChronoRingTorus);
+      ringInner.rotation.x = Math.PI / 2;
+      group.add(ringInner);
+
+      const dial = new THREE.Mesh(this.geoRuneRingPlane, this.matChronoDial);
+      dial.quaternion.copy(rotQuat);
+      group.add(dial);
+
+      group.userData = { ringOuter, ringInner, dial };
     }
 
     const pooledLight = this.acquireProjectileLight(lightColor, group.position);
@@ -935,9 +1036,28 @@ export class ParticleSystem {
         p.light.intensity = p.baseIntensity * (0.85 + Math.sin(p.distanceTraveled * 12) * 0.25);
       }
 
-      // Animate spinning rings if present
-      if (p.mesh.userData?.ring) {
-        p.mesh.userData.ring.rotation.z += deltaTime * 14;
+      // Animate multi-layered spinning projectile components smoothly
+      if (p.mesh.userData) {
+        const ud = p.mesh.userData;
+        if (ud.ringOuter) ud.ringOuter.rotation.z += deltaTime * 12;
+        if (ud.ringInner) ud.ringInner.rotation.x -= deltaTime * 15;
+        if (ud.dial) ud.dial.rotation.z -= deltaTime * 8;
+        if (ud.halo) ud.halo.rotation.z += deltaTime * 6;
+        if (ud.flareH) ud.flareH.rotation.z += deltaTime * 4;
+        if (ud.flareV) ud.flareV.rotation.z += deltaTime * 4;
+        if (ud.spiral) {
+          ud.spiral.rotation.y += deltaTime * 16;
+          ud.spiral.rotation.z += deltaTime * 8;
+        }
+        if (ud.orbiters) {
+          p.orbitAngle = (p.orbitAngle || 0) + deltaTime * 8;
+          const rad = ud.orbitRadius || 0.65;
+          ud.orbiters.forEach((orb, idx) => {
+            const angle = p.orbitAngle + (idx * Math.PI * 2) / ud.orbiters.length;
+            orb.position.set(Math.cos(angle) * rad, Math.sin(angle * 1.6) * 0.22, Math.sin(angle) * rad);
+            orb.rotation.y += deltaTime * 8;
+          });
+        }
       }
 
       // Emit trailing spark showers using pre-allocated geometries & materials
@@ -1137,6 +1257,59 @@ export class ParticleSystem {
         if (c.mesh.geometry) c.mesh.geometry.dispose();
         this.physicalCoins.splice(i, 1);
       }
+    }
+  }
+
+  /**
+   * Pre-instantiates all spell models, procedural PBR textures & materials,
+   * and compiles all WebGL shaders upfront during loading to guarantee 0ms combat stutter.
+   */
+  warmupSpellVisuals(renderer, camera) {
+    if (!renderer || !camera) return;
+    try {
+      const dummyOrigin = new THREE.Vector3(0, -9999, 0);
+      const dummyDir = new THREE.Vector3(0, 0, 1);
+      const elements = ['fire', 'frost', 'light', 'chrono'];
+      const spellTypes = ['basic', 'skill1', 'skill2'];
+
+      // 1. Pre-instantiate all elemental projectile types and rings
+      for (const el of elements) {
+        for (const st of spellTypes) {
+          this.spawnProjectile(dummyOrigin, dummyDir, st, el, 1, 1);
+        }
+      }
+
+      // 2. Pre-instantiate particle bursts for all elements
+      for (const el of elements) {
+        this.spawnBurst(dummyOrigin, el, 4);
+      }
+
+      // 3. Pre-warm muzzle flash
+      this.spawnMuzzleFlash(dummyOrigin, dummyDir, 'fire');
+
+      // 4. Force WebGL driver to compile every material shader & bind all textures in GPU VRAM
+      renderer.compile(this.scene, camera);
+
+      // 5. Clean up dummy warmup entities
+      for (let i = this.projectiles.length - 1; i >= 0; i--) {
+        const p = this.projectiles[i];
+        if (p.mesh.position.y < -9000) {
+          if (p.light) this.releaseProjectileLight(p.light);
+          this.scene.remove(p.mesh);
+          this.projectiles.splice(i, 1);
+        }
+      }
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const part = this.particles[i];
+        if (part.mesh.position.y < -9000) {
+          this.scene.remove(part.mesh);
+          this.particles.splice(i, 1);
+        }
+      }
+
+      console.log('[ParticleSystem] All spell visuals, procedural PBR textures & WebGL pipelines pre-warmed & cached in VRAM.');
+    } catch (err) {
+      console.warn('[ParticleSystem] Spell visuals pre-warming notice:', err);
     }
   }
 

@@ -59,15 +59,38 @@ class GameApp {
     this.progression = new ProgressionSystem();
     this.tutorial = new TutorialSystem();
 
-    // Studio 3D Spatial Proximity Voice Chat
+    // Studio 3D Spatial Proximity Voice Chat (Open Mic + Push to Talk)
     this.voiceChat = new VoiceChatSystem(onlineNetwork, this.engineScene.scene, this.engineScene.camera);
+    this.voiceChat.setVoiceMode(this.ui.settings.micMode || 'open_mic');
+    this.voiceChat.setNoiseGateThreshold(this.ui.settings.micThreshold || 14);
+
     this.voiceChat.onPeerSpeakingChange = (peerId, isSpeaking) => {
       const player = this.players.get(peerId);
       if (player) player.setSpeaking(isSpeaking);
     };
+
+    this.voiceChat.onLocalSpeakingChange = (isSpeaking) => {
+      this.ui.updateVoiceStatus(this.voiceChat.isHardwareMuted, this.voiceChat.voiceMode, isSpeaking);
+      if (this.localPlayer) this.localPlayer.setSpeaking(isSpeaking);
+    };
+
+    this.voiceChat.onLocalMuteChange = (isMuted, mode, isSpeaking) => {
+      this.ui.updateVoiceStatus(isMuted, mode, isSpeaking);
+      if (this.localPlayer && isMuted) this.localPlayer.setSpeaking(false);
+    };
+
     this.ui.registerVoiceToggle(() => {
       const isMuted = this.voiceChat.toggleMute();
-      this.ui.updateVoiceStatus(!isMuted);
+      this.ui.updateVoiceStatus(isMuted, this.voiceChat.voiceMode, this.voiceChat.isLocalSpeaking);
+    });
+
+    this.ui.registerMicModeChange((mode) => {
+      this.voiceChat.setVoiceMode(mode);
+      this.ui.updateVoiceStatus(this.voiceChat.isHardwareMuted, mode, this.voiceChat.isLocalSpeaking);
+    });
+
+    this.ui.registerMicThresholdChange((threshold) => {
+      this.voiceChat.setNoiseGateThreshold(threshold);
     });
 
     // RPG Inventory & Grimoire
@@ -145,6 +168,8 @@ class GameApp {
 
     // Pre-warm WebGL shaders and materials during loading screen to eliminate combat stutter
     this.engineScene.warmupShaders();
+    this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera);
+    this.ui.updateLoadingProgress(80, 'Pre-warming arcane spell matrices...');
 
     // Guarantee loading screen ALWAYS hides within 1.8s even if network handshake is slow
     let isLoaded = false;
@@ -205,7 +230,7 @@ class GameApp {
         this.questJournalUI.toggle();
       } else if (e.code === 'KeyV') {
         const isMuted = this.voiceChat.toggleMute();
-        this.ui.updateVoiceStatus(!isMuted);
+        this.ui.updateVoiceStatus(isMuted, this.voiceChat.voiceMode, this.voiceChat.isLocalSpeaking);
       }
     });
   }
@@ -754,7 +779,7 @@ class GameApp {
         this.tryInteract();
       } else if (e.code === 'KeyV') {
         const isMuted = this.voiceChat.toggleMute();
-        this.ui.updateVoiceStatus(!isMuted);
+        this.ui.updateVoiceStatus(isMuted, this.voiceChat.voiceMode, this.voiceChat.isLocalSpeaking);
       }
     });
   }
