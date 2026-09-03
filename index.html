@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Spire of the Archon - Live Online 3D Co-Op RPG</title>
+  <link rel="stylesheet" href="/src/ui/styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=MedievalSharp&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- LOADING SCREEN -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-content">
+      <div class="loading-sigil"></div>
+      <h1 class="loading-title">THE SPIRE OF THE ARCHON</h1>
+      <div class="loading-bar-track"><div id="loading-bar-fill" class="loading-bar-fill"></div></div>
+      <div id="loading-tip" class="loading-tip">Generating the Spire...</div>
+    </div>
+  </div>
+
+  <!-- 3D WebGL Canvas Container -->
+  <div id="game-container"></div>
+
+  <!-- First-Person Crosshair -->
+  <div id="crosshair" class="crosshair hidden">
+    <div class="crosshair-dot"></div>
+    <div class="crosshair-line line-top"></div>
+    <div class="crosshair-line line-bottom"></div>
+    <div class="crosshair-line line-left"></div>
+    <div class="crosshair-line line-right"></div>
+    <div id="hitmarker" class="hitmarker hidden"></div>
+  </div>
+
+  <!-- Click to Lock Cursor Overlay -->
+  <div id="click-to-play-hint" class="click-hint hidden">
+    <div class="hint-box">
+      <div class="hint-icon">🖱️</div>
+      <div class="hint-text">CLICK TO LOCK MOUSE & CAST SPELLS</div>
+      <div class="hint-sub">[WASD] Move | [LMB,Q,E,R] Spells | [I] Inventory | [K] Grimoire | [J] Quests</div>
+    </div>
+  </div>
+
+  <!-- Ambient / Story Ticker -->
+  <div id="story-banner" class="hidden">
+    <div class="story-icon">📜</div>
+    <div id="story-text">Welcome, Apprentice...</div>
+  </div>
+  <!-- Low Health Blood Screen Vignette -->
+  <div id="blood-vignette" class="blood-vignette hidden"></div>
+
+  <!-- Loot Pickup Notification -->
+  <div id="loot-notification" class="loot-notification hidden">
+    <span class="loot-icon">✨</span>
+    <span id="loot-name" class="loot-name">Staff of the Pyre Lord</span>
+    <span class="loot-sub">added to your bag</span>
+  </div>
+
+  <!-- Item Hover Tooltip -->
+  <div id="item-tooltip" class="item-tooltip hidden"></div>
+
+  <!-- Kill Feed / Combat Log -->
+  <div id="kill-feed" class="kill-feed"></div>
+
+  <!-- =============================================
+       HUD OVERLAY (visible during gameplay)
+       ============================================= -->
+  <div id="hud" class="hidden">
+
+    <!-- ===== TOP-LEFT: Quest Tracker ===== -->
+    <div class="hud-top-left">
+      <div class="quest-tracker-card" id="quest-tracker-card">
+        <div class="quest-header">
+          <span class="quest-badge">ACTIVE QUEST</span>
+          <span id="quest-act-title" class="quest-act">Act I: The Archives</span>
+        </div>
+        <div id="quest-step-title" class="quest-title">The Scribe's Awakening</div>
+        <div id="quest-step-desc" class="quest-desc">Inspect the Grand Lectern at the center of the archives.</div>
+        <div class="quest-footer">
+          <span id="quest-step-progress" class="quest-step-tag">Step 1 of 4</span>
+          <span id="quest-distance-tag" class="quest-dist-tag">Waypoint: 12m</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== TOP-RIGHT: Party Frames ===== -->
+    <div class="hud-top-right">
+      <div class="party-container" id="party-hud-list"></div>
+    </div>
+
+    <!-- ===== TOP-CENTER: Boss Health (Floor 3) ===== -->
+    <div id="boss-hud-bar" class="boss-health-card hidden">
+      <div class="boss-title">
+        <span id="boss-name">Archon Valerius, The Fractured Chronomancer</span>
+        <span id="boss-phase" class="boss-phase-badge">PHASE 1</span>
+      </div>
+      <div class="bar-track boss-track">
+        <div id="boss-health-fill" class="bar-fill boss-fill" style="width: 100%;"></div>
+        <span id="boss-shield-badge" class="boss-shield-badge hidden">TEMPORAL SHIELD ACTIVE</span>
+      </div>
+    </div>
+
+    <!-- ===== TOP-CENTER-BELOW: Active Timed Ability Banner ===== -->
+    <div id="active-spell-timer" class="active-spell-timer hidden">
+      <span class="timer-icon" id="active-spell-icon">🌪️</span>
+      <span id="active-spell-name" class="timer-name">Infernal Fire Tornado:</span>
+      <span id="active-spell-seconds" class="timer-countdown">5.0s</span>
+      <div class="timer-bar-track">
+        <div id="active-spell-fill" class="timer-bar-fill" style="width: 100%;"></div>
+      </div>
+    </div>
+
+    <!-- ===== CENTER: Interaction Prompt ===== -->
+    <div id="interaction-prompt" class="interaction-prompt hidden">
+      <span class="interact-key">[E]</span>
+      <span id="interact-label" class="interact-label">Interact</span>
+    </div>
+
+    <!-- ===== BOTTOM-LEFT: Alchemical Health Potion Flask Orb + Player Info ===== -->
+    <div class="hud-bottom-left">
+      <div class="potion-orb-wrapper health-orb-wrapper">
+        <div class="potion-orb health-orb">
+          <div class="orb-glass-shine"></div>
+          <div id="hud-health-fill" class="orb-liquid health-liquid" style="height: 100%;">
+            <div class="liquid-wave"></div>
+            <div class="liquid-bubbles"></div>
+          </div>
+          <div class="orb-filigree-frame"></div>
+          <div class="orb-text-overlay">
+            <span class="orb-label">HEALTH</span>
+            <span id="hud-health-text" class="orb-value">180 / 180</span>
+          </div>
+        </div>
+        <div class="bottom-player-info">
+          <div class="bottom-player-header">
+            <span class="player-avatar-badge" id="hud-avatar">🔥</span>
+            <div>
+              <div id="hud-player-name" class="player-name-text">Apprentice</div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <span id="hud-level-badge" class="level-badge">Lv 1</span>
+                <span id="hud-class-title" class="class-title-badge">PYROMANCER</span>
+              </div>
+            </div>
+          </div>
+          <!-- Buff/Debuff icons row -->
+          <div id="buff-bar" class="buff-bar"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== BOTTOM-CENTER: XP Bar + Spell Hotbar ===== -->
+    <div class="hud-bottom-center">
+      <!-- XP Progress Bar -->
+      <div class="xp-bar-container">
+        <div class="xp-bar-track">
+          <div id="xp-bar-fill" class="xp-bar-fill" style="width: 0%;"></div>
+          <span id="xp-bar-text" class="xp-bar-text">0 / 100 XP</span>
+        </div>
+      </div>
+
+      <!-- Spell Hotbar -->
+      <div class="spell-hotbar" id="spell-hotbar">
+        <div class="spell-slot" id="slot-basic" data-key="LMB" title="Basic Spell (LMB)">
+          <div class="slot-key">LMB</div>
+          <div class="spell-icon" id="icon-basic">🪄</div>
+          <div class="cooldown-overlay" id="cd-basic"></div>
+        </div>
+        <div class="spell-slot" id="slot-skill1" data-key="Q" title="Skill 1 (Q)">
+          <div class="slot-key">Q</div>
+          <div class="spell-icon" id="icon-skill1">💥</div>
+          <div class="spell-cost" id="cost-skill1">25 MP</div>
+          <div class="cooldown-overlay" id="cd-skill1"></div>
+        </div>
+        <div class="spell-slot" id="slot-skill2" data-key="E" title="Skill 2 (E)">
+          <div class="slot-key">E</div>
+          <div class="spell-icon" id="icon-skill2">🌊</div>
+          <div class="spell-cost" id="cost-skill2">35 MP</div>
+          <div class="cooldown-overlay" id="cd-skill2"></div>
+        </div>
+        <div class="spell-slot ult-slot" id="slot-ult" data-key="R" title="Ultimate (R)">
+          <div class="slot-key">R</div>
+          <div class="spell-icon" id="icon-ult">☄️</div>
+          <div class="spell-cost" id="cost-ult">60 MP</div>
+          <div class="cooldown-overlay" id="cd-ult"></div>
+        </div>
+        <div class="spell-slot dash-slot" id="slot-dash" data-key="SPC" title="Blink / Dash (SPACE)">
+          <div class="slot-key">SPC</div>
+          <div class="spell-icon" id="icon-dash">⚡</div>
+          <div class="spell-cost">15 MP</div>
+          <div class="cooldown-overlay" id="cd-dash"></div>
+        </div>
+      </div>
+
+      <!-- Quick Keys Legend -->
+      <div class="hud-keys-legend">
+        <span><kbd>J</kbd> Journal</span>
+        <span><kbd>I</kbd> Gear</span>
+        <span><kbd>K</kbd> Grimoire</span>
+        <span><kbd>T</kbd> Talents</span>
+        <span><kbd>H</kbd> Controls</span>
+      </div>
+    </div>
+
+    <!-- ===== BOTTOM-RIGHT: Alchemical Mana Potion Flask Orb + Utility Buttons ===== -->
+    <div class="hud-bottom-right">
+      <div class="potion-orb-wrapper mana-orb-wrapper">
+        <div class="hud-utility-row">
+          <button id="btn-toggle-inventory" class="hud-btn-mini" title="Inventory (I)">🎒</button>
+          <button id="btn-toggle-grimoire" class="hud-btn-mini" title="Grimoire (K)">📖</button>
+          <button id="btn-toggle-journal" class="hud-btn-mini" title="Quest Journal (J)">📜</button>
+          <button id="btn-toggle-talents" class="hud-btn-mini" title="Talents (T)">
+            ✨
+            <span id="talent-points-badge" class="badge hidden">1</span>
+          </button>
+          <button id="btn-toggle-audio" class="hud-btn-mini" title="Sound">
+            <span id="audio-icon">🔊</span>
+          </button>
+        </div>
+        <div class="potion-orb mana-orb">
+          <div class="orb-glass-shine"></div>
+          <div id="hud-mana-fill" class="orb-liquid mana-liquid" style="height: 100%;">
+            <div class="liquid-wave"></div>
+            <div class="liquid-bubbles"></div>
+          </div>
+          <div class="orb-filigree-frame"></div>
+          <div class="orb-text-overlay">
+            <span class="orb-label">MANA</span>
+            <span id="hud-mana-text" class="orb-value">140 / 140</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== BOTTOM-LEFT CORNER: Chat ===== -->
+    <div id="chat-container" class="chat-container">
+      <div id="chat-messages" class="chat-messages"></div>
+      <form id="chat-form" class="chat-form chat-input-row">
+        <span id="chat-channel-badge" class="chat-channel-toggle" title="Click or press Tab to switch [Proximity / Party]">PROXIMITY</span>
+        <input type="text" id="chat-input" placeholder="[Enter] to chat • [Tab] for Party channel..." maxlength="140" autocomplete="off" />
+      </form>
+    </div>
+
+    <!-- Quick Controls Helper Button -->
+    <button id="btn-hud-controls" class="hud-controls-btn" title="Grimoire of Controls & Keybindings [H]">⌨️ CONTROLS [H]</button>
+
+    <!-- FPS Counter -->
+    <div id="fps-counter" class="fps-counter hidden">60 FPS</div>
+  </div>
+
+  <!-- =============================================
+       MAIN LOBBY & HOST/JOIN SCREEN
+       ============================================= -->
+  <div id="lobby-screen" class="modal-overlay">
+    <div class="lobby-card">
+      <div class="spire-brand">
+        <h1 class="game-title">THE SPIRE OF THE ARCHON</h1>
+        <p class="game-subtitle">CO-OPERATIVE FIRST-PERSON WIZARD ESCAPE RPG</p>
+      </div>
+
+      <div class="lobby-section">
+        <label class="section-label">NAME YOUR ARCHMAGE</label>
+        <input type="text" id="player-name-input" class="magic-input" value="Archmage Ignis" maxlength="16" />
+      </div>
+
+      <div class="lobby-section">
+        <label class="section-label">CHOOSE YOUR HOLY TRINITY DISCIPLINE</label>
+        <div class="class-grid" id="class-grid">
+          <div class="class-card selected" data-class="pyromancer">
+            <div class="class-icon">🔥</div>
+            <div class="class-info">
+              <h3>PYROMANCER</h3>
+              <p>Devastating Fire DPS & Meteor Area Burst</p>
+            </div>
+          </div>
+          <div class="class-card" data-class="cryomancer">
+            <div class="class-icon">❄️</div>
+            <div class="class-info">
+              <h3>CRYOMANCER</h3>
+              <p>Stalwart Frost Tank & Ice Armor Bulwark</p>
+            </div>
+          </div>
+          <div class="class-card" data-class="luminary">
+            <div class="class-icon">✨</div>
+            <div class="class-info">
+              <h3>LUMINARY</h3>
+              <p>Holy Restoration Healer & Divine Sanctuary</p>
+            </div>
+          </div>
+          <div class="class-card" data-class="chronomancer">
+            <div class="class-icon">⏳</div>
+            <div class="class-info">
+              <h3>CHRONOMANCER</h3>
+              <p>Temporal Support, Time Stasis & Speed Haste</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- DIRECT QUICK ASCEND & ACTION BUTTONS -->
+      <div class="lobby-action-tabs">
+        <div class="action-tab-box">
+          <h3>Host Live Online Spire</h3>
+          <p>Host directly from your PC for friends or solo play.</p>
+          <div class="input-inline">
+            <input type="text" id="host-code-input" placeholder="Custom Code (optional)" maxlength="12" />
+            <button id="btn-host-game" class="magic-btn btn-primary">HOST ONLINE SPIRE</button>
+          </div>
+        </div>
+        <div class="action-tab-box">
+          <h3>Join Friend's Spire</h3>
+          <p>Connect using your friend's online Room Code.</p>
+          <div class="input-inline">
+            <input type="text" id="join-code-input" placeholder="Enter Room Code (e.g. SPIRE-XXXX)" maxlength="16" />
+            <button id="btn-join-game" class="magic-btn btn-secondary">JOIN ONLINE PARTY</button>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: 18px; text-align: center;">
+        <button id="btn-quick-ascend" class="magic-btn btn-primary btn-large" style="font-size: 1.1rem; padding: 14px 28px; background: linear-gradient(135deg, #ffd700, #ff5722); box-shadow: 0 0 25px rgba(255, 152, 0, 0.6);">
+          🔮 ASCEND THE SPIRE (INSTANT PLAY)
+        </button>
+      </div>
+
+      <div id="room-lobby-panel" class="room-panel hidden">
+        <div class="room-code-display">
+          <span>ROOM CODE:</span>
+          <span id="display-room-code" class="room-code-tag">------</span>
+          <button id="btn-copy-code" class="mini-btn">Copy</button>
+        </div>
+        <div class="party-list-header">Covenant of Wizards (<span id="party-count">1</span>/4)</div>
+        <div id="lobby-player-list" class="lobby-player-list"></div>
+        <div class="lobby-footer">
+          <button id="btn-start-game" class="magic-btn btn-primary btn-large">ASCEND THE SPIRE</button>
+          <div id="host-start-hint" class="host-hint">Ready to ascend to Floor 1!</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ESCAPE / PAUSE MENU -->
+  <div id="escape-menu" class="modal-overlay hidden">
+    <div class="modal-card escape-card">
+      <h2 class="escape-title">⏸️ PAUSED</h2>
+      <div class="escape-buttons">
+        <button id="btn-resume" class="magic-btn btn-primary btn-large">RESUME</button>
+        <button id="btn-open-settings" class="magic-btn btn-secondary btn-large">SETTINGS</button>
+        <button id="btn-quit-lobby" class="magic-btn btn-danger btn-large">QUIT TO LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS MODAL -->
+  <div id="settings-modal" class="modal-overlay hidden">
+    <div class="modal-card settings-card">
+      <div class="modal-top">
+        <h2>SETTINGS</h2>
+        <button id="btn-close-settings" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="settings-grid">
+        <div class="setting-row">
+          <label>Master Volume</label>
+          <input type="range" id="setting-master-vol" min="0" max="100" value="70" />
+          <span id="label-master-vol" class="setting-val">70%</span>
+        </div>
+        <div class="setting-row">
+          <label>SFX Volume</label>
+          <input type="range" id="setting-sfx-vol" min="0" max="100" value="80" />
+          <span id="label-sfx-vol" class="setting-val">80%</span>
+        </div>
+        <div class="setting-row">
+          <label>Music Volume</label>
+          <input type="range" id="setting-music-vol" min="0" max="100" value="35" />
+          <span id="label-music-vol" class="setting-val">35%</span>
+        </div>
+        <div class="setting-row">
+          <label>Voice Volume</label>
+          <input type="range" id="setting-voice-vol" min="0" max="100" value="90" />
+          <span id="label-voice-vol" class="setting-val">90%</span>
+        </div>
+        <div class="setting-row">
+          <label>Mouse Sensitivity</label>
+          <input type="range" id="setting-sensitivity" min="10" max="300" value="100" />
+          <span id="label-sensitivity" class="setting-val">1.0</span>
+        </div>
+        <div class="setting-row">
+          <label>Field of View</label>
+          <input type="range" id="setting-fov" min="60" max="110" value="75" />
+          <span id="label-fov" class="setting-val">75°</span>
+        </div>
+        <div class="setting-row">
+          <label>Show FPS Counter</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="setting-show-fps" />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row">
+          <label>Show Damage Numbers</label>
+          <label class="toggle-switch">
+            <input type="checkbox" id="setting-show-dmg-numbers" checked />
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+        <div class="setting-row" style="flex-direction: column; align-items: flex-start; gap: 6px;">
+          <label style="display: flex; justify-content: space-between; width: 100%;">
+            <span>ElevenLabs API Key (Optional Studio Voice)</span>
+            <small style="color: var(--arcane-cyan);">AI Voice</small>
+          </label>
+          <div style="display: flex; gap: 8px; width: 100%;">
+            <input type="password" id="setting-elevenlabs-key" placeholder="Enter key (e.g. xi-...)" style="flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 0.8rem;" />
+            <button id="btn-save-voice-key" class="mini-btn" style="background: var(--gold); color: #12101e; font-weight: 700;">Save</button>
+          </div>
+          <small style="font-size: 0.65rem; color: var(--text-muted);">When key is empty, game automatically uses built-in browser speech synthesis.</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DEATH OVERLAY -->
+  <div id="death-overlay" class="modal-overlay hidden death-overlay">
+    <div class="death-content">
+      <div class="death-icon">💀</div>
+      <h1 class="death-title">YOU HAVE FALLEN</h1>
+      <div id="death-timer" class="death-timer">Temporal Reconstitution in 10s...</div>
+      <div class="death-sub">Moored to the Awakening Vault. Reconstitution underway.</div>
+      <button id="btn-instant-respawn" class="btn-primary" style="margin-top: 18px; padding: 10px 24px; font-size: 0.95rem; cursor: pointer; border: 1px solid #ffd700;">⚡ RECONSTITUTE NOW [SPACE]</button>
+    </div>
+  </div>
+
+  <!-- PARTY WIPE / GAME OVER -->
+  <div id="wipe-overlay" class="modal-overlay hidden">
+    <div class="modal-card wipe-card">
+      <div class="wipe-icon">☠️</div>
+      <h1 class="wipe-title">THE SPIRE CLAIMS ALL</h1>
+      <p class="wipe-sub">Your entire covenant has fallen. The Archon's curse persists.</p>
+      <div class="wipe-buttons">
+        <button id="btn-retry-floor" class="magic-btn btn-primary btn-large">RETRY THIS FLOOR</button>
+        <button id="btn-wipe-lobby" class="magic-btn btn-secondary btn-large">RETURN TO LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- INVENTORY & CHARACTER PAPERDOLL MODAL -->
+  <div id="inventory-modal" class="modal-overlay hidden">
+    <div class="modal-card inventory-card">
+      <div class="modal-top">
+        <h2>CHARACTER & EQUIPMENT</h2>
+        <button id="btn-close-inventory" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="inventory-layout">
+        <div class="paperdoll-section">
+          <h3>Equipped Gear</h3>
+          <div id="equipment-paperdoll" class="paperdoll-grid"></div>
+        </div>
+        <div class="stats-section">
+          <h3>Core Attributes</h3>
+          <div id="character-stats-list" class="stats-list"></div>
+          <div id="free-attr-points" class="free-points-row hidden">
+            <span>Unspent Attribute Points:</span>
+            <span id="free-attr-count" class="point-glow">0</span>
+          </div>
+        </div>
+        <div class="bag-section">
+          <h3>Arcane Satchel (16 Slots)</h3>
+          <div id="bag-grid" class="bag-grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SPELL GRIMOIRE MODAL -->
+  <div id="grimoire-modal" class="modal-overlay hidden">
+    <div class="modal-card grimoire-card">
+      <div class="modal-top">
+        <h2>ARCHON SPELL GRIMOIRE</h2>
+        <div class="skill-points-header">
+          Skill Points: <span id="grimoire-skill-points" class="point-glow">2</span>
+        </div>
+        <button id="btn-close-grimoire" class="modal-close-btn">&times;</button>
+      </div>
+      <div id="grimoire-spells-list" class="grimoire-list"></div>
+    </div>
+  </div>
+
+  <!-- QUEST JOURNAL MODAL -->
+  <div id="quest-journal-modal" class="modal-overlay hidden">
+    <div class="modal-card journal-card">
+      <div class="modal-top">
+        <h2>📜 QUEST JOURNAL</h2>
+        <button id="btn-close-journal" class="modal-close-btn">&times;</button>
+      </div>
+      <div id="quest-journal-content" class="journal-layout"></div>
+    </div>
+  </div>
+
+  <!-- Scribe's Lectern Story Modal -->
+  <div id="lectern-modal" class="modal-overlay hidden">
+    <div class="modal-card story-tome-card">
+      <div class="modal-top">
+        <h2>THE CHRONICLES OF AETHELGARD</h2>
+        <button id="btn-close-lectern" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="tome-body">
+        <p class="tome-text">
+          "To whichever apprentice finds this tome: Archon Valerius has locked the Spire in a fractured temporal loop.
+          Brute power alone cannot shatter the door. You must awaken the Riddle Monolith, rotate the 3 Astrolabe Prisms to
+          focus the celestial light upon the northern gate seal, and ascend through the crucible to reach the observatory pinnacle."
+        </p>
+      </div>
+      <button id="btn-lectern-continue" class="magic-btn btn-primary" style="width: 100%; margin-top: 18px;">
+        UNDERSTOOD - BEGIN THE ESCAPE
+      </button>
+    </div>
+  </div>
+
+  <!-- MAGIC BOOK / REVERSE TIME TOME MODAL -->
+  <div id="magic-book-modal" class="modal-overlay hidden">
+    <div class="modal-card magic-book-card">
+      <div class="book-cover-trim"></div>
+      <div class="modal-top book-modal-header">
+        <div class="book-title-group">
+          <span class="book-crest-badge" id="book-crest-icon">📖</span>
+          <h2 id="book-modal-title">THE GRIMOIRE OF COMBAT</h2>
+        </div>
+        <button id="btn-close-magic-book" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="book-parchment-container">
+        <!-- Decayed state -->
+        <div id="book-decay-banner" class="book-decay-banner">
+          <div class="decay-rune-icon">⏳</div>
+          <div class="decay-text">
+            <strong>Eroded by Centuries of Temporal Fractures</strong>
+            <p>The ancient ink on this parchment unraveled across cyclical time loops.</p>
+          </div>
+          <button id="btn-reverse-time" class="magic-btn btn-reverse-time">
+            ✨ CAST SPELL: REVERSE TIME [SPACE]
+          </button>
+        </div>
+        <!-- Reconstructed text container with animated scribble effect -->
+        <div id="book-parchment-content" class="book-parchment-content"></div>
+      </div>
+      <div class="book-modal-footer">
+        <span class="book-page-number" id="book-page-num">Awakening Vault Archive • Folio I</span>
+        <button id="btn-finish-book" class="magic-btn btn-secondary">CLOSE TOME</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TALENT TREE MODAL -->
+  <div id="talent-modal" class="modal-overlay hidden">
+    <div class="modal-card talent-card">
+      <div class="modal-top">
+        <h2 id="talent-class-title">Sorcerer Talent Specialization</h2>
+        <div class="talent-points-header">
+          Arcane Points: <span id="talent-points-count" class="point-glow">1</span>
+        </div>
+        <button id="btn-close-talents" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="talents-grid" id="talent-nodes-container"></div>
+    </div>
+  </div>
+
+  <!-- COOPERATIVE ARCANE QUIZ MODAL -->
+  <div id="quiz-modal" class="modal-overlay hidden">
+    <div class="modal-card quiz-card">
+      <div class="quiz-badge">ANCIENT RIDDLE MONOLITH</div>
+      <h2 id="quiz-title" class="quiz-title">The Scribe's Test</h2>
+      <div id="quiz-timer" class="quiz-timer">Time Remaining: 25s</div>
+      <div class="quiz-riddle-box">
+        <p id="quiz-riddle-text">"I consume everything yet have no mouth..."</p>
+      </div>
+      <div class="quiz-options-grid" id="quiz-options"></div>
+      <div class="quiz-votes-box">
+        <div class="votes-title">Covenant Votes:</div>
+        <div id="quiz-votes-list" class="votes-list">No votes cast yet.</div>
+      </div>
+      <div id="quiz-result-notice" class="quiz-result hidden">
+        <div id="quiz-result-text">Correct!</div>
+        <div id="quiz-lore-text" class="lore-text"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEVEL UP CELEBRATION -->
+  <div id="level-up-overlay" class="level-up-overlay hidden">
+    <div class="level-up-content">
+      <div class="level-up-icon">⬆️</div>
+      <div class="level-up-text">LEVEL UP!</div>
+      <div id="level-up-detail" class="level-up-detail">Level 2 Reached!</div>
+      <div class="level-up-rewards">+3 Attribute Points | +1 Talent Point | +1 Skill Point</div>
+    </div>
+  </div>
+
+  <!-- VICTORY MODAL -->
+  <div id="victory-modal" class="modal-overlay hidden">
+    <div class="modal-card victory-card">
+      <div class="victory-icon">🌟</div>
+      <h1 class="victory-title">FREEDOM WON!</h1>
+      <p class="victory-subtitle">Archon Valerius has fallen. The temporal curse dissipates into starlight.</p>
+      
+      <!-- MYTHIC SPOILS BANNER -->
+      <div class="victory-spoils-banner" style="background: rgba(255, 215, 0, 0.12); border: 1px solid #d4af37; border-radius: 6px; padding: 14px; margin: 15px 0; text-align: center;">
+        <h3 style="color: #ffd700; margin: 0 0 6px 0; font-family: 'Cinzel', serif;">👑 THE ARCHON'S MYTHIC SPOILS</h3>
+        <div style="color: #e0e0e0; font-size: 0.95rem; margin-bottom: 6px;">
+          🪙 <strong>+500 Gold</strong> • ⭐ <strong>+300 XP</strong> • ⚡ <strong>+3 Free Talent Points</strong>
+        </div>
+        <div id="victory-loot-drop" style="color: #ff9800; font-weight: bold;"></div>
+      </div>
+
+      <div class="victory-stats" id="victory-stats-list"></div>
+
+      <div style="display: flex; gap: 12px; margin-top: 18px;">
+        <button id="btn-ascend-ng-plus" class="magic-btn btn-primary btn-large" style="flex: 1.2; background: linear-gradient(135deg, #7b1fa2, #e040fb); box-shadow: 0 0 20px rgba(224, 64, 251, 0.5);">
+          🌀 ENTER NEW GAME+ (ASCENSION I)
+        </button>
+        <button id="btn-play-again" class="magic-btn btn-secondary btn-large" style="flex: 0.8;">
+          RESTART RUN
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTROLS & KEYBINDINGS MODAL -->
+  <div id="controls-modal" class="modal-overlay hidden">
+    <div class="modal-card controls-card">
+      <div class="modal-top">
+        <h2 class="controls-title">⚔️ GRIMOIRE OF CONTROLS & KEYBINDINGS</h2>
+        <button id="btn-close-controls" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="controls-grid">
+        <div class="control-row"><span class="key-badge">W A S D</span><span class="control-action">Movement & Strafe</span></div>
+        <div class="control-row"><span class="key-badge">LMB</span><span class="control-action">Basic Arcane Attack</span></div>
+        <div class="control-row"><span class="key-badge">Q</span><span class="control-action">Skill 1 (e.g. Fireball, Ice Lance, Radiant Heal)</span></div>
+        <div class="control-row"><span class="key-badge">E</span><span class="control-action">Contextual: Interact with NPCs / Portals / Skill 2 in Combat</span></div>
+        <div class="control-row"><span class="key-badge">R</span><span class="control-action">Ultimate Ability (Fire Tornado, Blizzard, Sanctuary)</span></div>
+        <div class="control-row"><span class="key-badge">SPACE</span><span class="control-action">Temporal Dash / Blink</span></div>
+        <div class="control-row"><span class="key-badge">J</span><span class="control-action">Quest Journal & Objectives Log</span></div>
+        <div class="control-row"><span class="key-badge">I</span><span class="control-action">Inventory & Equipment Gear</span></div>
+        <div class="control-row"><span class="key-badge">K</span><span class="control-action">Spell Grimoire & Skill Points</span></div>
+        <div class="control-row"><span class="key-badge">T</span><span class="control-action">Talent Specialization Tree</span></div>
+        <div class="control-row"><span class="key-badge">ENTER</span><span class="control-action">Covenant In-Game Chat</span></div>
+        <div class="control-row"><span class="key-badge">H / F1</span><span class="control-action">Toggle Controls Guide</span></div>
+        <div class="control-row"><span class="key-badge">ESC</span><span class="control-action">Menu / Settings / Close Any Modal</span></div>
+      </div>
+      <button id="btn-done-controls" class="magic-btn btn-primary" style="width: 100%; margin-top: 18px;">CLOSE GUIDE [ESC]</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

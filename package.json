@@ -1,0 +1,36 @@
+{
+  "name": "spire-of-the-archon",
+  "version": "1.0.0",
+  "description": "Story-driven 3D multiplayer co-op wizard escape game with puzzles, quizzes, spells, and boss fights",
+  "main": "server/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server/server.js",
+    "start": "node server/server.js",
+    "host": "node server/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "peerjs": "^1.5.5",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "three": "^0.174.0"
+  },
+  "devDependencies": {
+    "vite": "^6.2.0"
+  },
+  "keywords": [
+    "threejs",
+    "multiplayer",
+    "coop",
+    "rpg",
+    "wizard",
+    "puzzles",
+    "game"
+  ],
+  "author": "Antigravity",
+  "license": "MIT"
+}
