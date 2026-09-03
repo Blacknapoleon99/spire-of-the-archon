@@ -150,6 +150,37 @@ export class AnimationController {
    */
   animateBoss(bossGroup, phase, deltaTime) {
     if (!bossGroup || !bossGroup.userData) return;
+    const { bossType } = bossGroup.userData;
+
+    if (bossType === 'ignis') {
+      const { core, shield } = bossGroup.userData;
+      const breath = Math.sin(this.time * 2.5) * 0.08;
+      bossGroup.position.y = breath;
+      if (core) {
+        const pulse = 0.85 + Math.sin(this.time * 5.0) * 0.15;
+        core.scale.set(pulse, pulse, pulse);
+      }
+      if (shield && shield.visible) {
+        shield.rotation.y += deltaTime * 1.5;
+        shield.rotation.x += deltaTime * 0.8;
+      }
+      return;
+    }
+
+    if (bossType === 'xyris') {
+      const { eye, ring1, ring2, shield } = bossGroup.userData;
+      bossGroup.position.y = 0.8 + Math.sin(this.time * 2.0) * 0.25;
+      if (eye) eye.rotation.z += deltaTime * 2.5;
+      if (ring1) ring1.rotation.x += deltaTime * 3.0;
+      if (ring2) ring2.rotation.y -= deltaTime * 2.5;
+      if (shield && shield.visible) {
+        shield.rotation.y += deltaTime * 2.0;
+        const pulse = 1.0 + Math.sin(this.time * 6.0) * 0.08;
+        shield.scale.set(pulse, pulse, pulse);
+      }
+      return;
+    }
+
     const { ring1, ring2, hourglass, shield, staffGroup } = bossGroup.userData;
 
     // Dynamic Multi-Phase Levitation Height

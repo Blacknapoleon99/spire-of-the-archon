@@ -66,77 +66,52 @@ export class TowerEnvironment {
   }
 
   /**
-   * Pre-builds 100% of Floors 1, 2, and 3 during the initial loading screen
+   * Pre-builds 100% of all 15 Floors during the initial loading screen
    * and pre-compiles all scene materials on the GPU for instant 0ms mid-game transitions.
    */
   preloadAllFloors(renderer = null, camera = null) {
     if (this.isFloorsPreloaded) return;
     this.isFloorsPreloaded = true;
 
-    console.log('[TowerEnvironment] Pre-building 100% of all 3 floor environments...');
+    console.log('[TowerEnvironment] Pre-building 100% of all 15 floor environments in memory...');
 
-    // 1. Build Floor 1
-    const f1Group = new THREE.Group();
-    f1Group.name = 'Floor1_Archives_Cached';
-    this.roomGroup = f1Group;
-    this.colliders = [];
-    this.interactables = [];
-    this.animatedProps = [];
-    this.destructibles = [];
-    this.buildFloor1Archives();
-    this.freezeStaticMatrices(f1Group);
-    this.floorCache.set(1, {
-      group: f1Group,
-      colliders: [...this.colliders],
-      interactables: [...this.interactables],
-      animatedProps: [...this.animatedProps],
-      destructibles: [...this.destructibles],
-      exitPortal: this.exitPortal,
-      lavaUniforms: this.lavaUniforms,
-      nebulaUniforms: this.nebulaUniforms
-    });
+    for (let f = 1; f <= 15; f++) {
+      const fGroup = new THREE.Group();
+      fGroup.name = `Floor${f}_Cached`;
+      this.roomGroup = fGroup;
+      this.colliders = [];
+      this.interactables = [];
+      this.animatedProps = [];
+      this.destructibles = [];
 
-    // 2. Build Floor 2
-    const f2Group = new THREE.Group();
-    f2Group.name = 'Floor2_Forge_Cached';
-    this.roomGroup = f2Group;
-    this.colliders = [];
-    this.interactables = [];
-    this.animatedProps = [];
-    this.destructibles = [];
-    this.buildFloor2Forge();
-    this.freezeStaticMatrices(f2Group);
-    this.floorCache.set(2, {
-      group: f2Group,
-      colliders: [...this.colliders],
-      interactables: [...this.interactables],
-      animatedProps: [...this.animatedProps],
-      destructibles: [...this.destructibles],
-      exitPortal: this.exitPortal,
-      lavaUniforms: this.lavaUniforms,
-      nebulaUniforms: this.nebulaUniforms
-    });
+      if (f === 1) this.buildFloor1Archives();
+      else if (f === 2) this.buildFloor2Catacombs();
+      else if (f === 3) this.buildFloor3Scriptorium();
+      else if (f === 4) this.buildFloor4Mirrors();
+      else if (f === 5) this.buildFloor5BossIgnis();
+      else if (f === 6) this.buildFloor6Foundry();
+      else if (f === 7) this.buildFloor7GolemLab();
+      else if (f === 8) this.buildFloor8Crystals();
+      else if (f === 9) this.buildFloor9Catwalks();
+      else if (f === 10) this.buildFloor10BossXyris();
+      else if (f === 11) this.buildFloor11StarGallery();
+      else if (f === 12) this.buildFloor12Chronometer();
+      else if (f === 13) this.buildFloor13Promenade();
+      else if (f === 14) this.buildFloor14Sanctum();
+      else if (f === 15) this.buildFloor15BossValerius();
 
-    // 3. Build Floor 3
-    const f3Group = new THREE.Group();
-    f3Group.name = 'Floor3_Observatory_Cached';
-    this.roomGroup = f3Group;
-    this.colliders = [];
-    this.interactables = [];
-    this.animatedProps = [];
-    this.destructibles = [];
-    this.buildFloor3Observatory();
-    this.freezeStaticMatrices(f3Group);
-    this.floorCache.set(3, {
-      group: f3Group,
-      colliders: [...this.colliders],
-      interactables: [...this.interactables],
-      animatedProps: [...this.animatedProps],
-      destructibles: [...this.destructibles],
-      exitPortal: this.exitPortal,
-      lavaUniforms: this.lavaUniforms,
-      nebulaUniforms: this.nebulaUniforms
-    });
+      this.freezeStaticMatrices(fGroup);
+      this.floorCache.set(f, {
+        group: fGroup,
+        colliders: [...this.colliders],
+        interactables: [...this.interactables],
+        animatedProps: [...this.animatedProps],
+        destructibles: [...this.destructibles],
+        exitPortal: this.exitPortal,
+        lavaUniforms: this.lavaUniforms,
+        nebulaUniforms: this.nebulaUniforms
+      });
+    }
 
     // Reconnect root roomGroup to active scene
     this.roomGroup = new THREE.Group();
@@ -146,20 +121,26 @@ export class TowerEnvironment {
     // Mount Floor 1
     this.mountCachedFloor(1);
 
-    // Pre-compile all 3 floors' materials into GPU driver shader cache
+    // Pre-compile all 15 floors' materials into GPU driver shader cache
     if (renderer && camera) {
-      this.scene.add(f2Group);
-      this.scene.add(f3Group);
-      f2Group.position.y = -9999;
-      f3Group.position.y = -9999;
+      for (let f = 2; f <= 15; f++) {
+        const cached = this.floorCache.get(f);
+        if (cached?.group) {
+          this.scene.add(cached.group);
+          cached.group.position.y = -9999;
+        }
+      }
       renderer.compile(this.scene, camera);
-      this.scene.remove(f2Group);
-      this.scene.remove(f3Group);
-      f2Group.position.y = 0;
-      f3Group.position.y = 0;
+      for (let f = 2; f <= 15; f++) {
+        const cached = this.floorCache.get(f);
+        if (cached?.group) {
+          this.scene.remove(cached.group);
+          cached.group.position.y = 0;
+        }
+      }
     }
 
-    console.log('⚡ [TowerEnvironment] All 3 floor environments 100% pre-built and pre-compiled in GPU VRAM!');
+    console.log('⚡ [TowerEnvironment] All 15 floor environments 100% pre-built and pre-compiled in GPU VRAM!');
   }
 
   mountCachedFloor(floorNumber) {
@@ -187,13 +168,21 @@ export class TowerEnvironment {
     this.clear();
     this.currentFloor = floorNumber;
 
-    if (floorNumber === 1) {
-      this.buildFloor1Archives();
-    } else if (floorNumber === 2) {
-      this.buildFloor2Forge();
-    } else if (floorNumber === 3) {
-      this.buildFloor3Observatory();
-    }
+    if (floorNumber === 1) this.buildFloor1Archives();
+    else if (floorNumber === 2) this.buildFloor2Catacombs();
+    else if (floorNumber === 3) this.buildFloor3Scriptorium();
+    else if (floorNumber === 4) this.buildFloor4Mirrors();
+    else if (floorNumber === 5) this.buildFloor5BossIgnis();
+    else if (floorNumber === 6) this.buildFloor6Foundry();
+    else if (floorNumber === 7) this.buildFloor7GolemLab();
+    else if (floorNumber === 8) this.buildFloor8Crystals();
+    else if (floorNumber === 9) this.buildFloor9Catwalks();
+    else if (floorNumber === 10) this.buildFloor10BossXyris();
+    else if (floorNumber === 11) this.buildFloor11StarGallery();
+    else if (floorNumber === 12) this.buildFloor12Chronometer();
+    else if (floorNumber === 13) this.buildFloor13Promenade();
+    else if (floorNumber === 14) this.buildFloor14Sanctum();
+    else if (floorNumber === 15) this.buildFloor15BossValerius();
 
     this.freezeStaticMatrices();
   }
@@ -2569,8 +2558,884 @@ export class TowerEnvironment {
         prop.ring.rotation.z += deltaTime * 0.6;
         prop.crystal.rotation.y += deltaTime * 0.9;
         prop.crystal.position.y = 4.1 + Math.sin(time * 2.5) * 0.1;
+      } else if (prop.type === 'gear') {
+        // Clockwork gear animation (Floors 12 & 15)
+        if (prop.axis === 'x') prop.mesh.rotation.x += deltaTime * (prop.speed || 0.5);
+        else if (prop.axis === 'z') prop.mesh.rotation.z += deltaTime * (prop.speed || 0.5);
+        else prop.mesh.rotation.y += deltaTime * (prop.speed || 0.5);
       }
     });
   }
-}
 
+  // =========================================================================
+  // ALIASES: Floors 2 & 3 keep backward-compat while new routing maps
+  // =========================================================================
+  buildFloor2Catacombs() { return this.buildFloor2Forge(); }
+  buildFloor3Scriptorium() { return this.buildFloor3Observatory(); }
+
+  // =========================================================================
+  // FLOOR 4: WHISPERING MIRROR GALLERY
+  // =========================================================================
+  buildFloor4Mirrors() {
+    const stonePBR = TextureGenerator.createStoneBrickPBR();
+    const marblePBR = TextureGenerator.createMarbleTilePBR();
+
+    // Dark obsidian floor
+    const floorGeo = new THREE.CylinderGeometry(20, 20, 1, 32);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x0a0a14, roughness: 0.4, metalness: 0.6 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Tall mirrored walls
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const wallGeo = new THREE.BoxGeometry(0.3, 12, 5);
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x88aacc, roughness: 0.05, metalness: 0.98, envMapIntensity: 2.0 });
+      const wall = new THREE.Mesh(wallGeo, wallMat);
+      wall.position.set(Math.cos(angle) * 18, 6, Math.sin(angle) * 18);
+      wall.rotation.y = angle;
+      this.roomGroup.add(wall);
+    }
+
+    // Gothic ceiling with hanging chandeliers
+    const ceilGeo = new THREE.CylinderGeometry(20, 20, 0.8, 32);
+    const ceilMat = new THREE.MeshStandardMaterial({ color: 0x0d0d1e, roughness: 0.9 });
+    const ceil = new THREE.Mesh(ceilGeo, ceilMat);
+    ceil.position.y = 11.5;
+    this.roomGroup.add(ceil);
+
+    // 3 Chandeliers
+    for (let c = 0; c < 3; c++) {
+      const r = c * 5;
+      const chainGeo = new THREE.CylinderGeometry(0.05, 0.05, 4, 6);
+      const chainMat = new THREE.MeshStandardMaterial({ color: 0x886644, metalness: 0.9, roughness: 0.3 });
+      const chain = new THREE.Mesh(chainGeo, chainMat);
+      chain.position.set(r - 5, 9, 0);
+      this.roomGroup.add(chain);
+      const ringGeo = new THREE.TorusGeometry(1.2 + c * 0.3, 0.08, 8, 24);
+      const ring = new THREE.Mesh(ringGeo, chainMat);
+      ring.position.set(r - 5, 7, 0);
+      ring.rotation.x = Math.PI / 2;
+      this.roomGroup.add(ring);
+      const light = new THREE.PointLight(0xffeedd, 1.8, 12);
+      light.position.set(r - 5, 6.8, 0);
+      this.roomGroup.add(light);
+    }
+
+    // Treasure chest
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(5, 0, -10);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f4', type: 'chest', x: 5, z: -10, radius: 2.5 });
+
+    // Exit portal door
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -18);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -18, radius: 3.5, isUnlocked: false };
+
+    // Ambient purple light
+    const ambLight = new THREE.PointLight(0x6600cc, 2.5, 30);
+    ambLight.position.set(0, 5, 0);
+    this.roomGroup.add(ambLight);
+
+    // Collision walls
+    this.colliders.push({ x: 0, z: 0, radius: 21, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 5: BOSS ROOM - IGNIS THE MOLTEN BEHEMOTH (Crucible Triad Puzzle)
+  // =========================================================================
+  buildFloor5BossIgnis() {
+    // Scorched basalt floor with lava cracks
+    const floorGeo = new THREE.CylinderGeometry(24, 24, 1, 32);
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a0800, roughness: 0.9, metalness: 0.1 });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Lava crack emissive strips across floor
+    for (let i = 0; i < 8; i++) {
+      const crackGeo = new THREE.BoxGeometry(0.3, 0.05, 12 + Math.random() * 6);
+      const crackMat = new THREE.MeshStandardMaterial({ color: 0xff3300, emissive: 0xff2200, emissiveIntensity: 3.0 });
+      const crack = new THREE.Mesh(crackGeo, crackMat);
+      const angle = (i / 8) * Math.PI * 2;
+      crack.position.set(Math.cos(angle) * 8, 0.01, Math.sin(angle) * 8);
+      crack.rotation.y = angle;
+      this.roomGroup.add(crack);
+    }
+
+    // Magma Caldera pit in center (impassable visual)
+    const caldGeo = new THREE.CylinderGeometry(5, 4, 0.5, 24);
+    const caldMat = new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff4400, emissiveIntensity: 2.5, roughness: 0.3 });
+    const caldera = new THREE.Mesh(caldGeo, caldMat);
+    caldera.position.set(0, 0.1, 0);
+    this.roomGroup.add(caldera);
+
+    // Massive obsidian pillars around perimeter
+    for (let p = 0; p < 6; p++) {
+      const angle = (p / 6) * Math.PI * 2;
+      const pilGeo = new THREE.CylinderGeometry(1.2, 1.8, 16, 8);
+      const pilMat = new THREE.MeshStandardMaterial({ color: 0x0a0805, roughness: 0.8 });
+      const pil = new THREE.Mesh(pilGeo, pilMat);
+      pil.position.set(Math.cos(angle) * 19, 8, Math.sin(angle) * 19);
+      pil.castShadow = true;
+      this.roomGroup.add(pil);
+      // Lava glow at base of pillars
+      const glow = new THREE.PointLight(0xff4400, 1.5, 8);
+      glow.position.set(Math.cos(angle) * 19, 1, Math.sin(angle) * 19);
+      this.roomGroup.add(glow);
+    }
+
+    // 3 Elemental Crucibles (Fire, Frost, Storm) arranged in triangle
+    const cruciblePositions = [
+      { x: -10, z: -8, element: 'fire', color: 0xff2200 },
+      { x: 10, z: -8, element: 'frost', color: 0x00aaff },
+      { x: 0, z: 12, element: 'storm', color: 0xffee00 },
+    ];
+    cruciblePositions.forEach(({ x, z, element, color }) => {
+      const cruc = ModelFactory.createCrucibleMesh(element, color);
+      cruc.position.set(x, 0, z);
+      this.roomGroup.add(cruc);
+      this.interactables.push({ id: `crucible_${element}`, type: 'crucible', element, x, z, radius: 2.5 });
+    });
+
+    // Ambient magma lighting
+    const ambLight = new THREE.PointLight(0xff3300, 3.5, 40);
+    ambLight.position.set(0, 4, 0);
+    this.roomGroup.add(ambLight);
+
+    // Boss spawn marker
+    this.exitPortal = { x: 0, z: -18, radius: 3.5, isUnlocked: false, isBossRoom: true };
+    this.colliders.push({ x: 0, z: 0, radius: 25, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 6: SMOLDERING FOUNDRY
+  // =========================================================================
+  buildFloor6Foundry() {
+    const stonePBR = TextureGenerator.createStoneBrickPBR();
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x332211, metalness: 0.9, roughness: 0.3 });
+
+    const floorGeo = new THREE.CylinderGeometry(22, 22, 1, 32);
+    const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ color: 0x1a1008, roughness: 0.85 }));
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Huge forge furnaces on walls
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const furnGeo = new THREE.BoxGeometry(4, 6, 3);
+      const furn = new THREE.Mesh(furnGeo, stonePBR.material);
+      furn.position.set(Math.cos(angle) * 17, 3, Math.sin(angle) * 17);
+      furn.rotation.y = angle + Math.PI;
+      this.roomGroup.add(furn);
+      const mouthGeo = new THREE.BoxGeometry(2.5, 2.5, 0.5);
+      const mouthMat = new THREE.MeshStandardMaterial({ color: 0xff5500, emissive: 0xff3300, emissiveIntensity: 3.5 });
+      const mouth = new THREE.Mesh(mouthGeo, mouthMat);
+      mouth.position.set(Math.cos(angle) * 15.5, 2.5, Math.sin(angle) * 15.5);
+      this.roomGroup.add(mouth);
+      const glow = new THREE.PointLight(0xff5500, 2.5, 12);
+      glow.position.set(Math.cos(angle) * 14, 3, Math.sin(angle) * 14);
+      this.roomGroup.add(glow);
+    }
+
+    // Conveyor belt style platforms (decorative catwalks)
+    for (let p = 0; p < 3; p++) {
+      const platGeo = new THREE.BoxGeometry(12, 0.3, 2);
+      const plat = new THREE.Mesh(platGeo, metalMat);
+      plat.position.set(0, 0.5, -6 + p * 6);
+      this.roomGroup.add(plat);
+    }
+
+    // Treasure chest
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(-8, 0, -8);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f6', type: 'chest', x: -8, z: -8, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -19);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -19, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0xff6600, 2.5, 35);
+    ambLight.position.set(0, 5, 0);
+    this.roomGroup.add(ambLight);
+    this.colliders.push({ x: 0, z: 0, radius: 23, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 7: GOLEM ASSEMBLY LAB
+  // =========================================================================
+  buildFloor7GolemLab() {
+    const stonePBR = TextureGenerator.createStoneBrickPBR();
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x141820, roughness: 0.7, metalness: 0.4 });
+
+    const floorGeo = new THREE.CylinderGeometry(22, 22, 1, 32);
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Research workbenches (rows)
+    for (let r = 0; r < 3; r++) {
+      for (let c = 0; c < 4; c++) {
+        const tableGeo = new THREE.BoxGeometry(2.5, 0.2, 1.2);
+        const tableMat = new THREE.MeshStandardMaterial({ color: 0x3a2a18, roughness: 0.8 });
+        const table = new THREE.Mesh(tableGeo, tableMat);
+        table.position.set(-7.5 + c * 5, 1, -6 + r * 6);
+        this.roomGroup.add(table);
+        const legGeo = new THREE.CylinderGeometry(0.1, 0.1, 1, 6);
+        const leg = new THREE.Mesh(legGeo, tableMat);
+        leg.position.set(-7.5 + c * 5, 0.5, -6 + r * 6);
+        this.roomGroup.add(leg);
+      }
+    }
+
+    // Partially assembled Golem frames on display
+    for (let g = 0; g < 4; g++) {
+      const angle = (g / 4) * Math.PI * 2;
+      const golem = ModelFactory.createGolemMesh();
+      golem.position.set(Math.cos(angle) * 14, 0, Math.sin(angle) * 14);
+      golem.scale.set(0.8, 0.8, 0.8);
+      this.roomGroup.add(golem);
+    }
+
+    // Arcane machinery glow strips on ceiling
+    const beamMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00ffcc, emissiveIntensity: 1.5 });
+    for (let b = 0; b < 6; b++) {
+      const beamGeo = new THREE.BoxGeometry(0.1, 0.1, 40);
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      beam.position.set(-12 + b * 5, 10.5, 0);
+      this.roomGroup.add(beam);
+    }
+
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(8, 0, 10);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f7', type: 'chest', x: 8, z: 10, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -19);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -19, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0x00ccff, 2.0, 35);
+    ambLight.position.set(0, 6, 0);
+    this.roomGroup.add(ambLight);
+    this.colliders.push({ x: 0, z: 0, radius: 23, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 8: CRYSTALLINE CAVERNS
+  // =========================================================================
+  buildFloor8Crystals() {
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x080c18, roughness: 0.5, metalness: 0.3 });
+
+    const floorGeo = new THREE.CylinderGeometry(22, 22, 1, 32);
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Giant crystal formations around the room
+    const crystalMat = new THREE.MeshStandardMaterial({
+      color: 0x4488ff,
+      emissive: 0x1122aa,
+      emissiveIntensity: 1.2,
+      transparent: true,
+      opacity: 0.8,
+      roughness: 0.05,
+      metalness: 0.6
+    });
+
+    for (let i = 0; i < 16; i++) {
+      const angle = (i / 16) * Math.PI * 2 + Math.random() * 0.3;
+      const radius = 8 + Math.random() * 10;
+      const height = 2 + Math.random() * 6;
+      const crystGeo = new THREE.ConeGeometry(0.3 + Math.random() * 0.5, height, 5);
+      const cryst = new THREE.Mesh(crystGeo, crystalMat);
+      cryst.position.set(Math.cos(angle) * radius, height / 2, Math.sin(angle) * radius);
+      cryst.rotation.x = (Math.random() - 0.5) * 0.4;
+      cryst.rotation.z = (Math.random() - 0.5) * 0.4;
+      cryst.castShadow = true;
+      this.roomGroup.add(cryst);
+    }
+
+    // Crystal ceiling stalactites
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const stalGeo = new THREE.ConeGeometry(0.2, 3, 5);
+      const stal = new THREE.Mesh(stalGeo, crystalMat);
+      stal.position.set(Math.cos(angle) * 10, 11, Math.sin(angle) * 10);
+      stal.rotation.z = Math.PI;
+      this.roomGroup.add(stal);
+    }
+
+    // Glowing crystal light nodes
+    for (let l = 0; l < 4; l++) {
+      const angle = (l / 4) * Math.PI * 2;
+      const nodeGeo = new THREE.OctahedronGeometry(0.8, 0);
+      const nodeMat = new THREE.MeshStandardMaterial({ color: 0x88bbff, emissive: 0x3366ff, emissiveIntensity: 3.0 });
+      const node = new THREE.Mesh(nodeGeo, nodeMat);
+      node.position.set(Math.cos(angle) * 6, 3, Math.sin(angle) * 6);
+      this.roomGroup.add(node);
+      const light = new THREE.PointLight(0x4488ff, 2.0, 14);
+      light.position.copy(node.position);
+      this.roomGroup.add(light);
+    }
+
+    // Lectern with quest scroll
+    const lectern = ModelFactory.createLecternMesh();
+    lectern.position.set(0, 0, -5);
+    this.roomGroup.add(lectern);
+    this.interactables.push({ id: 'lectern_f8', type: 'lectern', x: 0, z: -5, radius: 2.5 });
+
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(-7, 0, -12);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f8', type: 'chest', x: -7, z: -12, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -19);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -19, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0x2244ff, 2.5, 40);
+    ambLight.position.set(0, 5, 0);
+    this.roomGroup.add(ambLight);
+    this.colliders.push({ x: 0, z: 0, radius: 23, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 9: VOID CATWALKS
+  // =========================================================================
+  buildFloor9Catwalks() {
+    const metalMat = new THREE.MeshStandardMaterial({ color: 0x1a1a2e, metalness: 0.85, roughness: 0.25 });
+    const glowMat = new THREE.MeshStandardMaterial({ color: 0x9933ff, emissive: 0x6600cc, emissiveIntensity: 2.0 });
+
+    // Platform floor (smaller, surrounded by void)
+    const floorGeo = new THREE.BoxGeometry(16, 0.5, 16);
+    const floor = new THREE.Mesh(floorGeo, metalMat);
+    floor.position.set(0, -0.25, 0);
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+    this.colliders.push({ minX: -8, maxX: 8, minZ: -8, maxZ: 8, type: 'rect' });
+
+    // Side catwalks extending outward
+    const catwalkData = [
+      { x: 15, z: 0, rot: 0 },
+      { x: -15, z: 0, rot: 0 },
+      { x: 0, z: 15, rot: Math.PI / 2 },
+      { x: 0, z: -15, rot: Math.PI / 2 },
+    ];
+    catwalkData.forEach(({ x, z, rot }) => {
+      const cwGeo = new THREE.BoxGeometry(14, 0.3, 3);
+      const cw = new THREE.Mesh(cwGeo, metalMat);
+      cw.position.set(x, -0.15, z);
+      cw.rotation.y = rot;
+      this.roomGroup.add(cw);
+      // Railing glow strips
+      const railGeo = new THREE.BoxGeometry(14, 0.8, 0.1);
+      const rail = new THREE.Mesh(railGeo, glowMat);
+      rail.position.set(x, 0.4, z + (rot === 0 ? 1.5 : 0));
+      rail.rotation.y = rot;
+      this.roomGroup.add(rail);
+    });
+
+    // Void abyss visual (dark sphere below)
+    const voidGeo = new THREE.SphereGeometry(40, 24, 24);
+    const voidMat = new THREE.MeshStandardMaterial({ color: 0x01000a, side: THREE.BackSide, roughness: 1.0 });
+    const voidSphere = new THREE.Mesh(voidGeo, voidMat);
+    voidSphere.position.y = -20;
+    this.roomGroup.add(voidSphere);
+
+    // Floating arcane platforms
+    for (let p = 0; p < 6; p++) {
+      const angle = (p / 6) * Math.PI * 2;
+      const platGeo = new THREE.CylinderGeometry(2, 2, 0.3, 8);
+      const platMat = new THREE.MeshStandardMaterial({ color: 0x220044, emissive: 0x440088, emissiveIntensity: 1.0 });
+      const plat = new THREE.Mesh(platGeo, platMat);
+      plat.position.set(Math.cos(angle) * 22, -2 + Math.sin(p) * 3, Math.sin(angle) * 22);
+      this.roomGroup.add(plat);
+    }
+
+    // Chest on catwalk
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(15, 0.3, 0);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f9', type: 'chest', x: 15, z: 0, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -14);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -14, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0x7722ee, 2.5, 50);
+    ambLight.position.set(0, 8, 0);
+    this.roomGroup.add(ambLight);
+  }
+
+  // =========================================================================
+  // FLOOR 10: BOSS ROOM - XYRIS THE VOID SOVEREIGN (Prismatic Mirror Puzzle)
+  // =========================================================================
+  buildFloor10BossXyris() {
+    const floorMat = new THREE.MeshStandardMaterial({ color: 0x040010, roughness: 0.6, metalness: 0.5 });
+
+    const floorGeo = new THREE.CylinderGeometry(26, 26, 1, 40);
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Void Nexus floor rune ring
+    const runeGeo = new THREE.RingGeometry(4, 12, 48);
+    const runeMat = new THREE.MeshStandardMaterial({ color: 0x9933ff, emissive: 0x6600cc, emissiveIntensity: 2.0, side: THREE.DoubleSide });
+    const rune = new THREE.Mesh(runeGeo, runeMat);
+    rune.rotation.x = -Math.PI / 2;
+    rune.position.y = 0.02;
+    this.roomGroup.add(rune);
+
+    // Outer walls - void hexagonal panels
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const wallGeo = new THREE.BoxGeometry(0.4, 15, 6);
+      const wallMat = new THREE.MeshStandardMaterial({ color: 0x0a0018, roughness: 0.7 });
+      const wall = new THREE.Mesh(wallGeo, wallMat);
+      wall.position.set(Math.cos(angle) * 24, 7, Math.sin(angle) * 24);
+      wall.rotation.y = angle;
+      this.roomGroup.add(wall);
+    }
+
+    // 4 Prismatic Light Mirrors (rotatable - key mechanic)
+    const mirrorAngles = [0, Math.PI / 2, Math.PI, Math.PI * 3 / 2];
+    mirrorAngles.forEach((baseAngle, idx) => {
+      const mirrorMesh = ModelFactory.createPrismPedestalMesh(idx + 1);
+      const mx = Math.cos(baseAngle) * 14;
+      const mz = Math.sin(baseAngle) * 14;
+      mirrorMesh.position.set(mx, 0, mz);
+      this.roomGroup.add(mirrorMesh);
+      this.interactables.push({
+        id: `prism_${idx + 1}`,
+        type: 'prism',
+        mirrorIndex: idx,
+        x: mx,
+        z: mz,
+        radius: 2.8
+      });
+    });
+
+    // Aether Beam source emitter (north wall) - visual only
+    const beamGeo = new THREE.CylinderGeometry(0.15, 0.15, 30, 8);
+    const beamMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 4.0, transparent: true, opacity: 0.6 });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.set(0, 1.5, -5);
+    beam.rotation.z = Math.PI / 2;
+    this.roomGroup.add(beam);
+
+    // Boss room central light node
+    const bossLight = new THREE.PointLight(0x9900ff, 4.0, 50);
+    bossLight.position.set(0, 5, 0);
+    this.roomGroup.add(bossLight);
+
+    // Floating void shards around ceiling
+    const shardMat = new THREE.MeshStandardMaterial({ color: 0x220044, emissive: 0x440088, emissiveIntensity: 1.5 });
+    for (let s = 0; s < 16; s++) {
+      const angle = (s / 16) * Math.PI * 2;
+      const shardGeo = new THREE.OctahedronGeometry(0.4 + Math.random() * 0.4, 0);
+      const shard = new THREE.Mesh(shardGeo, shardMat);
+      shard.position.set(Math.cos(angle) * 10 + Math.random() * 3, 8 + Math.random() * 3, Math.sin(angle) * 10 + Math.random() * 3);
+      this.roomGroup.add(shard);
+    }
+
+    this.exitPortal = { x: 0, z: -22, radius: 4.0, isUnlocked: false, isBossRoom: true };
+    this.colliders.push({ x: 0, z: 0, radius: 27, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 11: STAR-WOVEN GALLERY
+  // =========================================================================
+  buildFloor11StarGallery() {
+    const marbleMat = new THREE.MeshStandardMaterial({ color: 0x0d0d22, roughness: 0.4, metalness: 0.2 });
+
+    const floorGeo = new THREE.CylinderGeometry(22, 22, 1, 32);
+    const floor = new THREE.Mesh(floorGeo, marbleMat);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Star-woven dome ceiling
+    const domeGeo = new THREE.SphereGeometry(22, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+    const domeMat = new THREE.MeshStandardMaterial({ color: 0x01010d, side: THREE.BackSide, roughness: 0.9 });
+    const dome = new THREE.Mesh(domeGeo, domeMat);
+    dome.position.y = 0;
+    this.roomGroup.add(dome);
+
+    // Star points on dome
+    const starMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xeeddff, emissiveIntensity: 2.5 });
+    for (let s = 0; s < 80; s++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI * 0.45;
+      const starGeo = new THREE.SphereGeometry(0.06, 4, 4);
+      const star = new THREE.Mesh(starGeo, starMat);
+      star.position.set(
+        Math.sin(phi) * Math.cos(theta) * 21,
+        Math.cos(phi) * 21,
+        Math.sin(phi) * Math.sin(theta) * 21
+      );
+      this.roomGroup.add(star);
+    }
+
+    // Constellation pillars with glowing runes
+    for (let p = 0; p < 8; p++) {
+      const angle = (p / 8) * Math.PI * 2;
+      const pilGeo = new THREE.CylinderGeometry(0.6, 0.9, 10, 8);
+      const pilMat = new THREE.MeshStandardMaterial({ color: 0x111133, roughness: 0.8 });
+      const pil = new THREE.Mesh(pilGeo, pilMat);
+      pil.position.set(Math.cos(angle) * 17, 5, Math.sin(angle) * 17);
+      this.roomGroup.add(pil);
+      const runeGeo = new THREE.BoxGeometry(0.1, 3, 0.05);
+      const runeMat = new THREE.MeshStandardMaterial({ color: 0xaabbff, emissive: 0x8899ff, emissiveIntensity: 2.0 });
+      const runeStrip = new THREE.Mesh(runeGeo, runeMat);
+      runeStrip.position.set(Math.cos(angle) * 17.35, 5, Math.sin(angle) * 17.35);
+      this.roomGroup.add(runeStrip);
+    }
+
+    // NPC - Astromancer guide
+    const scribe = ModelFactory.createScribeGhostMesh();
+    scribe.position.set(0, 0, -3);
+    this.roomGroup.add(scribe);
+    this.interactables.push({ id: 'scribe_f11', type: 'scribe', x: 0, z: -3, radius: 3.0 });
+
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(8, 0, -12);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f11', type: 'chest', x: 8, z: -12, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -19);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -19, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0x8866ff, 2.0, 40);
+    ambLight.position.set(0, 8, 0);
+    this.roomGroup.add(ambLight);
+    this.colliders.push({ x: 0, z: 0, radius: 23, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 12: CLOCKWORK CHRONOMETER GEARS
+  // =========================================================================
+  buildFloor12Chronometer() {
+    const brassMat = new THREE.MeshStandardMaterial({ color: 0x886633, metalness: 0.85, roughness: 0.3 });
+
+    const floorGeo = new THREE.CylinderGeometry(22, 22, 1, 32);
+    const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ color: 0x1a1208, roughness: 0.7 }));
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Giant clock face on floor
+    const clockFaceGeo = new THREE.CylinderGeometry(14, 14, 0.2, 48);
+    const clockFaceMat = new THREE.MeshStandardMaterial({ color: 0xd4aa55, metalness: 0.7, roughness: 0.3 });
+    const clockFace = new THREE.Mesh(clockFaceGeo, clockFaceMat);
+    clockFace.position.y = -0.1;
+    this.roomGroup.add(clockFace);
+
+    // Gear teeth ring
+    const gearRingGeo = new THREE.TorusGeometry(13.5, 0.8, 8, 36);
+    const gearRing = new THREE.Mesh(gearRingGeo, brassMat);
+    gearRing.rotation.x = Math.PI / 2;
+    gearRing.position.y = 0.2;
+    this.roomGroup.add(gearRing);
+
+    // Large spinning gears on walls (animated props)
+    const gearPositions = [
+      { x: -15, y: 6, z: 0 }, { x: 15, y: 6, z: 0 },
+      { x: 0, y: 6, z: -15 }, { x: 0, y: 6, z: 15 },
+    ];
+    gearPositions.forEach(({ x, y, z }, idx) => {
+      const gGeo = new THREE.TorusGeometry(3.5, 0.5, 8, 18);
+      const gear = new THREE.Mesh(gGeo, brassMat);
+      gear.position.set(x, y, z);
+      if (x !== 0) gear.rotation.y = Math.PI / 2;
+      this.roomGroup.add(gear);
+      this.animatedProps.push({ type: 'gear', mesh: gear, speed: idx % 2 === 0 ? 0.5 : -0.3, axis: x !== 0 ? 'x' : 'z' });
+    });
+
+    // Clock hands (animated)
+    const handMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.95 });
+    const hrHandGeo = new THREE.BoxGeometry(0.3, 0.1, 7);
+    const hrHand = new THREE.Mesh(hrHandGeo, handMat);
+    hrHand.position.set(0, 0.3, -3.5);
+    this.roomGroup.add(hrHand);
+    this.animatedProps.push({ type: 'gear', mesh: hrHand, speed: 0.02, axis: 'y' });
+
+    const minHandGeo = new THREE.BoxGeometry(0.2, 0.1, 10);
+    const minHand = new THREE.Mesh(minHandGeo, handMat);
+    minHand.position.set(0, 0.35, -5);
+    this.roomGroup.add(minHand);
+    this.animatedProps.push({ type: 'gear', mesh: minHand, speed: 0.15, axis: 'y' });
+
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(-10, 0, 8);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f12', type: 'chest', x: -10, z: 8, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -19);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -19, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0xffcc44, 2.0, 40);
+    ambLight.position.set(0, 8, 0);
+    this.roomGroup.add(ambLight);
+    this.colliders.push({ x: 0, z: 0, radius: 23, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 13: SKY PROMENADE
+  // =========================================================================
+  buildFloor13Promenade() {
+    const stonePBR = TextureGenerator.createStoneBrickPBR();
+    const skyMat = new THREE.MeshStandardMaterial({ color: 0x050d22, roughness: 0.9 });
+
+    const floorGeo = new THREE.CylinderGeometry(22, 22, 1, 32);
+    const floor = new THREE.Mesh(floorGeo, new THREE.MeshStandardMaterial({ color: 0x1a1e2c, roughness: 0.7 }));
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Open sky dome (top-open) - feel of elevated tower top
+    const domeSky = new THREE.SphereGeometry(35, 24, 12, 0, Math.PI * 2, 0, Math.PI / 3);
+    const domeSkyMat = new THREE.MeshStandardMaterial({ color: 0x020820, side: THREE.BackSide });
+    const sky = new THREE.Mesh(domeSky, domeSkyMat);
+    sky.position.y = 5;
+    this.roomGroup.add(sky);
+
+    // Elegant marble colonnade
+    for (let col = 0; col < 12; col++) {
+      const angle = (col / 12) * Math.PI * 2;
+      const colGeo = new THREE.CylinderGeometry(0.5, 0.65, 9, 12);
+      const column = new THREE.Mesh(colGeo, stonePBR.material);
+      column.position.set(Math.cos(angle) * 18, 4.5, Math.sin(angle) * 18);
+      column.castShadow = true;
+      this.roomGroup.add(column);
+      // Capital (top)
+      const capGeo = new THREE.BoxGeometry(1.8, 0.5, 1.8);
+      const cap = new THREE.Mesh(capGeo, stonePBR.material);
+      cap.position.set(Math.cos(angle) * 18, 9.25, Math.sin(angle) * 18);
+      this.roomGroup.add(cap);
+    }
+
+    // Aerial lanterns floating
+    const lanternMat = new THREE.MeshStandardMaterial({ color: 0xffdd88, emissive: 0xffaa00, emissiveIntensity: 2.5, transparent: true, opacity: 0.85 });
+    for (let l = 0; l < 10; l++) {
+      const angle = (l / 10) * Math.PI * 2;
+      const lanGeo = new THREE.BoxGeometry(0.4, 0.6, 0.4);
+      const lan = new THREE.Mesh(lanGeo, lanternMat);
+      lan.position.set(Math.cos(angle) * 10, 5 + Math.sin(l * 1.3) * 2, Math.sin(angle) * 10);
+      this.roomGroup.add(lan);
+      const light = new THREE.PointLight(0xffaa00, 0.8, 6);
+      light.position.copy(lan.position);
+      this.roomGroup.add(light);
+    }
+
+    // Scribe NPC
+    const scribe = ModelFactory.createScribeGhostMesh();
+    scribe.position.set(-5, 0, -5);
+    this.roomGroup.add(scribe);
+    this.interactables.push({ id: 'scribe_f13', type: 'scribe', x: -5, z: -5, radius: 3.0 });
+
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(6, 0, -12);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f13', type: 'chest', x: 6, z: -12, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -19);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -19, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0x8899ff, 2.0, 45);
+    ambLight.position.set(0, 6, 0);
+    this.roomGroup.add(ambLight);
+    this.colliders.push({ x: 0, z: 0, radius: 23, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 14: SANCTUM OF ETERNITY
+  // =========================================================================
+  buildFloor14Sanctum() {
+    const marblePBR = TextureGenerator.createMarbleTilePBR();
+    const goldMat = new THREE.MeshStandardMaterial({ color: 0xd4a00a, metalness: 0.95, roughness: 0.1 });
+
+    const floorGeo = new THREE.CylinderGeometry(22, 22, 1, 32);
+    const floor = new THREE.Mesh(floorGeo, marblePBR.material);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Grand altar at center
+    const altarGeo = new THREE.BoxGeometry(5, 1.5, 3);
+    const altarMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5 });
+    const altar = new THREE.Mesh(altarGeo, altarMat);
+    altar.position.set(0, 0.75, -6);
+    this.roomGroup.add(altar);
+
+    // Golden altar trim
+    const trimGeo = new THREE.BoxGeometry(5.4, 0.3, 3.4);
+    const trim = new THREE.Mesh(trimGeo, goldMat);
+    trim.position.set(0, 1.5, -6);
+    this.roomGroup.add(trim);
+
+    // Gilded arch over altar
+    const archGeo = new THREE.TorusGeometry(3.5, 0.25, 8, 16, Math.PI);
+    const arch = new THREE.Mesh(archGeo, goldMat);
+    arch.position.set(0, 3.5, -6);
+    arch.rotation.z = Math.PI;
+    this.roomGroup.add(arch);
+
+    // Sacred light column over altar
+    const sacredLight = new THREE.PointLight(0xfff8e0, 4.0, 16);
+    sacredLight.position.set(0, 5, -6);
+    this.roomGroup.add(sacredLight);
+
+    // Eight towering gilded pillars
+    for (let p = 0; p < 8; p++) {
+      const angle = (p / 8) * Math.PI * 2;
+      const pilGeo = new THREE.CylinderGeometry(0.7, 0.9, 12, 12);
+      const pil = new THREE.Mesh(pilGeo, marblePBR.material);
+      pil.position.set(Math.cos(angle) * 16, 6, Math.sin(angle) * 16);
+      this.roomGroup.add(pil);
+      const capGeo = new THREE.BoxGeometry(2.2, 0.7, 2.2);
+      const cap = new THREE.Mesh(capGeo, goldMat);
+      cap.position.set(Math.cos(angle) * 16, 12.35, Math.sin(angle) * 16);
+      this.roomGroup.add(cap);
+    }
+
+    // Alchemist shop NPC
+    const alchemist = ModelFactory.createAlchemistMesh();
+    alchemist.position.set(8, 0, 4);
+    this.roomGroup.add(alchemist);
+    this.interactables.push({ id: 'alchemist_f14', type: 'alchemist', x: 8, z: 4, radius: 3.0 });
+
+    const chest = ModelFactory.createTreasureChestMesh(false);
+    chest.position.set(-8, 0, -12);
+    this.roomGroup.add(chest);
+    this.interactables.push({ id: 'chest_f14', type: 'chest', x: -8, z: -12, radius: 2.5 });
+
+    const exitDoor = this.createExitDoor();
+    exitDoor.position.set(0, 0, -19);
+    this.roomGroup.add(exitDoor);
+    this.exitPortal = { x: 0, z: -19, radius: 3.5, isUnlocked: false };
+
+    const ambLight = new THREE.PointLight(0xffd700, 2.5, 45);
+    ambLight.position.set(0, 8, 0);
+    this.roomGroup.add(ambLight);
+    this.colliders.push({ x: 0, z: 0, radius: 23, type: 'cylinder_outer' });
+  }
+
+  // =========================================================================
+  // FLOOR 15: GRAND FINALE BOSS ROOM - ARCHON VALERIUS ASCENDANT
+  //           (Temporal Paradox Keystone Puzzle)
+  // =========================================================================
+  buildFloor15BossValerius() {
+    const marblePBR = TextureGenerator.createMarbleTilePBR();
+    const goldMat = new THREE.MeshStandardMaterial({ color: 0xffdd00, metalness: 0.95, roughness: 0.1 });
+    const astraMat = new THREE.MeshStandardMaterial({ color: 0x220044, emissive: 0x8800ff, emissiveIntensity: 2.5 });
+
+    // Grand celestial floor - white marble with golden veins
+    const floorGeo = new THREE.CylinderGeometry(28, 28, 1, 48);
+    const floor = new THREE.Mesh(floorGeo, marblePBR.material);
+    floor.position.y = -0.5;
+    floor.receiveShadow = true;
+    this.roomGroup.add(floor);
+
+    // Astral rune circle on floor
+    const runeGeo = new THREE.RingGeometry(6, 16, 60);
+    const runeMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 1.8, side: THREE.DoubleSide });
+    const runeRing = new THREE.Mesh(runeGeo, runeMat);
+    runeRing.rotation.x = -Math.PI / 2;
+    runeRing.position.y = 0.02;
+    this.roomGroup.add(runeRing);
+
+    // Massive Chrono Spire pillars (8 enormous gilded monoliths)
+    for (let p = 0; p < 8; p++) {
+      const angle = (p / 8) * Math.PI * 2;
+      const pilGeo = new THREE.BoxGeometry(2.5, 20, 2.5);
+      const pil = new THREE.Mesh(pilGeo, marblePBR.material);
+      pil.position.set(Math.cos(angle) * 22, 10, Math.sin(angle) * 22);
+      pil.castShadow = true;
+      this.roomGroup.add(pil);
+      // Golden rune glow on pillar face
+      const glowGeo = new THREE.BoxGeometry(0.1, 12, 2);
+      const glowMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 2.5 });
+      const glow = new THREE.Mesh(glowGeo, glowMat);
+      glow.position.set(Math.cos(angle) * 22 + Math.cos(angle) * 1.26, 10, Math.sin(angle) * 22 + Math.sin(angle) * 1.26);
+      this.roomGroup.add(glow);
+    }
+
+    // 4 Cardinal Temporal Paradox Keystones (N, E, S, W at 45-degree diagonal)
+    const keystonePositions = [
+      { dir: 'north', x: 0, z: -14 },
+      { dir: 'east', x: 14, z: 0 },
+      { dir: 'south', x: 0, z: 14 },
+      { dir: 'west', x: -14, z: 0 },
+    ];
+    keystonePositions.forEach(({ dir, x, z }) => {
+      const keystone = ModelFactory.createKeystoneMesh(dir);
+      keystone.position.set(x, 0, z);
+      this.roomGroup.add(keystone);
+      this.interactables.push({ id: `keystone_${dir}`, type: 'keystone', direction: dir, x, z, radius: 2.8 });
+    });
+
+    // Astral Nova effect - floating time shards
+    const shardMat = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xffaa00, emissiveIntensity: 3.0, transparent: true, opacity: 0.75 });
+    for (let s = 0; s < 20; s++) {
+      const angle = (s / 20) * Math.PI * 2;
+      const shardGeo = new THREE.OctahedronGeometry(0.35 + Math.random() * 0.3, 0);
+      const shard = new THREE.Mesh(shardGeo, shardMat);
+      shard.position.set(Math.cos(angle) * (8 + Math.random() * 6), 2 + Math.random() * 5, Math.sin(angle) * (8 + Math.random() * 6));
+      this.roomGroup.add(shard);
+    }
+
+    // Massive concentric chronometer rings (Valerius throne visuals)
+    const ringMat = new THREE.MeshStandardMaterial({ color: 0xd4a000, metalness: 0.95, roughness: 0.1, emissive: 0xffdd00, emissiveIntensity: 0.8 });
+    [6, 8, 10].forEach((r, i) => {
+      const ringGeo = new THREE.TorusGeometry(r, 0.2, 10, 64);
+      const ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.position.set(0, 3 + i * 1.5, 0);
+      ring.rotation.x = Math.PI / 3 + i * 0.3;
+      this.roomGroup.add(ring);
+      this.animatedProps.push({ type: 'gear', mesh: ring, speed: 0.25 - i * 0.05, axis: 'y' });
+    });
+
+    // Grand Celestial Skybox dome for final boss
+    const domeGeo = new THREE.SphereGeometry(40, 32, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+    const domeMat = new THREE.MeshStandardMaterial({ color: 0x000010, side: THREE.BackSide });
+    const dome = new THREE.Mesh(domeGeo, domeMat);
+    dome.position.y = 0;
+    this.roomGroup.add(dome);
+
+    // Final boss room celestial lighting
+    const bossLight = new THREE.PointLight(0xffd700, 4.5, 60);
+    bossLight.position.set(0, 6, 0);
+    this.roomGroup.add(bossLight);
+    const accentLight1 = new THREE.PointLight(0x8800ff, 2.5, 35);
+    accentLight1.position.set(-10, 4, -10);
+    this.roomGroup.add(accentLight1);
+    const accentLight2 = new THREE.PointLight(0x0044ff, 2.0, 30);
+    accentLight2.position.set(10, 4, 10);
+    this.roomGroup.add(accentLight2);
+
+    // No exit portal for final boss room - game ends here
+    this.exitPortal = { x: 0, z: -24, radius: 4.5, isUnlocked: false, isBossRoom: true, isFinalBoss: true };
+    this.colliders.push({ x: 0, z: 0, radius: 29, type: 'cylinder_outer' });
+  }
+}

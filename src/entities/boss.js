@@ -15,8 +15,14 @@ export class BossEntity {
     this.position = new THREE.Vector3(data.x || 0, data.y || 0, data.z || -15);
     this.targetPos = this.position.clone();
 
-    // Create 3D Mesh
-    this.mesh = ModelFactory.createBossMesh();
+    // Create 3D Mesh for active boss
+    if (data.bossType === 'ignis' || data.id?.includes('ignis')) {
+      this.mesh = ModelFactory.createIgnisColossusMesh();
+    } else if (data.bossType === 'xyris' || data.id?.includes('xyris')) {
+      this.mesh = ModelFactory.createXyrisVoidSovereignMesh();
+    } else {
+      this.mesh = ModelFactory.createBossMesh();
+    }
     this.mesh.position.copy(this.position);
     this.scene.add(this.mesh);
 
@@ -53,7 +59,9 @@ export class BossEntity {
     const fill = document.getElementById('boss-health-fill');
     const phaseBadge = document.getElementById('boss-phase');
     const shieldBadge = document.getElementById('boss-shield-badge');
+    const bossNameEl = document.getElementById('boss-name-label');
 
+    if (bossNameEl) bossNameEl.textContent = this.name.toUpperCase();
     const ratio = Math.max(0, Math.min(1, this.health / this.maxHealth));
     if (fill) fill.style.width = `${ratio * 100}%`;
     if (phaseBadge) phaseBadge.textContent = `PHASE ${this.phase}`;

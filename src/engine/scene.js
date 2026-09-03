@@ -251,10 +251,7 @@ export class EngineScene {
       this.dirLight.intensity = 1.4;
       this.arcaneFill.color.setHex(0x7928ca);
       this.arcaneFill.intensity = 1.3;
-      if (this.bloomPass) {
-        this.bloomPass.strength = 1.1;
-        this.bloomPass.threshold = 0.82;
-      }
+      if (this.bloomPass) { this.bloomPass.strength = 1.1; this.bloomPass.threshold = 0.82; }
     } else if (floorNumber === 2) {
       // Floor 2: The Alchemical Forge (Smoldering Volcanic Amber)
       this.scene.background.setHex(0x140603);
@@ -266,12 +263,9 @@ export class EngineScene {
       this.dirLight.intensity = 1.8;
       this.arcaneFill.color.setHex(0xff5722);
       this.arcaneFill.intensity = 1.9;
-      if (this.bloomPass) {
-        this.bloomPass.strength = 1.35; // Hotter molten glow
-        this.bloomPass.threshold = 0.78;
-      }
+      if (this.bloomPass) { this.bloomPass.strength = 1.35; this.bloomPass.threshold = 0.78; }
     } else if (floorNumber === 3) {
-      // Floor 3: The Astral Observatory (Deep Cosmic Violet / Starlight)
+      // Floor 3: The Astral Observatory (Deep Cosmic Violet)
       this.scene.background.setHex(0x050414);
       this.scene.fog.color.setHex(0x050414);
       this.scene.fog.density = 0.019;
@@ -281,10 +275,151 @@ export class EngineScene {
       this.dirLight.intensity = 2.0;
       this.arcaneFill.color.setHex(0x9333ea);
       this.arcaneFill.intensity = 2.1;
-      if (this.bloomPass) {
-        this.bloomPass.strength = 1.45; // Radiant cosmic starlight
-        this.bloomPass.threshold = 0.76;
-      }
+      if (this.bloomPass) { this.bloomPass.strength = 1.45; this.bloomPass.threshold = 0.76; }
+    } else if (floorNumber === 4) {
+      // Floor 4: Whispering Mirror Gallery (Midnight Indigo)
+      this.scene.background.setHex(0x06060f);
+      this.scene.fog.color.setHex(0x06060f);
+      this.scene.fog.density = 0.020;
+      this.ambientLight.color.setHex(0x14163a);
+      this.ambientLight.intensity = 1.2;
+      this.dirLight.color.setHex(0x8888dd);
+      this.dirLight.intensity = 1.5;
+      this.arcaneFill.color.setHex(0x5522cc);
+      this.arcaneFill.intensity = 1.6;
+      if (this.bloomPass) { this.bloomPass.strength = 1.2; this.bloomPass.threshold = 0.80; }
+    } else if (floorNumber === 5) {
+      // Floor 5: Boss Room - Ignis (Inferno)
+      this.scene.background.setHex(0x1a0800);
+      this.scene.fog.color.setHex(0x1a0800);
+      this.scene.fog.density = 0.030;
+      this.ambientLight.color.setHex(0x4a1400);
+      this.ambientLight.intensity = 1.8;
+      this.dirLight.color.setHex(0xff4400);
+      this.dirLight.intensity = 2.2;
+      this.arcaneFill.color.setHex(0xff2200);
+      this.arcaneFill.intensity = 2.5;
+      if (this.bloomPass) { this.bloomPass.strength = 1.7; this.bloomPass.threshold = 0.72; }
+    } else if (floorNumber === 6) {
+      // Floor 6: Smoldering Foundry (Deep Ember)
+      this.scene.background.setHex(0x120702);
+      this.scene.fog.color.setHex(0x120702);
+      this.scene.fog.density = 0.028;
+      this.ambientLight.color.setHex(0x3a1a06);
+      this.ambientLight.intensity = 1.6;
+      this.dirLight.color.setHex(0xff6633);
+      this.dirLight.intensity = 1.9;
+      this.arcaneFill.color.setHex(0xff4400);
+      this.arcaneFill.intensity = 2.0;
+      if (this.bloomPass) { this.bloomPass.strength = 1.4; this.bloomPass.threshold = 0.75; }
+    } else if (floorNumber === 7) {
+      // Floor 7: Golem Assembly Lab (Steel Blue)
+      this.scene.background.setHex(0x050c14);
+      this.scene.fog.color.setHex(0x050c14);
+      this.scene.fog.density = 0.021;
+      this.ambientLight.color.setHex(0x0e1e30);
+      this.ambientLight.intensity = 1.4;
+      this.dirLight.color.setHex(0x66aacc);
+      this.dirLight.intensity = 1.7;
+      this.arcaneFill.color.setHex(0x00ccff);
+      this.arcaneFill.intensity = 1.8;
+      if (this.bloomPass) { this.bloomPass.strength = 1.2; this.bloomPass.threshold = 0.79; }
+    } else if (floorNumber === 8) {
+      // Floor 8: Crystalline Caverns (Ice Blue)
+      this.scene.background.setHex(0x03060e);
+      this.scene.fog.color.setHex(0x03060e);
+      this.scene.fog.density = 0.018;
+      this.ambientLight.color.setHex(0x0e1a38);
+      this.ambientLight.intensity = 1.3;
+      this.dirLight.color.setHex(0x88bbff);
+      this.dirLight.intensity = 1.8;
+      this.arcaneFill.color.setHex(0x3366ff);
+      this.arcaneFill.intensity = 2.0;
+      if (this.bloomPass) { this.bloomPass.strength = 1.4; this.bloomPass.threshold = 0.77; }
+    } else if (floorNumber === 9) {
+      // Floor 9: Void Catwalks (Deep Abyssal Purple)
+      this.scene.background.setHex(0x01000a);
+      this.scene.fog.color.setHex(0x01000a);
+      this.scene.fog.density = 0.015;
+      this.ambientLight.color.setHex(0x0d0022);
+      this.ambientLight.intensity = 1.1;
+      this.dirLight.color.setHex(0x9933ff);
+      this.dirLight.intensity = 1.6;
+      this.arcaneFill.color.setHex(0x6600cc);
+      this.arcaneFill.intensity = 1.8;
+      if (this.bloomPass) { this.bloomPass.strength = 1.5; this.bloomPass.threshold = 0.75; }
+    } else if (floorNumber === 10) {
+      // Floor 10: Boss Room - Xyris (Void Nexus)
+      this.scene.background.setHex(0x020008);
+      this.scene.fog.color.setHex(0x020008);
+      this.scene.fog.density = 0.028;
+      this.ambientLight.color.setHex(0x180030);
+      this.ambientLight.intensity = 1.7;
+      this.dirLight.color.setHex(0xaa44ff);
+      this.dirLight.intensity = 2.2;
+      this.arcaneFill.color.setHex(0x9900ff);
+      this.arcaneFill.intensity = 2.8;
+      if (this.bloomPass) { this.bloomPass.strength = 1.8; this.bloomPass.threshold = 0.70; }
+    } else if (floorNumber === 11) {
+      // Floor 11: Star-Woven Gallery (Nebula Violet)
+      this.scene.background.setHex(0x010110);
+      this.scene.fog.color.setHex(0x010110);
+      this.scene.fog.density = 0.016;
+      this.ambientLight.color.setHex(0x181245);
+      this.ambientLight.intensity = 1.4;
+      this.dirLight.color.setHex(0xccbbff);
+      this.dirLight.intensity = 1.8;
+      this.arcaneFill.color.setHex(0x7755ee);
+      this.arcaneFill.intensity = 2.0;
+      if (this.bloomPass) { this.bloomPass.strength = 1.5; this.bloomPass.threshold = 0.76; }
+    } else if (floorNumber === 12) {
+      // Floor 12: Clockwork Chronometer (Brass & Gold)
+      this.scene.background.setHex(0x100c02);
+      this.scene.fog.color.setHex(0x100c02);
+      this.scene.fog.density = 0.022;
+      this.ambientLight.color.setHex(0x382800);
+      this.ambientLight.intensity = 1.5;
+      this.dirLight.color.setHex(0xffcc44);
+      this.dirLight.intensity = 1.9;
+      this.arcaneFill.color.setHex(0xdd8800);
+      this.arcaneFill.intensity = 1.8;
+      if (this.bloomPass) { this.bloomPass.strength = 1.25; this.bloomPass.threshold = 0.79; }
+    } else if (floorNumber === 13) {
+      // Floor 13: Sky Promenade (Night Sky Blue)
+      this.scene.background.setHex(0x020818);
+      this.scene.fog.color.setHex(0x020818);
+      this.scene.fog.density = 0.014;
+      this.ambientLight.color.setHex(0x0c1840);
+      this.ambientLight.intensity = 1.3;
+      this.dirLight.color.setHex(0x88aaff);
+      this.dirLight.intensity = 1.6;
+      this.arcaneFill.color.setHex(0x4466dd);
+      this.arcaneFill.intensity = 1.7;
+      if (this.bloomPass) { this.bloomPass.strength = 1.2; this.bloomPass.threshold = 0.80; }
+    } else if (floorNumber === 14) {
+      // Floor 14: Sanctum of Eternity (Warm Gold)
+      this.scene.background.setHex(0x0e0a00);
+      this.scene.fog.color.setHex(0x0e0a00);
+      this.scene.fog.density = 0.020;
+      this.ambientLight.color.setHex(0x402a00);
+      this.ambientLight.intensity = 1.6;
+      this.dirLight.color.setHex(0xffdd88);
+      this.dirLight.intensity = 2.0;
+      this.arcaneFill.color.setHex(0xffaa00);
+      this.arcaneFill.intensity = 2.2;
+      if (this.bloomPass) { this.bloomPass.strength = 1.3; this.bloomPass.threshold = 0.78; }
+    } else if (floorNumber === 15) {
+      // Floor 15: Boss Room - Archon Valerius (Celestial Gold & Violet)
+      this.scene.background.setHex(0x080410);
+      this.scene.fog.color.setHex(0x080410);
+      this.scene.fog.density = 0.025;
+      this.ambientLight.color.setHex(0x30200a);
+      this.ambientLight.intensity = 2.0;
+      this.dirLight.color.setHex(0xffee88);
+      this.dirLight.intensity = 2.5;
+      this.arcaneFill.color.setHex(0xffd700);
+      this.arcaneFill.intensity = 3.0;
+      if (this.bloomPass) { this.bloomPass.strength = 2.0; this.bloomPass.threshold = 0.68; }
     }
   }
 

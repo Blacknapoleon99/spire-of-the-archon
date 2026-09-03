@@ -67,7 +67,7 @@ export class GameState {
     this.roomId = roomId;
     this.io = io;
     this.floor = 1;
-    this.maxFloors = 3;
+    this.maxFloors = 15;
     this.isGameStarted = false;
     this.isGameOver = false;
     this.isVictory = false;
@@ -78,7 +78,7 @@ export class GameState {
     this.projectiles = [];
     this.activePuzzles = {};
 
-    // Floor 1 Puzzle: 3 Light Beam Obelisks
+    // Puzzles for Exploration & Climactic Boss Levels (Floors 5, 10, 15)
     this.puzzles = {
       floor1: {
         prisms: [
@@ -99,6 +99,40 @@ export class GameState {
         unlocked: false
       },
       floor3: {
+        keystones: [
+          { id: 'north', active: false, x: 0, z: -16 },
+          { id: 'south', active: false, x: 0, z: 16 },
+          { id: 'east', active: false, x: 16, z: 0 },
+          { id: 'west', active: false, x: -16, z: 0 }
+        ],
+        bossShieldActive: false
+      },
+      // FLOOR 5 BOSS ROOM PUZZLE: Simultaneous Crucible Triad under Molten Colossus bombardment
+      floor5: {
+        crucibles: [
+          { element: 'fire', charged: false, color: 0xff4400 },
+          { element: 'frost', charged: false, color: 0x00ccff },
+          { element: 'storm', charged: false, color: 0xffea00 }
+        ],
+        order: ['fire', 'frost', 'storm'],
+        currentStep: 0,
+        unlocked: false,
+        bossShieldActive: true
+      },
+      // FLOOR 10 BOSS ROOM PUZZLE: Simultaneous 4-Mirror Prismatic Beam Alignment during Void Annihilation
+      floor10: {
+        mirrors: [
+          { id: 1, angle: 0, targetAngle: 90, isAligned: false },
+          { id: 2, angle: 180, targetAngle: 270, isAligned: false },
+          { id: 3, angle: 90, targetAngle: 0, isAligned: false },
+          { id: 4, angle: 270, targetAngle: 180, isAligned: false }
+        ],
+        annihilationTimer: 14.0,
+        unlocked: false,
+        bossShieldActive: true
+      },
+      // FLOOR 15 GRAND FINALE BOSS ROOM PUZZLE: Simultaneous 4 Temporal Paradox Keystones
+      floor15: {
         keystones: [
           { id: 'north', active: false, x: 0, z: -16 },
           { id: 'south', active: false, x: 0, z: 16 },
@@ -128,34 +162,119 @@ export class GameState {
     this.currentQuiz = null;
     this.quizVotes.clear();
 
+    // =========================================================================
+    // TIER 1: THE FORBIDDEN ARCHIVES & ANCIENT CATACOMBS (Floors 1 - 5)
+    // =========================================================================
     if (floorNumber === 1) {
-      // Floor 1 Enemies: Arcane Sentries & Library Wisps (Positioned deep in archives so entrance corridor is safe)
+      // Floor 1: The Archives of the Scribes
       this.spawnEnemy('sentry', -14, 0, -12, 80, 10, 'Arcane Sentinel');
       this.spawnEnemy('sentry', 14, 0, -12, 80, 10, 'Arcane Sentinel');
       this.spawnEnemy('shade', 0, 0, -20, 120, 15, 'Library Shade');
       this.broadcastStory('Floor 1: The Archives of the Scribes. Seek the riddle monolith and align the light prisms to unlock the elevator gate!');
     } else if (floorNumber === 2) {
-      // Floor 2: Colossal 130m Molten Chasm (13x Area of Floor 1!)
-      this.spawnEnemy('golem', -24, 0, 10, 240, 26, 'Forge Juggernaut');
-      this.spawnEnemy('golem', 24, 0, 10, 240, 26, 'Forge Juggernaut');
-      this.spawnEnemy('golem', -20, 0, -25, 260, 28, 'Molten Behemoth');
-      this.spawnEnemy('golem', 20, 0, -25, 260, 28, 'Molten Behemoth');
-      this.spawnEnemy('shade', -38, 0, -12, 140, 18, 'Chasm Stalker');
-      this.spawnEnemy('shade', 38, 0, -12, 140, 18, 'Chasm Stalker');
-      this.spawnEnemy('shade', -12, 0, -42, 150, 20, 'Gatehouse Spectre');
-      this.spawnEnemy('shade', 12, 0, -42, 150, 20, 'Gatehouse Spectre');
-      this.broadcastStory('Floor 2: The Colossal Molten Chasm (13x Floor Expansion)! Traverse the obsidian bridges, ignite the crucibles, and breach the Great Gatehouse!');
+      // Floor 2: The Crypt of the Archons
+      this.spawnEnemy('sentry', -12, 0, -8, 110, 14, 'Crypt Guardian');
+      this.spawnEnemy('sentry', 12, 0, -8, 110, 14, 'Crypt Guardian');
+      this.spawnEnemy('shade', 0, 0, -16, 130, 16, 'Tomb Wraith');
+      this.spawnEnemy('shade', -8, 0, -24, 130, 16, 'Shadow Spectre');
+      this.broadcastStory('Floor 2: The Crypt of the Archons. Ancient sarcophagi rest under ethereal mist. Beware of awakening wraiths!');
     } else if (floorNumber === 3) {
-      // Floor 3: Archon Valerius Boss Arena
-      this.spawnBoss(0, 0, -15);
-      this.broadcastStory('Floor 3: The Astral Observatory. Archmage Valerius awaits at the chronometer pinnacle. Prepare for battle!');
+      // Floor 3: The Sunken Scriptorium
+      this.spawnEnemy('golem', -10, 0, -12, 180, 20, 'Waterlogged Construct');
+      this.spawnEnemy('golem', 10, 0, -12, 180, 20, 'Waterlogged Construct');
+      this.spawnEnemy('shade', 0, 0, -22, 140, 18, 'Sunken Apparition');
+      this.broadcastStory('Floor 3: The Sunken Scriptorium. Tidal mana surges through shattered flooded chambers!');
+    } else if (floorNumber === 4) {
+      // Floor 4: The Hall of Whispering Mirrors
+      this.spawnEnemy('shade', -14, 0, -10, 150, 20, 'Mirror Phantom');
+      this.spawnEnemy('shade', 14, 0, -10, 150, 20, 'Mirror Phantom');
+      this.spawnEnemy('sentry', 0, 0, -20, 160, 22, 'Prismatic Sentinel');
+      this.spawnEnemy('golem', 0, 0, -30, 220, 24, 'Obsidian Ward');
+      this.broadcastStory('Floor 4: The Hall of Whispering Mirrors. The mirrors twist perception—the molten caldera looms just ahead!');
+    } else if (floorNumber === 5) {
+      // Floor 5: BOSS LEVEL & BOSS ROOM - Ignis the Molten Behemoth
+      this.spawnBossIgnis(0, 0, -12);
+      this.puzzles.floor5.bossShieldActive = true;
+      this.puzzles.floor5.currentStep = 0;
+      this.puzzles.floor5.crucibles.forEach(c => c.charged = false);
+      this.broadcastStory('FLOOR 5 [BOSS ROOM]: The Magma Crucible! Ignis the Molten Behemoth rises! Solve the Crucible Triad (Fire -> Frost -> Storm) during combat to shatter his Molten Shield!');
+    }
+
+    // =========================================================================
+    // TIER 2: THE ALCHEMICAL FORGE & VOID UNDER-SPIRE (Floors 6 - 10)
+    // =========================================================================
+    else if (floorNumber === 6) {
+      // Floor 6: The Smoldering Foundry
+      this.spawnEnemy('golem', -16, 0, -12, 260, 26, 'Forge Juggernaut');
+      this.spawnEnemy('golem', 16, 0, -12, 260, 26, 'Forge Juggernaut');
+      this.spawnEnemy('shade', 0, 0, -24, 180, 22, 'Cinder Stalker');
+      this.broadcastStory('Floor 6: The Smoldering Foundry. Industrial blast furnaces heat the spire\'s metallic marrow!');
+    } else if (floorNumber === 7) {
+      // Floor 7: The Golem Assembly Laboratory
+      this.spawnEnemy('golem', -20, 0, -10, 290, 28, 'Titan Prototype');
+      this.spawnEnemy('golem', 20, 0, -10, 290, 28, 'Titan Prototype');
+      this.spawnEnemy('sentry', 0, 0, -22, 190, 24, 'Tesla Conductor');
+      this.broadcastStory('Floor 7: The Golem Assembly Laboratory. Arcane machinery hums with volatile electrical current!');
+    } else if (floorNumber === 8) {
+      // Floor 8: The Crystalline Caverns
+      this.spawnEnemy('shade', -15, 0, -15, 200, 24, 'Aether Stalker');
+      this.spawnEnemy('shade', 15, 0, -15, 200, 24, 'Aether Stalker');
+      this.spawnEnemy('golem', 0, 0, -26, 310, 30, 'Crystalline Colossus');
+      this.broadcastStory('Floor 8: The Crystalline Caverns. Resonating amethyst geodes channel unfiltered raw arcana!');
+    } else if (floorNumber === 9) {
+      // Floor 9: The Void-Touched Catwalks
+      this.spawnEnemy('shade', -18, 0, -12, 220, 26, 'Void Horror');
+      this.spawnEnemy('shade', 18, 0, -12, 220, 26, 'Void Horror');
+      this.spawnEnemy('sentry', 0, 0, -24, 220, 26, 'Abyssal Eye');
+      this.broadcastStory('Floor 9: The Void-Touched Catwalks. The fabric of reality thins as the Void Nexus approaches!');
+    } else if (floorNumber === 10) {
+      // Floor 10: BOSS LEVEL & BOSS ROOM - Xyris the Void Sovereign
+      this.spawnBossXyris(0, 0, -14);
+      this.puzzles.floor10.bossShieldActive = true;
+      this.puzzles.floor10.mirrors.forEach(m => m.isAligned = false);
+      this.broadcastStory('FLOOR 10 [BOSS ROOM]: The Void Nexus! Xyris the Void Sovereign manifests! Align all 4 Prismatic Mirrors into a light circuit to pierce his Void Shield before Void Annihilation triggers!');
+    }
+
+    // =========================================================================
+    // TIER 3: THE CELESTIAL PINNACLE & ASTRAL DOMAIN (Floors 11 - 15)
+    // =========================================================================
+    else if (floorNumber === 11) {
+      // Floor 11: The Star-Woven Gallery
+      this.spawnEnemy('sentry', -16, 0, -14, 240, 28, 'Astral Warder');
+      this.spawnEnemy('sentry', 16, 0, -14, 240, 28, 'Astral Warder');
+      this.spawnEnemy('shade', 0, 0, -25, 240, 28, 'Cosmic Phantom');
+      this.broadcastStory('Floor 11: The Star-Woven Gallery. Constellation mosaics illuminate the ascent to the outer atmosphere!');
+    } else if (floorNumber === 12) {
+      // Floor 12: The Chronometer Clockwork Gears
+      this.spawnEnemy('golem', -18, 0, -14, 340, 32, 'Clockwork Sentinel');
+      this.spawnEnemy('golem', 18, 0, -14, 340, 32, 'Clockwork Sentinel');
+      this.spawnEnemy('sentry', 0, 0, -26, 250, 30, 'Time-Twisted Watcher');
+      this.broadcastStory('Floor 12: The Chronometer Clockwork Gears. Giant brass cogs tick with rhythmic temporal tension!');
+    } else if (floorNumber === 13) {
+      // Floor 13: The High Spire Sky Promenade
+      this.spawnEnemy('shade', -18, 0, -16, 260, 30, 'Tempest Spectre');
+      this.spawnEnemy('shade', 18, 0, -16, 260, 30, 'Tempest Spectre');
+      this.spawnEnemy('golem', 0, 0, -28, 360, 34, 'Gale Titan');
+      this.broadcastStory('Floor 13: The High Spire Sky Promenade. Piercing gale winds howl across the open sky bridges!');
+    } else if (floorNumber === 14) {
+      // Floor 14: The Sanctum of Eternity
+      this.spawnEnemy('sentry', -16, 0, -14, 280, 32, 'Archon Praetor');
+      this.spawnEnemy('sentry', 16, 0, -14, 280, 32, 'Archon Praetor');
+      this.spawnEnemy('golem', 0, 0, -24, 380, 36, 'Eternal Guardian');
+      this.broadcastStory('Floor 14: The Sanctum of Eternity. Pure aether flows from the astral vault. The Archon awaits above!');
+    } else if (floorNumber === 15) {
+      // Floor 15: FINAL BOSS LEVEL & BOSS ROOM - Archon Valerius Ascendant
+      this.spawnBossValerius(0, 0, -15);
+      this.puzzles.floor15.bossShieldActive = true;
+      this.puzzles.floor15.keystones.forEach(k => k.active = false);
+      this.broadcastStory('FLOOR 15 [GRAND BOSS ROOM]: The Astral Pinnacle! Archon Valerius Ascendant manipulates time itself! Disrupt all 4 Cardinal Temporal Keystones during combat to shatter his Chrono Barrier!');
     }
 
     // Reset player floor positions to entrance
     for (const [socketId, player] of this.players) {
       player.x = (Math.random() - 0.5) * 2;
       player.y = 0;
-      player.z = floorNumber === 2 ? 40 : (floorNumber === 3 ? 14 : 31);
+      player.z = (floorNumber === 5 || floorNumber === 6) ? 38 : ((floorNumber === 10 || floorNumber === 15) ? 24 : 31);
       player.rotY = 0;
       player.health = player.maxHealth;
       player.mana = player.maxMana;
@@ -191,29 +310,85 @@ export class GameState {
     });
   }
 
-  spawnBoss(x, y, z) {
-    const id = 'boss_valerius';
+  spawnBossIgnis(x, y, z) {
+    const id = 'boss_ignis';
     const asc = this.ascensionTier || 0;
-    const health = Math.round(800 * (1 + asc * 0.45));
-    const damage = Math.round(35 * (1 + asc * 0.3));
+    const health = Math.round(1400 * (1 + asc * 0.45));
+    const damage = Math.round(38 * (1 + asc * 0.3));
 
     this.enemies.set(id, {
       id,
       type: 'boss',
-      name: asc > 0 ? `[NG+${asc}] Archon Valerius` : 'Archon Valerius, The Fractured Chronomancer',
-      x,
-      y,
-      z,
+      bossType: 'ignis',
+      name: asc > 0 ? `[NG+${asc}] Ignis the Molten Behemoth` : 'Ignis the Molten Behemoth, Lord of the Crucible',
+      x, y, z,
       health,
       maxHealth: health,
       damage,
-      speed: 3.2,
+      speed: 2.8,
       state: 'combat',
       targetId: null,
-      phase: 1, // 1: Arcane Barrage, 2: Chrono Shift, 3: Astral Overload
-      invulnerable: true, // until keystones are hit
+      phase: 1,
+      invulnerable: true, // Immune while Crucible Shield is active
+      cooldown: 0,
+      specialTimer: 6.0,
+      stunnedTimer: 0,
+      isAlive: true
+    });
+  }
+
+  spawnBossXyris(x, y, z) {
+    const id = 'boss_xyris';
+    const asc = this.ascensionTier || 0;
+    const health = Math.round(2200 * (1 + asc * 0.45));
+    const damage = Math.round(48 * (1 + asc * 0.3));
+
+    this.enemies.set(id, {
+      id,
+      type: 'boss',
+      bossType: 'xyris',
+      name: asc > 0 ? `[NG+${asc}] Xyris the Void Sovereign` : 'Xyris the Void Sovereign, Eye of the Abyss',
+      x, y, z,
+      health,
+      maxHealth: health,
+      damage,
+      speed: 3.5,
+      state: 'combat',
+      targetId: null,
+      phase: 1,
+      invulnerable: true, // Protected by Void Ward until mirrors align
       cooldown: 0,
       specialTimer: 8.0,
+      channelingAnnihilation: false,
+      channelTimer: 0,
+      stunnedTimer: 0,
+      isAlive: true
+    });
+  }
+
+  spawnBossValerius(x, y, z) {
+    const id = 'boss_valerius';
+    const asc = this.ascensionTier || 0;
+    const health = Math.round(3500 * (1 + asc * 0.45));
+    const damage = Math.round(58 * (1 + asc * 0.3));
+
+    this.enemies.set(id, {
+      id,
+      type: 'boss',
+      bossType: 'valerius',
+      name: asc > 0 ? `[NG+${asc}] Archon Valerius Ascendant` : 'Archon Valerius, Eternal Chronomancer Ascendant',
+      x, y, z,
+      health,
+      maxHealth: health,
+      damage,
+      speed: 3.4,
+      state: 'combat',
+      targetId: null,
+      phase: 1,
+      invulnerable: true, // Temporal rewind shield until keystones disrupted
+      cooldown: 0,
+      specialTimer: 6.0,
+      stunnedTimer: 0,
       isAlive: true
     });
   }
@@ -320,6 +495,34 @@ export class GameState {
     const enemy = this.enemies.get(enemyId);
     if (!enemy || !enemy.isAlive) return;
 
+    // Check boss shields during simultaneous combat puzzles
+    if (enemy.type === 'boss') {
+      if (this.floor === 5 && this.puzzles.floor5?.bossShieldActive) {
+        this.io.to(this.roomId).emit('floating_text', {
+          x: enemy.x, y: enemy.y + 2.5, z: enemy.z,
+          text: 'MOLTEN SHIELD (Charge Crucibles!)',
+          color: '#ff3b30'
+        });
+        return;
+      }
+      if (this.floor === 10 && this.puzzles.floor10?.bossShieldActive) {
+        this.io.to(this.roomId).emit('floating_text', {
+          x: enemy.x, y: enemy.y + 2.5, z: enemy.z,
+          text: 'VOID WARD (Align 4 Mirrors!)',
+          color: '#9333ea'
+        });
+        return;
+      }
+      if (this.floor === 15 && this.puzzles.floor15?.bossShieldActive) {
+        this.io.to(this.roomId).emit('floating_text', {
+          x: enemy.x, y: enemy.y + 2.5, z: enemy.z,
+          text: 'TEMPORAL SHIELD (Disrupt Keystones!)',
+          color: '#00e5ff'
+        });
+        return;
+      }
+    }
+
     if (enemy.invulnerable) {
       this.io.to(this.roomId).emit('floating_text', {
         x: enemy.x,
@@ -377,21 +580,67 @@ export class GameState {
       }
 
       if (enemy.type === 'boss') {
-        this.isVictory = true;
-        this.broadcastStory('Victory! Archon Valerius has fallen. The temporal curse shatters, and the gateway to freedom is opened!');
-        this.io.to(this.roomId).emit('game_victory', {
-          stats: Array.from(this.players.values()).map(p => ({
-            name: p.name,
-            class: p.wizardClass,
-            score: p.score
-          }))
-        });
+        if (this.floor === 15) {
+          this.isVictory = true;
+          this.broadcastStory('Victory! Archon Valerius Ascendant has fallen. The temporal curse shatters, and eternity is restored!');
+          this.io.to(this.roomId).emit('game_victory', {
+            stats: Array.from(this.players.values()).map(p => ({
+              name: p.name,
+              class: p.wizardClass,
+              score: p.score
+            }))
+          });
+        } else if (this.floor === 5) {
+          this.broadcastStory('IGNIS HAS FALLEN! The Molten Gates to Tier 2 (Floor 6: The Smoldering Foundry) have been breached! Step into the portal!');
+          this.io.to(this.roomId).emit('boss_defeated_advancement', {
+            nextFloor: 6,
+            message: 'Tier 1 Conquered! The Alchemical Under-Spire Awaits.'
+          });
+        } else if (this.floor === 10) {
+          this.broadcastStory('XYRIS HAS PERISHED! The Void Nexus dissolves, revealing the star-gate to Tier 3 (Floor 11: The Celestial Pinnacle)!');
+          this.io.to(this.roomId).emit('boss_defeated_advancement', {
+            nextFloor: 11,
+            message: 'Tier 2 Conquered! The Celestial Pinnacle Awaits.'
+          });
+        }
       }
     }
   }
 
-  // Interactive Floor 1 Prism Rotation
+  // Interactive Prism / Mirror Rotation (Floor 1 & Boss Floor 10)
   rotatePrism(prismId) {
+    if (this.floor === 10) {
+      // Floor 10 Boss Xyris 4-Mirror Puzzle
+      const puzzle = this.puzzles.floor10;
+      const mirror = puzzle.mirrors.find(m => m.id === prismId);
+      if (!mirror) return;
+
+      mirror.angle = (mirror.angle + 90) % 360;
+      mirror.isAligned = (mirror.angle === mirror.targetAngle);
+      const allAligned = puzzle.mirrors.every(m => m.isAligned);
+      puzzle.unlocked = allAligned;
+
+      this.io.to(this.roomId).emit('puzzle_update', {
+        floor: 10,
+        type: 'mirror_rotated',
+        prismId,
+        angle: mirror.angle,
+        allAligned
+      });
+
+      if (allAligned) {
+        puzzle.bossShieldActive = false;
+        const boss = this.enemies.get('boss_xyris');
+        if (boss) {
+          boss.invulnerable = false;
+          boss.stunnedTimer = 8.0;
+          this.broadcastStory('PRISMATIC CONVERGENCE! The redirected Aether Beam pierces Xyris\'s Void Eye! Void Annihilation interrupted! HE IS STUNNED!');
+        }
+        this.io.to(this.roomId).emit('boss_shield_broken', { bossId: 'boss_xyris', duration: 8.0 });
+      }
+      return;
+    }
+
     const puzzle = this.puzzles.floor1;
     const prism = puzzle.prisms.find(p => p.id === prismId);
     if (!prism) return;
@@ -416,9 +665,10 @@ export class GameState {
     }
   }
 
-  // Interactive Floor 2 Crucible Imbue
+  // Interactive Crucible Imbue (Floor 2 & Boss Floor 5)
   handleCrucibleInteraction(index, element) {
-    const puzzle = this.puzzles.floor2;
+    const puzzle = (this.floor === 5) ? this.puzzles.floor5 : this.puzzles.floor2;
+    if (!puzzle) return;
     const expected = puzzle.order[puzzle.currentStep];
 
     if (element === expected) {
@@ -426,7 +676,7 @@ export class GameState {
       puzzle.currentStep++;
 
       this.io.to(this.roomId).emit('puzzle_update', {
-        floor: 2,
+        floor: this.floor,
         type: 'crucible_charge',
         index,
         element,
@@ -436,23 +686,36 @@ export class GameState {
 
       if (puzzle.currentStep >= puzzle.order.length) {
         puzzle.unlocked = true;
-        this.broadcastStory('The Crucible harmonizes! The molten elevator gate lowers, granting access to the Astral Pinnacle.');
+
+        if (this.floor === 5) {
+          puzzle.bossShieldActive = false;
+          const boss = this.enemies.get('boss_ignis');
+          if (boss) {
+            boss.invulnerable = false;
+            boss.stunnedTimer = 8.0;
+            this.broadcastStory('THE CRUCIBLE OVERFLOWS! Ignis\'s Molten Aegis has SHATTERED! HE IS STUNNED FOR 8 SECONDS! STRIKE NOW!');
+          }
+          this.io.to(this.roomId).emit('boss_shield_broken', { bossId: 'boss_ignis', duration: 8.0 });
+        } else {
+          this.broadcastStory('The Crucible harmonizes! The molten elevator gate lowers, granting access to the upper levels.');
+        }
       }
     } else {
-      // Mistake! Reset and shock players slightly
+      // Mistake! Reset and warn players
       puzzle.currentStep = 0;
       puzzle.crucibles.forEach(c => c.charged = false);
       this.io.to(this.roomId).emit('puzzle_update', {
-        floor: 2,
+        floor: this.floor,
         type: 'crucible_reset',
         message: 'The elements clash! The crucible resets.'
       });
     }
   }
 
-  // Interactive Floor 3 Keystone Activate
+  // Interactive Keystone Activate (Floor 3 & Boss Floor 15)
   activateKeystone(keystoneId) {
-    const puzzle = this.puzzles.floor3;
+    const puzzle = (this.floor === 15) ? this.puzzles.floor15 : this.puzzles.floor3;
+    if (!puzzle) return;
     const keystone = puzzle.keystones.find(k => k.id === keystoneId);
     if (!keystone || keystone.active) return;
 
@@ -464,12 +727,14 @@ export class GameState {
       const boss = this.enemies.get('boss_valerius');
       if (boss) {
         boss.invulnerable = false;
-        this.broadcastStory('The Astral Keystones have overloaded! Archon Valerius\'s temporal shield has shattered! STRIKE HIM NOW!');
+        boss.stunnedTimer = 6.0;
+        this.broadcastStory('TEMPORAL OVERLOAD! Archon Valerius\'s time-stasis barrier has collapsed! STRIKE HIM NOW!');
       }
+      this.io.to(this.roomId).emit('boss_shield_broken', { bossId: 'boss_valerius', duration: 6.0 });
     }
 
     this.io.to(this.roomId).emit('puzzle_update', {
-      floor: 3,
+      floor: this.floor,
       type: 'keystone_activated',
       keystoneId,
       allActive
@@ -871,6 +1136,12 @@ export class GameState {
   }
 
   updateBossAI(boss, target, dist, deltaTime) {
+    // If stunned from puzzle mechanics, skip AI actions
+    if (boss.stunnedTimer > 0) {
+      boss.stunnedTimer -= deltaTime;
+      return;
+    }
+
     if (boss.specialTimer > 0) boss.specialTimer -= deltaTime;
 
     // Face target
@@ -878,72 +1149,149 @@ export class GameState {
     const dz = target.z - boss.z;
     const angle = Math.atan2(dx, dz);
 
-    if (dist > 6) {
+    if (dist > (boss.bossType === 'ignis' ? 4 : 6)) {
       boss.x += Math.sin(angle) * boss.speed * deltaTime;
       boss.z += Math.cos(angle) * boss.speed * deltaTime;
     }
 
-    // Boss Phase transition based on health
-    const hpRatio = boss.health / boss.maxHealth;
-    if (hpRatio < 0.35 && boss.phase !== 3) {
-      boss.phase = 3;
-      boss.invulnerable = true; // Keystones must be re-aligned in phase 3
-      this.puzzles.floor3.keystones.forEach(k => k.active = false);
-      this.broadcastStory('VALERIUS: "Fools! You cannot defy time itself! The Spire crumbles with you!" Valerius triggers Temporal Collapse!');
-      this.io.to(this.roomId).emit('boss_phase_change', {
-        bossId: boss.id,
-        phase: 3,
-        voiceKey: 'valerius_phase3',
-        title: 'PHASE 3: TEMPORAL COLLAPSE'
-      });
-    } else if (hpRatio < 0.7 && boss.phase === 1) {
-      boss.phase = 2;
-      this.broadcastStory('VALERIUS: "Witness the dilation of centuries!" Valerius warps time in the observatory!');
-      this.io.to(this.roomId).emit('boss_phase_change', {
-        bossId: boss.id,
-        phase: 2,
-        voiceKey: 'valerius_phase2',
-        title: 'PHASE 2: TEMPORAL DILATION'
-      });
-    }
+    // -------------------------------------------------------------------------
+    // BOSS 1: IGNIS THE MOLTEN BEHEMOTH (Floor 5)
+    // -------------------------------------------------------------------------
+    if (boss.bossType === 'ignis') {
+      // Shield regeneration check
+      if (!this.puzzles.floor5.bossShieldActive) {
+        boss.shieldRegenTimer = (boss.shieldRegenTimer || 0) + deltaTime;
+        if (boss.shieldRegenTimer > 18.0) {
+          boss.shieldRegenTimer = 0;
+          this.puzzles.floor5.bossShieldActive = true;
+          this.puzzles.floor5.currentStep = 0;
+          this.puzzles.floor5.crucibles.forEach(c => c.charged = false);
+          this.broadcastStory('IGNIS ROARS! The volcanic core erupts, restoring his Molten Shield! RE-ALIGN THE CRUCIBLES!');
+          this.io.to(this.roomId).emit('boss_special', {
+            bossId: boss.id,
+            ability: 'magma_surge',
+            duration: 2.0
+          });
+        }
+      }
 
-    // Boss special attack logic
-    if (boss.specialTimer <= 0) {
-      boss.specialTimer = boss.phase === 3 ? 5.0 : 7.0;
-
-      if (boss.phase === 1) {
-        // Arcane Missiles barrage
+      if (boss.specialTimer <= 0) {
+        boss.specialTimer = 6.0;
         this.io.to(this.roomId).emit('boss_special', {
           bossId: boss.id,
-          ability: 'arcane_barrage',
-          voiceKey: 'valerius_special_barrage',
+          ability: 'magma_slam',
           targetX: target.x,
           targetZ: target.z,
-          duration: 2.5
-        });
-      } else if (boss.phase === 2) {
-        // Chrono Vortex / Time Slow
-        this.io.to(this.roomId).emit('boss_special', {
-          bossId: boss.id,
-          ability: 'chrono_vortex',
-          x: boss.x,
-          z: boss.z,
-          duration: 4.0
-        });
-      } else if (boss.phase === 3) {
-        // Astral Nova
-        this.io.to(this.roomId).emit('boss_special', {
-          bossId: boss.id,
-          ability: 'astral_nova',
-          voiceKey: 'valerius_special_nova',
-          x: 0,
-          z: 0,
-          duration: 3.0
+          duration: 2.2
         });
       }
     }
 
-    // Basic ranged boss attack
+    // -------------------------------------------------------------------------
+    // BOSS 2: XYRIS THE VOID SOVEREIGN (Floor 10)
+    // -------------------------------------------------------------------------
+    else if (boss.bossType === 'xyris') {
+      // Void Annihilation channel loop
+      if (this.puzzles.floor10.bossShieldActive) {
+        boss.annihilationTimer = (boss.annihilationTimer || 14.0) - deltaTime;
+        if (boss.annihilationTimer <= 0) {
+          // Annihilation detonates!
+          boss.annihilationTimer = 14.0;
+          this.broadcastStory('VOID ANNIHILATION DETONATES! The mirrors were not aligned in time!');
+          for (const p of this.players.values()) {
+            if (p.isAlive) {
+              p.health -= 45;
+              if (p.health <= 0) {
+                p.health = 0;
+                p.isAlive = false;
+                this.io.to(this.roomId).emit('player_died', { playerId: p.id });
+              }
+            }
+          }
+          this.io.to(this.roomId).emit('boss_special', {
+            bossId: boss.id,
+            ability: 'void_cataclysm',
+            duration: 2.0
+          });
+        }
+      }
+
+      if (boss.specialTimer <= 0) {
+        boss.specialTimer = 7.0;
+        this.io.to(this.roomId).emit('boss_special', {
+          bossId: boss.id,
+          ability: 'void_missiles',
+          targetX: target.x,
+          targetZ: target.z,
+          duration: 2.5
+        });
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // BOSS 3: ARCHON VALERIUS ASCENDANT (Floor 15)
+    // -------------------------------------------------------------------------
+    else {
+      // Boss Phase transition based on health
+      const hpRatio = boss.health / boss.maxHealth;
+      if (hpRatio < 0.35 && boss.phase !== 3) {
+        boss.phase = 3;
+        boss.invulnerable = true;
+        this.puzzles.floor15.bossShieldActive = true;
+        this.puzzles.floor15.keystones.forEach(k => k.active = false);
+        this.broadcastStory('VALERIUS: "Fools! You cannot defy time itself! The Spire crumbles with you!" Valerius triggers Temporal Collapse!');
+        this.io.to(this.roomId).emit('boss_phase_change', {
+          bossId: boss.id,
+          phase: 3,
+          voiceKey: 'valerius_phase3',
+          title: 'PHASE 3: TEMPORAL COLLAPSE'
+        });
+      } else if (hpRatio < 0.7 && boss.phase === 1) {
+        boss.phase = 2;
+        this.broadcastStory('VALERIUS: "Witness the dilation of centuries!" Valerius warps time in the observatory!');
+        this.io.to(this.roomId).emit('boss_phase_change', {
+          bossId: boss.id,
+          phase: 2,
+          voiceKey: 'valerius_phase2',
+          title: 'PHASE 2: TEMPORAL DILATION'
+        });
+      }
+
+      // Boss special attack logic
+      if (boss.specialTimer <= 0) {
+        boss.specialTimer = boss.phase === 3 ? 5.0 : 7.0;
+
+        if (boss.phase === 1) {
+          this.io.to(this.roomId).emit('boss_special', {
+            bossId: boss.id,
+            ability: 'arcane_barrage',
+            voiceKey: 'valerius_special_barrage',
+            targetX: target.x,
+            targetZ: target.z,
+            duration: 2.5
+          });
+        } else if (boss.phase === 2) {
+          this.io.to(this.roomId).emit('boss_special', {
+            bossId: boss.id,
+            ability: 'chrono_vortex',
+            x: boss.x,
+            z: boss.z,
+            duration: 4.0
+          });
+        } else if (boss.phase === 3) {
+          this.io.to(this.roomId).emit('boss_special', {
+            bossId: boss.id,
+            ability: 'astral_nova',
+            voiceKey: 'valerius_special_nova',
+            x: 0,
+            z: 0,
+            duration: 3.0
+          });
+        }
+      }
+    }
+
+    // Basic boss attack
     if (boss.cooldown <= 0) {
       boss.cooldown = 2.0;
       target.health -= boss.damage;

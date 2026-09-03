@@ -23,6 +23,14 @@ export class EnemyEntity {
       this.mesh = ModelFactory.createGolemMesh();
     } else if (this.type === 'shade') {
       this.mesh = ModelFactory.createVoidShadeMesh();
+    } else if (this.type === 'boss') {
+      if (data.bossType === 'ignis' || data.id?.includes('ignis')) {
+        this.mesh = ModelFactory.createIgnisColossusMesh();
+      } else if (data.bossType === 'xyris' || data.id?.includes('xyris')) {
+        this.mesh = ModelFactory.createXyrisVoidSovereignMesh();
+      } else {
+        this.mesh = ModelFactory.createBossMesh();
+      }
     } else {
       this.mesh = ModelFactory.createSentinelMesh();
     }

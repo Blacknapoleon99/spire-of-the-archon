@@ -84,24 +84,24 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Puzzles
+  // Puzzles (Floors 1, 2, 3, and Boss Floors 5, 10, 15)
   socket.on('rotate_prism', ({ prismId }) => {
     const room = roomManager.getRoomBySocket(socket);
-    if (room && room.gameState.floor === 1) {
+    if (room && room.gameState) {
       room.gameState.rotatePrism(prismId);
     }
   });
 
   socket.on('interact_crucible', ({ index, element }) => {
     const room = roomManager.getRoomBySocket(socket);
-    if (room && room.gameState.floor === 2) {
+    if (room && room.gameState) {
       room.gameState.handleCrucibleInteraction(index, element);
     }
   });
 
   socket.on('activate_keystone', ({ keystoneId }) => {
     const room = roomManager.getRoomBySocket(socket);
-    if (room && room.gameState.floor === 3) {
+    if (room && room.gameState) {
       room.gameState.activateKeystone(keystoneId);
     }
   });

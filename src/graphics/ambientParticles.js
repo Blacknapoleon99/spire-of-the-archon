@@ -11,13 +11,81 @@ export class AmbientParticles {
     this.destroy();
     this.floorNumber = floorNumber;
 
-    if (floorNumber === 1) {
-      this.initFloor1();
-    } else if (floorNumber === 2) {
-      this.initFloor2();
-    } else if (floorNumber === 3) {
-      this.initFloor3();
+    if (floorNumber === 1) this.initFloor1();
+    else if (floorNumber === 2) this.initFloor2();
+    else if (floorNumber === 3) this.initFloor3();
+    else if (floorNumber === 4) this.initFloorGenericDust(0x8844ff, 0x4422aa, 80); // Mirror Gallery - violet motes
+    else if (floorNumber === 5) this.initFloorEmbers(0xff4400, 0xff2200, 200);     // Boss Ignis - heavy ember storm
+    else if (floorNumber === 6) this.initFloorEmbers(0xff6600, 0xff3300, 140);     // Foundry - forge embers
+    else if (floorNumber === 7) this.initFloorGenericDust(0x00ccff, 0x0088aa, 90); // Golem Lab - cyan sparks
+    else if (floorNumber === 8) this.initFloorGenericDust(0x4488ff, 0x2244cc, 100); // Crystal Caverns - ice motes
+    else if (floorNumber === 9) this.initFloorGenericDust(0x7722ee, 0x330088, 60);  // Void Catwalks - void wisps
+    else if (floorNumber === 10) this.initFloorEmbers(0x9900ff, 0x6600cc, 180);    // Boss Xyris - void corruption
+    else if (floorNumber === 11) this.initFloorGenericDust(0xeeddff, 0xaabbff, 120); // Star Gallery - star motes
+    else if (floorNumber === 12) this.initFloorGenericDust(0xffcc44, 0xdd8800, 60);  // Chronometer - golden sparks
+    else if (floorNumber === 13) this.initFloorGenericDust(0x8899ff, 0x4466dd, 70);  // Sky Promenade - sky motes
+    else if (floorNumber === 14) this.initFloorGenericDust(0xffd700, 0xddaa00, 80);  // Sanctum - sacred light motes
+    else if (floorNumber === 15) this.initFloorEmbers(0xffd700, 0xff8800, 240);     // Boss Valerius - astral storm
+  }
+
+  initFloorGenericDust(colorStr1, colorStr2, count = 80) {
+    const c1 = new THREE.Color(colorStr1);
+    const c2 = new THREE.Color(colorStr2);
+    const particleCount = count;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const velocities = [];
+    const phases = [];
+    const radius = 20;
+
+    for (let i = 0; i < particleCount; i++) {
+      const r = Math.sqrt(Math.random()) * radius;
+      const theta = Math.random() * 2 * Math.PI;
+      positions[i * 3] = r * Math.cos(theta);
+      positions[i * 3 + 1] = Math.random() * 10;
+      positions[i * 3 + 2] = r * Math.sin(theta);
+      velocities.push({ x: (Math.random() - 0.5) * 0.06, y: (Math.random() - 0.5) * 0.06, z: (Math.random() - 0.5) * 0.06 });
+      phases.push(Math.random() * Math.PI * 2);
     }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const texture = this.createCircleTexture(
+      `rgba(${Math.round(c1.r * 255)}, ${Math.round(c1.g * 255)}, ${Math.round(c1.b * 255)}, 1)`,
+      `rgba(${Math.round(c2.r * 255)}, ${Math.round(c2.g * 255)}, ${Math.round(c2.b * 255)}, 0)`
+    );
+    const material = new THREE.PointsMaterial({ size: 0.14, map: texture, transparent: true, opacity: 0.45, color: 0xffffff, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.particleSystem = new THREE.Points(geometry, material);
+    this.particleSystem.userData = { velocities, phases, radius };
+    this.scene.add(this.particleSystem);
+  }
+
+  initFloorEmbers(colorStr1, colorStr2, count = 150) {
+    const c1 = new THREE.Color(colorStr1);
+    const c2 = new THREE.Color(colorStr2);
+    const particleCount = count;
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(particleCount * 3);
+    const phases = [];
+    const radius = 24;
+
+    for (let i = 0; i < particleCount; i++) {
+      const r = Math.sqrt(Math.random()) * radius;
+      const theta = Math.random() * 2 * Math.PI;
+      positions[i * 3] = r * Math.cos(theta);
+      positions[i * 3 + 1] = Math.random() * 16;
+      positions[i * 3 + 2] = r * Math.sin(theta);
+      phases.push(Math.random() * Math.PI * 2);
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const texture = this.createCircleTexture(
+      `rgba(${Math.round(c1.r * 255)}, ${Math.round(c1.g * 255)}, ${Math.round(c1.b * 255)}, 1)`,
+      `rgba(${Math.round(c2.r * 255)}, ${Math.round(c2.g * 255)}, ${Math.round(c2.b * 255)}, 0)`
+    );
+    const material = new THREE.PointsMaterial({ size: 0.25, map: texture, transparent: true, opacity: 0.7, color: 0xffffff, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.particleSystem = new THREE.Points(geometry, material);
+    this.particleSystem.userData = { phases, radius, isEmbers: true };
+    this.scene.add(this.particleSystem);
   }
 
   createCircleTexture(color1, color2) {
@@ -262,7 +330,37 @@ export class AmbientParticles {
         colors[i * 3 + 1] = intensity;
         colors[i * 3 + 2] = intensity;
       }
-      this.particleSystem.geometry.attributes.color.needsUpdate = true;
+       this.particleSystem.geometry.attributes.color.needsUpdate = true;
+    } else if (data.isEmbers) {
+      // Generic rising embers (floors 5, 6, 10, 15)
+      for (let i = 0; i < positions.length / 3; i++) {
+        data.phases[i] += deltaTime * 2;
+        positions[i * 3] += Math.sin(data.phases[i]) * 0.012;
+        positions[i * 3 + 1] += 1.8 * deltaTime;
+        if (positions[i * 3 + 1] > 18) {
+          const r = Math.sqrt(Math.random()) * data.radius;
+          const theta = Math.random() * 2 * Math.PI;
+          positions[i * 3] = r * Math.cos(theta);
+          positions[i * 3 + 1] = 0;
+          positions[i * 3 + 2] = r * Math.sin(theta);
+        }
+      }
+    } else if (data.velocities) {
+      // Generic dust motes (floors 4, 7, 8, 9, 11, 12, 13, 14)
+      for (let i = 0; i < positions.length / 3; i++) {
+        data.phases[i] += deltaTime;
+        positions[i * 3] += data.velocities[i].x * deltaTime + Math.sin(data.phases[i]) * 0.004;
+        positions[i * 3 + 1] += data.velocities[i].y * deltaTime + Math.cos(data.phases[i]) * 0.004;
+        positions[i * 3 + 2] += data.velocities[i].z * deltaTime + Math.sin(data.phases[i] * 0.8) * 0.004;
+        const x = positions[i * 3]; const z = positions[i * 3 + 2];
+        if (x * x + z * z > data.radius * data.radius || positions[i * 3 + 1] < 0 || positions[i * 3 + 1] > 12) {
+          const r = Math.sqrt(Math.random()) * data.radius;
+          const theta = Math.random() * 2 * Math.PI;
+          positions[i * 3] = r * Math.cos(theta);
+          positions[i * 3 + 1] = Math.random() * 10;
+          positions[i * 3 + 2] = r * Math.sin(theta);
+        }
+      }
     }
 
     this.particleSystem.geometry.attributes.position.needsUpdate = true;

@@ -603,6 +603,174 @@ export class ModelFactory {
   }
 
   /**
+   * Floor 5 Boss: Ignis the Molten Behemoth
+   * Towering volcanic colossus with burning magma fissures and Molten Aegis forcefield
+   */
+  static createIgnisColossusMesh() {
+    const group = new THREE.Group();
+    group.name = 'IgnisMoltenBehemoth';
+
+    const obsidianPBR = TextureGenerator.createObsidianRockPBR();
+    const magmaMat = new THREE.MeshStandardMaterial({
+      color: 0xff3700,
+      emissive: 0xff4500,
+      emissiveIntensity: 2.8,
+      roughness: 0.2,
+      metalness: 0.5
+    });
+
+    // Heavy Torso
+    const torsoGeo = new THREE.DodecahedronGeometry(1.6, 0);
+    const torso = new THREE.Mesh(torsoGeo, obsidianPBR.material);
+    torso.position.y = 2.4;
+    torso.scale.set(1.2, 1.4, 1.0);
+    torso.castShadow = true;
+    group.add(torso);
+
+    // Glowing Magma Core inside chest
+    const coreGeo = new THREE.SphereGeometry(0.85, 16, 16);
+    const core = new THREE.Mesh(coreGeo, magmaMat);
+    core.position.set(0, 2.4, 0.35);
+    group.add(core);
+
+    // Massive Boulder Shoulders
+    const shoulderGeo = new THREE.DodecahedronGeometry(0.9, 0);
+    const shoulderL = new THREE.Mesh(shoulderGeo, obsidianPBR.material);
+    shoulderL.position.set(-1.8, 3.2, 0);
+    group.add(shoulderL);
+
+    const shoulderR = new THREE.Mesh(shoulderGeo, obsidianPBR.material);
+    shoulderR.position.set(1.8, 3.2, 0);
+    group.add(shoulderR);
+
+    // Heavy Biped Legs
+    const legGeo = new THREE.BoxGeometry(0.7, 1.6, 0.9);
+    const legL = new THREE.Mesh(legGeo, obsidianPBR.material);
+    legL.position.set(-0.8, 0.8, 0);
+    group.add(legL);
+
+    const legR = new THREE.Mesh(legGeo, obsidianPBR.material);
+    legR.position.set(0.8, 0.8, 0);
+    group.add(legR);
+
+    // Horned Obsidian Crest Head
+    const headGeo = new THREE.ConeGeometry(0.7, 1.1, 5);
+    const head = new THREE.Mesh(headGeo, obsidianPBR.material);
+    head.position.set(0, 3.8, 0.2);
+    head.rotation.x = Math.PI / 6;
+    group.add(head);
+
+    // Burning Eye Slits
+    const eyeGeo = new THREE.BoxGeometry(0.5, 0.08, 0.1);
+    const eyes = new THREE.Mesh(eyeGeo, magmaMat);
+    eyes.position.set(0, 3.65, 0.55);
+    group.add(eyes);
+
+    // Molten Aegis Shield (Toggled by puzzle solve)
+    const shieldGeo = new THREE.IcosahedronGeometry(3.0, 2);
+    const shieldMat = new THREE.MeshStandardMaterial({
+      color: 0xff4500,
+      emissive: 0xff2200,
+      emissiveIntensity: 2.2,
+      transparent: true,
+      opacity: 0.4,
+      wireframe: true
+    });
+    const shield = new THREE.Mesh(shieldGeo, shieldMat);
+    shield.position.y = 2.4;
+    group.add(shield);
+
+    const light = new THREE.PointLight(0xff4500, 3.5, 18);
+    light.position.set(0, 2.5, 0);
+    group.add(light);
+
+    group.userData = { torso, core, shield, light, bossType: 'ignis' };
+    return group;
+  }
+
+  /**
+   * Floor 10 Boss: Xyris the Void Sovereign
+   * Levitating multi-winged abyss entity with central void eye and Void Ward sphere
+   */
+  static createXyrisVoidSovereignMesh() {
+    const group = new THREE.Group();
+    group.name = 'XyrisVoidSovereign';
+
+    const voidMat = new THREE.MeshStandardMaterial({
+      color: 0x050510,
+      roughness: 0.1,
+      metalness: 0.9,
+      emissive: 0x3b0764,
+      emissiveIntensity: 1.5
+    });
+
+    const eyeMat = new THREE.MeshStandardMaterial({
+      color: 0xa855f7,
+      emissive: 0xd946ef,
+      emissiveIntensity: 3.5,
+      roughness: 0.1
+    });
+
+    // Central Levitation Body
+    const bodyGeo = new THREE.OctahedronGeometry(1.2, 0);
+    const body = new THREE.Mesh(bodyGeo, voidMat);
+    body.position.y = 2.8;
+    body.scale.set(0.9, 1.6, 0.9);
+    group.add(body);
+
+    // Central Glowing Void Eye
+    const eyeGeo = new THREE.OctahedronGeometry(0.55, 0);
+    const eye = new THREE.Mesh(eyeGeo, eyeMat);
+    eye.position.set(0, 2.8, 0.5);
+    eye.rotation.z = Math.PI / 4;
+    group.add(eye);
+
+    // 4 Ethereal Floating Void Wings
+    const wingGeo = new THREE.ConeGeometry(0.35, 2.8, 4);
+    for (let w = 0; w < 4; w++) {
+      const wing = new THREE.Mesh(wingGeo, voidMat);
+      const angle = (w / 4) * Math.PI * 2;
+      wing.position.set(Math.cos(angle) * 1.8, 3.0 + Math.sin(angle) * 0.4, Math.sin(angle) * 1.8);
+      wing.rotation.z = (w % 2 === 0 ? 1 : -1) * (Math.PI / 3);
+      group.add(wing);
+    }
+
+    // 2 Orbiting Singularity Rings
+    const ringGeo1 = new THREE.TorusGeometry(1.9, 0.04, 8, 32);
+    const ring1 = new THREE.Mesh(ringGeo1, eyeMat);
+    ring1.position.y = 2.8;
+    ring1.rotation.x = Math.PI / 3;
+    group.add(ring1);
+
+    const ringGeo2 = new THREE.TorusGeometry(2.3, 0.03, 8, 32);
+    const ring2 = new THREE.Mesh(ringGeo2, eyeMat);
+    ring2.position.y = 2.8;
+    ring2.rotation.y = Math.PI / 4;
+    group.add(ring2);
+
+    // Void Ward Shield Sphere
+    const shieldGeo = new THREE.IcosahedronGeometry(2.8, 2);
+    const shieldMat = new THREE.MeshStandardMaterial({
+      color: 0x9333ea,
+      emissive: 0x7c3aed,
+      emissiveIntensity: 2.2,
+      transparent: true,
+      opacity: 0.35,
+      wireframe: true
+    });
+    const shield = new THREE.Mesh(shieldGeo, shieldMat);
+    shield.position.y = 2.8;
+    group.add(shield);
+
+    const light = new THREE.PointLight(0xa855f7, 3.5, 16);
+    light.position.set(0, 2.8, 0);
+    group.add(light);
+
+    group.userData = { body, eye, ring1, ring2, shield, light, bossType: 'xyris' };
+    return group;
+  }
+
+  /**
    * Scribe's Grand Lectern with Open Leather-Bound Tome
    */
   static createLecternMesh() {
@@ -1300,11 +1468,13 @@ export class ModelFactory {
         dummy.add(this.createWizardMesh(cls));
       });
 
-      // Preload 3 Enemy types & Boss
+      // Preload 3 Enemy types & 3 Boss Types (Floors 5, 10, 15)
       dummy.add(this.createSentinelMesh());
       dummy.add(this.createGolemMesh());
       dummy.add(this.createVoidShadeMesh());
       dummy.add(this.createBossMesh());
+      dummy.add(this.createIgnisColossusMesh());
+      dummy.add(this.createXyrisVoidSovereignMesh());
 
       // Preload NPCs & Interactables
       dummy.add(this.createScribeGhostMesh());
