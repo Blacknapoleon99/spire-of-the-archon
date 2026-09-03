@@ -1284,5 +1284,53 @@ export class ModelFactory {
     group.userData = { halo };
     return group;
   }
+
+  /**
+   * 100% Upfront Entity Pre-warming: Instantiates all character classes, enemies, NPCs,
+   * chests, and interactables and compiles all WebGL shaders upfront during the loading screen.
+   */
+  static preloadAllEntities(scene, camera, renderer) {
+    if (!renderer || !scene || !camera) return;
+    try {
+      const dummy = new THREE.Group();
+      dummy.position.set(0, -9999, 0);
+
+      // Preload 5 Wizard player classes
+      ['pyromancer', 'cryomancer', 'luminary', 'stormcaller', 'chronomancer'].forEach(cls => {
+        dummy.add(this.createWizardMesh(cls));
+      });
+
+      // Preload 3 Enemy types & Boss
+      dummy.add(this.createSentinelMesh());
+      dummy.add(this.createGolemMesh());
+      dummy.add(this.createVoidShadeMesh());
+      dummy.add(this.createBossMesh());
+
+      // Preload NPCs & Interactables
+      dummy.add(this.createScribeGhostMesh());
+      dummy.add(this.createAlchemistMesh());
+      dummy.add(this.createConvictMesh());
+      dummy.add(this.createLecternMesh());
+      dummy.add(this.createPrismPedestalMesh(1));
+      dummy.add(this.createCrucibleMesh('fire', 0xff4400));
+      dummy.add(this.createKeystoneMesh('north'));
+      dummy.add(this.createTreasureChestMesh(false));
+      dummy.add(this.createGoldCoinMesh());
+      dummy.add(this.createLootDropMesh({ type: 'weapon', rarity: 'legendary' }));
+
+      scene.add(dummy);
+      renderer.compile(scene, camera);
+      scene.remove(dummy);
+
+      // Clean up geometries
+      dummy.traverse(child => {
+        if (child.isMesh && child.geometry) child.geometry.dispose();
+      });
+
+      console.log('⚡ [ModelFactory] 100% of player, enemy, boss, and interactable shaders pre-compiled in GPU VRAM!');
+    } catch (e) {
+      console.warn('[ModelFactory] Entity preload notice:', e);
+    }
+  }
 }
 

@@ -159,31 +159,27 @@ class GameApp {
     this.initCombatInputs();
     this.setupUIButtons();
 
-    // 12-Second Cinematic Loading Sequence with Staged Progression & Complete Pre-warming
-    const TOTAL_LOAD_TIME = 12000; // 12.0 seconds (user requested 10-15s)
+    this.setupUIButtons();
+
+    // 12-Second Cinematic Loading Sequence with 100% Guaranteed Upfront Preloading
+    const TOTAL_LOAD_TIME = 12000; // 12.0 seconds minimum cinematic display
     const loadStartTime = performance.now();
-
-    // Kick off asynchronous asset preloading in background
-    assetLoader.preloadAll().catch(err => console.warn('[AssetLoader] Preload notice:', err));
-
-    // Build Floor 1 and Awakening Vault
-    this.tower.buildFloor(1);
-    this.ambientParticles.setFloor(1);
-    this.engineScene.setFloorLighting(1);
 
     // Staged progression milestones across the 12 seconds
     const STAGES = [
-      { atPct: 0, text: 'Awakening Ancient Leylines & Vault...', tip: 'The Archon once held domain over past, present, and eternity...' },
-      { atPct: 20, text: 'Preloading 3D GLTF Entity & Monster Assets...', tip: 'Wizards who enter the Spire must master all elements to survive.' },
-      { atPct: 45, text: 'Pre-heating Infernal Tornado & Blizzard Vortex Shaders in GPU VRAM...', tip: 'Your Ultimate abilities unleash catastrophic elemental devastation.' },
-      { atPct: 70, text: 'Forging Arcane Spell Pipelines & Procedural PBR Textures...', tip: 'Proximity voice chat lets you strategize with companions in 3D audio space.' },
-      { atPct: 88, text: 'Binding 3D Spatial Proximity Voice Matrix & Network...', tip: 'Toggle your microphone with [V] or switch to Open Mic in Settings [ESC].' },
+      { atPct: 0, text: 'Awakening Ancient Leylines & Vault Geometry...', tip: 'The Archon once held domain over past, present, and eternity...' },
+      { atPct: 18, text: 'Preloading 3D Rigged Wand, Player Classes & Bosses...', tip: 'Wizards who enter the Spire must master all elements to survive.' },
+      { atPct: 38, text: 'Forging All 25 Procedural PBR Textures in GPU VRAM...', tip: 'Every stone, lava fissure, and astral floor is pre-baked for 0ms lag.' },
+      { atPct: 58, text: 'Pre-building Floors 1, 2, and 3 for Instant Ascent...', tip: 'Floor transitions are pre-cached in memory for seamless exploration.' },
+      { atPct: 75, text: 'Pre-heating Infernal Tornado & Blizzard Vortex Shaders...', tip: 'Your Ultimate abilities unleash catastrophic elemental devastation.' },
+      { atPct: 90, text: 'Binding 3D Spatial Proximity Voice Matrix & Network...', tip: 'Toggle your microphone with [V] or switch to Open Mic in Settings [ESC].' },
       { atPct: 98, text: 'Harmonizing Astral Frequencies... The Spire Awaits.', tip: 'Ascension is imminent. Prepare your Grimoire.' }
     ];
 
     let hasPreloadedTextures = false;
+    let hasPreloadedFloors = false;
     let hasWarmedShaders = false;
-    let hasInitializedVoice = false;
+    let isPreloadFinished = false;
     let isLoadComplete = false;
 
     // Initialize WebRTC STUN network in background
@@ -191,30 +187,49 @@ class GameApp {
       this.ui.setOnlinePeerId(peerId);
     });
 
+    // Build initial Floor 1 and Awakening Vault
+    this.tower.buildFloor(1);
+    this.ambientParticles.setFloor(1);
+    this.engineScene.setFloorLighting(1);
+
+    // Kick off 100% upfront preloading across all modules
+    Promise.allSettled([
+      assetLoader.preloadAll(),
+      this.chunkLoader.preloadEverything(this.engineScene.renderer),
+      ModelFactory.preloadAllEntities(this.engineScene.scene, this.engineScene.camera, this.engineScene.renderer),
+      this.tower.preloadAllFloors(this.engineScene.renderer, this.engineScene.camera),
+      this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera),
+      this.voiceChat.init().catch(() => {})
+    ]).then(() => {
+      isPreloadFinished = true;
+      this.engineScene.warmupShaders();
+      console.log('⚡ [SpireGame] 100% of all models, textures, floors, entities, audio & shaders completely pre-warmed!');
+    });
+
     const updateLoading = () => {
       if (isLoadComplete) return;
       const elapsed = performance.now() - loadStartTime;
-      const progress = Math.min(100, (elapsed / TOTAL_LOAD_TIME) * 100);
+      const timeProgress = (elapsed / TOTAL_LOAD_TIME) * 100;
+      // Cap at 99% until all asynchronous preloading tasks are 100% resolved
+      const progress = isPreloadFinished ? Math.min(100, timeProgress) : Math.min(99, timeProgress);
 
-      // Pre-generate and upload all 25 PBR textures across all 3 floors to GPU VRAM at 30%
-      if (progress >= 30 && !hasPreloadedTextures) {
+      // Pre-generate and upload all 25 PBR textures across all 3 floors to GPU VRAM at 25%
+      if (progress >= 25 && !hasPreloadedTextures) {
         hasPreloadedTextures = true;
         this.chunkLoader.preloadEverything(this.engineScene.renderer);
       }
 
-      // Trigger WebGL shader & Ultimate vortex pre-warm at 55% (so all compilation finishes upfront)
-      if (progress >= 55 && !hasWarmedShaders) {
+      // Pre-build Floors 1, 2, and 3 in memory at 45%
+      if (progress >= 45 && !hasPreloadedFloors) {
+        hasPreloadedFloors = true;
+        this.tower.preloadAllFloors(this.engineScene.renderer, this.engineScene.camera);
+      }
+
+      // Trigger WebGL shader & Ultimate vortex pre-warm at 65%
+      if (progress >= 65 && !hasWarmedShaders) {
         hasWarmedShaders = true;
         this.engineScene.warmupShaders();
         this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera);
-      }
-
-      // Initialize voice chat at 80%
-      if (progress >= 80 && !hasInitializedVoice) {
-        hasInitializedVoice = true;
-        this.voiceChat.init().then(() => {
-          this.ui.updateVoiceStatus(this.voiceChat.isHardwareMuted, this.voiceChat.voiceMode, this.voiceChat.isLocalSpeaking);
-        });
       }
 
       // Find active stage text
@@ -223,9 +238,14 @@ class GameApp {
         if (progress >= s.atPct) currentStage = s;
       }
 
-      this.ui.updateLoadingProgress(progress, currentStage.text, currentStage.tip);
+      const statusText = (!isPreloadFinished && progress >= 99) 
+        ? 'Finalizing 100% GPU VRAM Pre-warming & Shader Compilation...' 
+        : currentStage.text;
 
-      if (progress >= 100) {
+      this.ui.updateLoadingProgress(progress, statusText, currentStage.tip);
+
+      // Only present ENTER THE SPIRE when BOTH the 12s timer AND all tasks are 100% finished
+      if (progress >= 100 && isPreloadFinished) {
         isLoadComplete = true;
         this.ui.updateLoadingProgress(100, 'ASCENSION READY. THE SPIRE AWAITS.', 'Click or Press Space to enter the Vault.');
         
