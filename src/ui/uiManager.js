@@ -61,7 +61,14 @@ export class UIManager {
     // Loading Screen
     this.loadingScreen = document.getElementById('loading-screen');
     this.loadingBarFill = document.getElementById('loading-bar-fill');
+    this.loadingPercentText = document.getElementById('loading-percent-text');
+    this.loadingStatusText = document.getElementById('loading-status-text');
     this.loadingTip = document.getElementById('loading-tip');
+    this.initLoadingEmbersCanvas();
+
+    // Voice Chat HUD
+    this.voiceHudIndicator = document.getElementById('voice-hud-indicator');
+    this.voiceStatusText = document.getElementById('voice-status-text');
 
     this.crosshair = document.getElementById('crosshair');
     this.hitmarker = document.getElementById('hitmarker');
@@ -457,11 +464,84 @@ export class UIManager {
   /** Loading Screen Control */
   updateLoadingProgress(pct, tip) {
     if (this.loadingBarFill) this.loadingBarFill.style.width = `${pct}%`;
+    if (this.loadingPercentText) this.loadingPercentText.textContent = `${Math.round(pct)}%`;
+    if (this.loadingStatusText && tip) this.loadingStatusText.textContent = tip.toUpperCase();
     if (tip && this.loadingTip) this.loadingTip.textContent = tip;
   }
 
   hideLoadingScreen() {
     if (this.loadingScreen) this.loadingScreen.classList.add('hidden');
+    if (this._embersAnimationId) {
+      cancelAnimationFrame(this._embersAnimationId);
+      this._embersAnimationId = null;
+    }
+  }
+
+  initLoadingEmbersCanvas() {
+    const canvas = document.getElementById('loading-embers-canvas');
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const resize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    resize();
+    window.addEventListener('resize', resize);
+
+    const embers = [];
+    for (let i = 0; i < 48; i++) {
+      embers.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        radius: Math.random() * 2.2 + 0.8,
+        vy: -(Math.random() * 1.4 + 0.4),
+        vx: (Math.random() - 0.5) * 0.6,
+        alpha: Math.random() * 0.7 + 0.3,
+        color: Math.random() > 0.4 ? '#ffd700' : '#bf5af2'
+      });
+    }
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (const e of embers) {
+        e.y += e.vy;
+        e.x += e.vx + Math.sin(e.y * 0.02) * 0.3;
+        if (e.y < -10) {
+          e.y = canvas.height + 10;
+          e.x = Math.random() * canvas.width;
+        }
+        ctx.save();
+        ctx.globalAlpha = e.alpha * (0.6 + Math.sin(e.y * 0.05) * 0.4);
+        ctx.fillStyle = e.color;
+        ctx.shadowColor = e.color;
+        ctx.shadowBlur = 8;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+      this._embersAnimationId = requestAnimationFrame(animate);
+    };
+    animate();
+  }
+
+  /** Proximity Voice Chat HUD Controls */
+  registerVoiceToggle(fn) {
+    this._onVoiceToggle = fn;
+    this.voiceHudIndicator?.addEventListener('click', () => {
+      if (this._onVoiceToggle) this._onVoiceToggle();
+    });
+  }
+
+  updateVoiceStatus(isActive) {
+    if (!this.voiceHudIndicator || !this.voiceStatusText) return;
+    if (isActive) {
+      this.voiceHudIndicator.classList.remove('muted');
+      this.voiceStatusText.textContent = 'PROXIMITY MIC: ON [V]';
+    } else {
+      this.voiceHudIndicator.classList.add('muted');
+      this.voiceStatusText.textContent = 'PROXIMITY MIC: MUTED [V]';
+    }
   }
 
   /** Register callback to re-engage pointer lock upon closing any menu */

@@ -15,10 +15,99 @@ export class ParticleSystem {
     this.vortices = [];
     this.physicalCoins = [];
     this.decalManager = new DecalManager(this.scene);
+
+    // Pre-allocated static geometries for zero-allocation combat casting
+    this.geoCore = new THREE.SphereGeometry(0.42, 10, 10);
+    this.geoTorusFire = new THREE.TorusGeometry(0.68, 0.08, 8, 16);
+    this.geoFlameWave = new THREE.TorusGeometry(1.1, 0.2, 8, 20, Math.PI);
+    this.geoEmberBolt = new THREE.ConeGeometry(0.16, 0.7, 8);
+    this.geoIceLance = new THREE.ConeGeometry(0.24, 1.8, 6);
+    this.geoIceShard = new THREE.OctahedronGeometry(0.12, 0);
+    this.geoFrostDiamond = new THREE.OctahedronGeometry(0.26, 0);
+    this.geoSparkSphere = new THREE.SphereGeometry(0.32, 8, 8);
+    this.geoHaloRing = new THREE.RingGeometry(0.45, 0.58, 16);
+    this.geoChronoDodeca = new THREE.DodecahedronGeometry(0.28, 0);
+    this.geoChronoRing = new THREE.TorusGeometry(0.5, 0.03, 8, 16);
+    this.geoMuzzleSpark = new THREE.TetrahedronGeometry(0.06, 0);
+    this.geoTrailOcta = new THREE.OctahedronGeometry(0.065, 0);
+    this.geoBurstDodeca = new THREE.DodecahedronGeometry(0.12, 0);
+    this.geoBurstOcta = new THREE.OctahedronGeometry(0.15, 0);
+    this.geoShockwaveRing = new THREE.RingGeometry(0.2, 0.6, 24);
+
+    // Pre-allocated shared materials
+    this.matFireCore = new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff4500, emissiveIntensity: 2.2, roughness: 0.2 });
+    this.matFireRing = new THREE.MeshBasicMaterial({ color: 0xffd600 });
+    this.matFireWave = new THREE.MeshBasicMaterial({ color: 0xff3d00, side: THREE.DoubleSide });
+    this.matFireBolt = new THREE.MeshBasicMaterial({ color: 0xff5722 });
+    this.matIceLance = new THREE.MeshStandardMaterial({ color: 0x00e5ff, emissive: 0x0091ea, emissiveIntensity: 1.8, roughness: 0.1, metalness: 0.3 });
+    this.matFrostDiamond = new THREE.MeshStandardMaterial({ color: 0x80d8ff, emissive: 0x00e5ff, emissiveIntensity: 1.2, roughness: 0.1 });
+    this.matLightCore = new THREE.MeshBasicMaterial({ color: 0xffea00 });
+    this.matLightHalo = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
+    this.matChronoCore = new THREE.MeshStandardMaterial({ color: 0xbf5af2, emissive: 0xaa00ff, emissiveIntensity: 2.0 });
+    this.matChronoRing = new THREE.MeshBasicMaterial({ color: 0xd500f9 });
+
+    this.trailWhiteMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.trailMats = {
+      fire: new THREE.MeshBasicMaterial({ color: 0xff5722 }),
+      frost: new THREE.MeshBasicMaterial({ color: 0x00e5ff }),
+      light: new THREE.MeshBasicMaterial({ color: 0xffd700 }),
+      chrono: new THREE.MeshBasicMaterial({ color: 0xbf5af2 }),
+      storm: new THREE.MeshBasicMaterial({ color: 0xffd60a })
+    };
+
+    this.muzzleSparkMaterials = {
+      fire: new THREE.MeshBasicMaterial({ color: 0xff3d00 }),
+      frost: new THREE.MeshBasicMaterial({ color: 0x00e5ff }),
+      light: new THREE.MeshBasicMaterial({ color: 0xffd700 }),
+      chrono: new THREE.MeshBasicMaterial({ color: 0xbf5af2 })
+    };
+
+    this.elementColors = {
+      fire: 0xff3d00,
+      frost: 0x00e5ff,
+      light: 0xffd700,
+      chrono: 0xbf5af2,
+      storm: 0xffd60a
+    };
+
+    // Persistent Muzzle Flash Light (Never added/removed from scene to prevent WebGL shader recompilation)
+    this.muzzleFlashLight = new THREE.PointLight(0xff5722, 0, 8);
+    this.scene.add(this.muzzleFlashLight);
+    this.muzzleFlashTimer = 0;
+
+    // Persistent Projectile Lights Pool
+    this.projectileLightsPool = [
+      new THREE.PointLight(0xff5722, 0, 9),
+      new THREE.PointLight(0x00e5ff, 0, 9),
+      new THREE.PointLight(0xffd700, 0, 9),
+      new THREE.PointLight(0xbf5af2, 0, 9)
+    ];
+    this.projectileLightsPool.forEach(l => this.scene.add(l));
+    this.activeProjectileLights = new Set();
+  }
+
+  acquireProjectileLight(colorHex, pos) {
+    for (const light of this.projectileLightsPool) {
+      if (!this.activeProjectileLights.has(light)) {
+        this.activeProjectileLights.add(light);
+        light.color.setHex(colorHex);
+        light.position.copy(pos);
+        light.intensity = 3.2;
+        return light;
+      }
+    }
+    return null;
+  }
+
+  releaseProjectileLight(light) {
+    if (light) {
+      light.intensity = 0;
+      this.activeProjectileLights.delete(light);
+    }
   }
 
   /**
-   * Spawns an animated magical projectile with unique 3D geometries per spell
+   * Spawns an animated magical projectile with unique 3D geometries per spell (zero dynamic allocations)
    */
   spawnProjectile(origin, direction, spellType, element, speed = 24, maxDist = 35) {
     const group = new THREE.Group();
@@ -28,127 +117,74 @@ export class ParticleSystem {
     const normDir = direction.clone().normalize();
     const rotQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normDir);
 
-    let matColor = 0xff3b30;
-    let lightColor = 0xff5722;
+    let lightColor = this.elementColors[element] || 0xff5722;
 
     if (element === 'fire') {
-      lightColor = 0xff5722;
       if (spellType === 'skill1') {
         // Fireball: Molten core with orbiting flaming spark ring & coronal spikes
-        matColor = 0xff4500;
-        const coreGeo = new THREE.SphereGeometry(0.42, 12, 12);
-        const coreMat = new THREE.MeshStandardMaterial({
-          color: 0xff2200,
-          emissive: 0xff4500,
-          emissiveIntensity: 2.2,
-          roughness: 0.2
-        });
-        const core = new THREE.Mesh(coreGeo, coreMat);
+        const core = new THREE.Mesh(this.geoCore, this.matFireCore);
         group.add(core);
 
-        const ringGeo = new THREE.TorusGeometry(0.68, 0.08, 8, 20);
-        const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd600 });
-        const ring = new THREE.Mesh(ringGeo, ringMat);
+        const ring = new THREE.Mesh(this.geoTorusFire, this.matFireRing);
         ring.rotation.x = Math.PI / 2;
         group.add(ring);
         group.userData = { ring };
       } else if (spellType === 'skill2') {
         // Flame Wave: Horizontal crescent arc of fire
-        matColor = 0xff6d00;
-        const waveGeo = new THREE.TorusGeometry(1.1, 0.2, 8, 24, Math.PI);
-        const waveMat = new THREE.MeshBasicMaterial({ color: 0xff3d00, side: THREE.DoubleSide });
-        const wave = new THREE.Mesh(waveGeo, waveMat);
+        const wave = new THREE.Mesh(this.geoFlameWave, this.matFireWave);
         wave.quaternion.copy(rotQuat);
         wave.rotation.z = Math.PI / 2;
         group.add(wave);
       } else {
         // Basic Ember Bolt
-        const boltGeo = new THREE.ConeGeometry(0.16, 0.7, 8);
-        const boltMat = new THREE.MeshBasicMaterial({ color: 0xff5722 });
-        const bolt = new THREE.Mesh(boltGeo, boltMat);
+        const bolt = new THREE.Mesh(this.geoEmberBolt, this.matFireBolt);
         bolt.quaternion.copy(rotQuat);
         group.add(bolt);
       }
     } else if (element === 'frost') {
-      lightColor = 0x00e5ff;
       if (spellType === 'skill1') {
         // Ice Lance: Elongated crystalline spear
-        matColor = 0x80d8ff;
-        const lanceGeo = new THREE.ConeGeometry(0.24, 1.8, 6);
-        const lanceMat = new THREE.MeshStandardMaterial({
-          color: 0x00e5ff,
-          emissive: 0x0091ea,
-          emissiveIntensity: 1.8,
-          roughness: 0.1,
-          metalness: 0.3
-        });
-        const lance = new THREE.Mesh(lanceGeo, lanceMat);
+        const lance = new THREE.Mesh(this.geoIceLance, this.matIceLance);
         lance.quaternion.copy(rotQuat);
         group.add(lance);
 
         // Orbiting ice shards
         for (let s = 0; s < 3; s++) {
-          const sGeo = new THREE.OctahedronGeometry(0.12, 0);
-          const sMesh = new THREE.Mesh(sGeo, lanceMat);
+          const sMesh = new THREE.Mesh(this.geoIceShard, this.matIceLance);
           sMesh.position.set(Math.cos(s * 2.1) * 0.4, 0, Math.sin(s * 2.1) * 0.4);
           group.add(sMesh);
         }
       } else {
         // Frost Shard: Faceted crystal diamond
-        matColor = 0x00e5ff;
-        const shardGeo = new THREE.OctahedronGeometry(0.26, 0);
-        const shardMat = new THREE.MeshStandardMaterial({
-          color: 0x80d8ff,
-          emissive: 0x00e5ff,
-          emissiveIntensity: 1.2,
-          roughness: 0.1
-        });
-        const shard = new THREE.Mesh(shardGeo, shardMat);
+        const shard = new THREE.Mesh(this.geoFrostDiamond, this.matFrostDiamond);
         group.add(shard);
       }
     } else if (element === 'light') {
-      lightColor = 0xffd700;
-      matColor = 0xfff9c4;
-      const sparkGeo = new THREE.SphereGeometry(0.32, 10, 10);
-      const sparkMat = new THREE.MeshBasicMaterial({ color: 0xffea00 });
-      const spark = new THREE.Mesh(sparkGeo, sparkMat);
+      const spark = new THREE.Mesh(this.geoSparkSphere, this.matLightCore);
       group.add(spark);
 
       // Holy halo
-      const haloGeo = new THREE.RingGeometry(0.45, 0.58, 20);
-      const haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide });
-      const halo = new THREE.Mesh(haloGeo, haloMat);
+      const halo = new THREE.Mesh(this.geoHaloRing, this.matLightHalo);
       halo.quaternion.copy(rotQuat);
       group.add(halo);
     } else {
       // Chrono
-      lightColor = 0xbf5af2;
-      matColor = 0xd500f9;
-      const chronoGeo = new THREE.DodecahedronGeometry(0.28, 0);
-      const chronoMat = new THREE.MeshStandardMaterial({
-        color: 0xbf5af2,
-        emissive: 0xaa00ff,
-        emissiveIntensity: 2.0
-      });
-      const chrono = new THREE.Mesh(chronoGeo, chronoMat);
+      const chrono = new THREE.Mesh(this.geoChronoDodeca, this.matChronoCore);
       group.add(chrono);
 
       // Orbiting time ring
-      const tRingGeo = new THREE.TorusGeometry(0.5, 0.03, 8, 16);
-      const tRingMat = new THREE.MeshBasicMaterial({ color: 0xd500f9 });
-      const tRing = new THREE.Mesh(tRingGeo, tRingMat);
+      const tRing = new THREE.Mesh(this.geoChronoRing, this.matChronoRing);
       group.add(tRing);
       group.userData = { ring: tRing };
     }
 
-    const light = new THREE.PointLight(lightColor, 3.2, 9);
-    group.add(light);
+    const pooledLight = this.acquireProjectileLight(lightColor, group.position);
 
     this.scene.add(group);
 
     this.projectiles.push({
       mesh: group,
-      light,
+      light: pooledLight,
       baseIntensity: 3.2,
       direction: normDir,
       speed,
@@ -617,10 +653,10 @@ export class ParticleSystem {
     // Trigger expanding ground shockwave ring
     this.spawnImpactShockwave(pos, color, 3.6, 0.45);
 
-    const geo1 = new THREE.DodecahedronGeometry(0.12, 0);
-    const geo2 = new THREE.OctahedronGeometry(0.15, 0);
-    const mat1 = new THREE.MeshBasicMaterial({ color });
-    const mat2 = new THREE.MeshBasicMaterial({ color: secondaryColor });
+    const geo1 = this.geoBurstDodeca;
+    const geo2 = this.geoBurstOcta;
+    const mat1 = this.trailMats[element] || this.trailMats.fire;
+    const mat2 = this.trailWhiteMat;
 
     for (let i = 0; i < count; i++) {
       const isSecondary = i % 3 === 0;
@@ -840,32 +876,23 @@ export class ParticleSystem {
   }
 
   /**
-   * Spawns a high-energy elemental muzzle flash flare at the casting point
+   * Spawns a high-energy elemental muzzle flash flare at the casting point (zero-allocation)
    */
   spawnMuzzleFlash(origin, direction, element = 'fire') {
-    const colors = {
-      fire: 0xff3d00,
-      frost: 0x00e5ff,
-      light: 0xffd700,
-      chrono: 0xbf5af2
-    };
-    const col = colors[element] || 0xff5722;
+    const col = this.elementColors[element] || 0xff5722;
 
-    // Momentary light flare
-    const flare = new THREE.PointLight(col, 4.5, 7);
-    flare.position.copy(origin);
-    this.scene.add(flare);
-    setTimeout(() => {
-      this.scene.remove(flare);
-    }, 85);
+    // Modulate persistent light without mutating scene graph
+    this.muzzleFlashLight.color.setHex(col);
+    this.muzzleFlashLight.position.copy(origin);
+    this.muzzleFlashLight.intensity = 4.5;
+    this.muzzleFlashTimer = 0.085;
 
-    // Radiating spark burst along direction
+    // Radiating spark burst along direction using shared geo & mat
     const normDir = direction ? direction.clone().normalize() : new THREE.Vector3(0, 0, -1);
-    const geo = new THREE.TetrahedronGeometry(0.06, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: col });
+    const mat = this.muzzleSparkMaterials[element] || this.muzzleSparkMaterials.fire;
 
     for (let s = 0; s < 8; s++) {
-      const spark = new THREE.Mesh(geo, mat);
+      const spark = new THREE.Mesh(this.geoMuzzleSpark, mat);
       spark.position.copy(origin);
       this.scene.add(spark);
 
@@ -887,6 +914,14 @@ export class ParticleSystem {
    * Main Frame Tick for Particles, Projectiles, Shockwaves, Physical Coins, and Vortexes
    */
   update(deltaTime, onProjectileHit = null, onVortexTick = null, playerPos = null) {
+    // 0. Tick Persistent Muzzle Flash Light
+    if (this.muzzleFlashTimer > 0) {
+      this.muzzleFlashTimer -= deltaTime;
+      if (this.muzzleFlashTimer <= 0) {
+        this.muzzleFlashLight.intensity = 0;
+      }
+    }
+
     // 1. Update Projectiles
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
@@ -894,8 +929,9 @@ export class ParticleSystem {
       p.mesh.position.addScaledVector(p.direction, moveStep);
       p.distanceTraveled += moveStep;
 
-      // Dynamic light flicker and pulse during flight
+      // Update pooled light position and pulse
       if (p.light) {
+        p.light.position.copy(p.mesh.position);
         p.light.intensity = p.baseIntensity * (0.85 + Math.sin(p.distanceTraveled * 12) * 0.25);
       }
 
@@ -904,20 +940,14 @@ export class ParticleSystem {
         p.mesh.userData.ring.rotation.z += deltaTime * 14;
       }
 
-      // Emit trailing spark showers
+      // Emit trailing spark showers using pre-allocated geometries & materials
       p.trailTimer = (p.trailTimer || 0) + deltaTime;
       if (p.trailTimer > 0.035) {
         p.trailTimer = 0;
-        let trailCol = 0xff5722;
-        if (p.element === 'frost') trailCol = 0x00e5ff;
-        if (p.element === 'light') trailCol = 0xffd700;
-        if (p.element === 'chrono') trailCol = 0xbf5af2;
-        if (p.element === 'storm') trailCol = 0xffd60a;
+        const trailMat = this.trailMats[p.element] || this.trailMats.fire;
 
         for (let t = 0; t < 2; t++) {
-          const trailGeo = new THREE.OctahedronGeometry(0.065, 0);
-          const trailMat = new THREE.MeshBasicMaterial({ color: t === 1 ? 0xffffff : trailCol });
-          const trailPart = new THREE.Mesh(trailGeo, trailMat);
+          const trailPart = new THREE.Mesh(this.geoTrailOcta, t === 1 ? this.trailWhiteMat : trailMat);
           trailPart.position.copy(p.mesh.position);
           trailPart.position.x += (Math.random() - 0.5) * 0.15;
           trailPart.position.y += (Math.random() - 0.5) * 0.15;
@@ -941,6 +971,7 @@ export class ParticleSystem {
       // Check collision callback
       if (onProjectileHit && onProjectileHit(p)) {
         this.spawnBurst(p.mesh.position, p.element, 28);
+        if (p.light) this.releaseProjectileLight(p.light);
         this.scene.remove(p.mesh);
         this.projectiles.splice(i, 1);
         continue;
@@ -948,6 +979,7 @@ export class ParticleSystem {
 
       if (p.distanceTraveled >= p.maxDist) {
         this.spawnBurst(p.mesh.position, p.element, 16);
+        if (p.light) this.releaseProjectileLight(p.light);
         this.scene.remove(p.mesh);
         this.projectiles.splice(i, 1);
       }

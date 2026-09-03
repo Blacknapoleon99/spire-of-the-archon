@@ -10,13 +10,37 @@
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=MedievalSharp&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <!-- LOADING SCREEN -->
+  <!-- CINEMATIC ANIMATED LOADING SCREEN -->
   <div id="loading-screen" class="loading-screen">
+    <div class="loading-bg-wrapper">
+      <img src="/images/spire_cinematic_bg.jpg" class="loading-cinematic-img" alt="Spire of the Archon" />
+      <div class="loading-vignette"></div>
+      <canvas id="loading-embers-canvas" class="loading-embers-canvas"></canvas>
+    </div>
     <div class="loading-content">
-      <div class="loading-sigil"></div>
-      <h1 class="loading-title">THE SPIRE OF THE ARCHON</h1>
-      <div class="loading-bar-track"><div id="loading-bar-fill" class="loading-bar-fill"></div></div>
-      <div id="loading-tip" class="loading-tip">Generating the Spire...</div>
+      <div class="loading-sigil-wrapper">
+        <div class="loading-sigil-outer"></div>
+        <div class="loading-sigil-inner"></div>
+        <div class="loading-sigil-rune">ᛟ</div>
+      </div>
+      <div class="loading-title-container">
+        <span class="loading-subtitle">CHRONICLES OF AETHELGARD</span>
+        <h1 class="loading-title">THE SPIRE OF THE ARCHON</h1>
+      </div>
+      <div class="loading-bar-container">
+        <div class="loading-bar-track">
+          <div id="loading-bar-fill" class="loading-bar-fill"></div>
+          <div class="loading-bar-glow"></div>
+        </div>
+        <div class="loading-bar-meta">
+          <span id="loading-status-text">WEAVING THE ARCANE MATRIX...</span>
+          <span id="loading-percent-text">0%</span>
+        </div>
+      </div>
+      <div class="loading-tip-card">
+        <span class="tip-label">ARCHMAGE LORE</span>
+        <div id="loading-tip" class="loading-tip">The Archon once held domain over past, present, and eternity...</div>
+      </div>
     </div>
   </div>
 
@@ -84,8 +108,12 @@
       </div>
     </div>
 
-    <!-- ===== TOP-RIGHT: Party Frames ===== -->
+    <!-- ===== TOP-RIGHT: Party Frames & Voice Chat ===== -->
     <div class="hud-top-right">
+      <div id="voice-hud-indicator" class="voice-hud-badge" title="Press [V] to Toggle Microphone">
+        <span class="voice-icon">🎙️</span>
+        <span id="voice-status-text">PROXIMITY MIC: ON [V]</span>
+      </div>
       <div class="party-container" id="party-hud-list"></div>
     </div>
 

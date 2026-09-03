@@ -105,6 +105,7 @@ export class WebRTCNetwork {
     conn.on('open', () => {
       this.connections.set(conn.peer, conn);
       console.log(`[Online WebRTC] Remote peer ${conn.peer} connected directly via P2P!`);
+      this.trigger('peer_connected', conn.peer);
     });
 
     conn.on('data', (packet) => {
@@ -129,6 +130,7 @@ export class WebRTCNetwork {
     conn.on('open', () => {
       this.hostConnection = conn;
       console.log('[Online WebRTC] Direct P2P connection to Host established!');
+      this.trigger('peer_connected', hostPeerId);
       conn.send({
         type: 'join_request',
         player: playerData

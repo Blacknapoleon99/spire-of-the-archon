@@ -29,6 +29,7 @@ import { voiceEngine } from './engine/voiceNarration.js';
 import { achievementSystem } from './systems/achievementSystem.js';
 import { storyLoreManager } from './systems/storyLore.js';
 import { assetLoader } from './graphics/assetLoader.js';
+import { VoiceChatSystem } from './systems/voiceChatSystem.js';
 
 /** Loading screen lore tips */
 const LOADING_TIPS = [
@@ -40,6 +41,8 @@ const LOADING_TIPS = [
   'Press J to open your Quest Journal and track all objectives.',
   'Co-op quizzes award Talent Points when answered correctly.',
   'Legendary items glow with a golden pillar of light when dropped.',
+  'Proximity voice chat lets you talk with nearby wizards — press [V] to toggle mute.',
+  'Inspect ancient lecterns to uncover forbidden Archon spell formulae.'
 ];
 
 class GameApp {
@@ -55,6 +58,17 @@ class GameApp {
     this.ui.getChatCoordinates = () => (this.localPlayer ? { x: this.localPlayer.position.x, y: this.localPlayer.position.y, z: this.localPlayer.position.z } : null);
     this.progression = new ProgressionSystem();
     this.tutorial = new TutorialSystem();
+
+    // Studio 3D Spatial Proximity Voice Chat
+    this.voiceChat = new VoiceChatSystem(onlineNetwork, this.engineScene.scene, this.engineScene.camera);
+    this.voiceChat.onPeerSpeakingChange = (peerId, isSpeaking) => {
+      const player = this.players.get(peerId);
+      if (player) player.setSpeaking(isSpeaking);
+    };
+    this.ui.registerVoiceToggle(() => {
+      const isMuted = this.voiceChat.toggleMute();
+      this.ui.updateVoiceStatus(!isMuted);
+    });
 
     // RPG Inventory & Grimoire
     this.inventory = new InventorySystem(this.engineScene.scene);
@@ -129,6 +143,9 @@ class GameApp {
     this.engineScene.setFloorLighting(1);
     this.ui.updateLoadingProgress(60, 'Weaving the arcane wards...');
 
+    // Pre-warm WebGL shaders and materials during loading screen to eliminate combat stutter
+    this.engineScene.warmupShaders();
+
     // Guarantee loading screen ALWAYS hides within 1.8s even if network handshake is slow
     let isLoaded = false;
     const finishLoading = () => {
@@ -139,6 +156,11 @@ class GameApp {
       // Start background progressive lazy-loading of Floor 2 & 3
       this.chunkLoader.startBackgroundPreload();
       soundEngine.startMusic('archives');
+
+      // Initialize Studio Proximity Voice Chat
+      this.voiceChat.init().then(() => {
+        this.ui.updateVoiceStatus(!this.voiceChat.isMuted);
+      });
     };
 
     const loadSafetyTimer = setTimeout(finishLoading, 1800);
@@ -169,7 +191,7 @@ class GameApp {
       this.grimoireUI.toggle();
     });
 
-    // Keyboard shortcuts for modals
+    // Keyboard shortcuts for modals & Voice Chat Mute
     window.addEventListener('keydown', (e) => {
       if (!this.isGameActive || document.activeElement.tagName === 'INPUT') return;
 
@@ -181,11 +203,18 @@ class GameApp {
         this.grimoireUI.toggle();
       } else if (e.code === 'KeyJ') {
         this.questJournalUI.toggle();
+      } else if (e.code === 'KeyV') {
+        const isMuted = this.voiceChat.toggleMute();
+        this.ui.updateVoiceStatus(!isMuted);
       }
     });
   }
 
   initNetworkListeners() {
+    onlineNetwork.on('peer_connected', (peerId) => {
+      this.voiceChat.callPeer(peerId);
+    });
+
     onlineNetwork.on('room_created', (data) => {
       this.ui.showRoomWaiting(data.roomId, true, [data.player]);
     });
@@ -204,6 +233,7 @@ class GameApp {
     });
 
     onlineNetwork.on('player_left', (data) => {
+      this.voiceChat.unregisterRemoteStream(data.socketId);
       const entity = this.players.get(data.socketId);
       if (entity) {
         entity.destroy();
@@ -722,6 +752,9 @@ class GameApp {
         this.tryDash();
       } else if (e.code === 'KeyF') {
         this.tryInteract();
+      } else if (e.code === 'KeyV') {
+        const isMuted = this.voiceChat.toggleMute();
+        this.ui.updateVoiceStatus(!isMuted);
       }
     });
   }
@@ -1038,6 +1071,11 @@ class GameApp {
 
     if (this.isGameActive && this.localPlayer) {
       this.gameTime += deltaTime;
+
+      // Update 3D Proximity Voice Chat spatial panning and distance rolloff
+      if (this.voiceChat) {
+        this.voiceChat.update(this.localPlayer.position, this.players);
+      }
 
       // Tutorial: journal tip after 30s
       if (this.gameTime > 30) this.tutorial.tryShowTip('journal');

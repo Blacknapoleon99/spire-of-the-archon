@@ -96,6 +96,46 @@ export class PlayerEntity {
     return sprite;
   }
 
+  setSpeaking(isSpeaking) {
+    if (this._isSpeaking === isSpeaking) return;
+    this._isSpeaking = isSpeaking;
+    if (isSpeaking) {
+      if (!this.speakingBadge) {
+        this.speakingBadge = this.createSpeakingBadge();
+        this.mesh.add(this.speakingBadge);
+      }
+      this.speakingBadge.visible = true;
+    } else if (this.speakingBadge) {
+      this.speakingBadge.visible = false;
+    }
+  }
+
+  createSpeakingBadge() {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#00e676';
+    ctx.shadowColor = '#00e676';
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(32, 32, 24, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.font = '26px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🎙️', 32, 34);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    const mat = new THREE.SpriteMaterial({ map: texture, depthTest: false });
+    const sprite = new THREE.Sprite(mat);
+    sprite.position.set(0, 3.4, 0);
+    sprite.scale.set(0.6, 0.6, 1);
+    return sprite;
+  }
+
   showSpeechBubble(message) {
     if (this.speechBubble) {
       this.mesh.remove(this.speechBubble);

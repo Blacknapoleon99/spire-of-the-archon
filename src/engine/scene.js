@@ -353,6 +353,17 @@ export class EngineScene {
     }
   }
 
+  warmupShaders() {
+    if (this.renderer && this.scene && this.camera) {
+      try {
+        this.renderer.compile(this.scene, this.camera);
+        console.log('[EngineScene] WebGL shaders pre-warmed & pre-compiled successfully.');
+      } catch (e) {
+        console.warn('[EngineScene] Shader pre-warming skipped:', e);
+      }
+    }
+  }
+
   render() {
     if (this.composer) {
       this.composer.render();
