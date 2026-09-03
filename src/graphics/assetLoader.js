@@ -55,6 +55,31 @@ export class AssetLoader {
     return null;
   }
 
+  loadGLTFRaw(url) {
+    return new Promise((resolve, reject) => {
+      this.loader.load(
+        url,
+        (gltf) => {
+          gltf.scene.traverse((child) => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+              if (child.material) {
+                child.material.side = THREE.FrontSide;
+              }
+            }
+          });
+          resolve(gltf);
+        },
+        undefined,
+        (err) => {
+          console.warn(`[AssetLoader] Could not load raw ${url}:`, err);
+          reject(err);
+        }
+      );
+    });
+  }
+
   preloadFloor1() {
     const floor1Urls = [
       '/models/sorcerer.glb',

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TextureGenerator } from './textureGenerator.js';
+import { assetLoader } from './assetLoader.js';
 
 /**
  * High-Fidelity First-Person Sorcerer Viewmodel (Anatomical Hands & Ornate Staff)
@@ -19,6 +20,19 @@ export class FPViewmodel {
     this.lookSwayX = 0;
     this.lookSwayY = 0;
     this.verticalBob = 0;
+
+    // 3D Rigged Animated Viewmodel State
+    this.hasRiggedModel = false;
+    this.mixer = null;
+    this.actions = {};
+    this.currentAction = null;
+
+    this.riggedGroup = new THREE.Group();
+    this.riggedGroup.visible = false;
+    this.group.add(this.riggedGroup);
+
+    this.proceduralGroup = new THREE.Group();
+    this.group.add(this.proceduralGroup);
 
     this.initViewmodel();
   }
@@ -298,7 +312,7 @@ export class FPViewmodel {
     this.staffGroup.add(this.staffLight);
 
     this.rightArmGroup.add(this.staffGroup);
-    this.group.add(this.rightArmGroup);
+    this.proceduralGroup.add(this.rightArmGroup);
 
     // ==========================================
     // LEFT HAND (SOMATIC SPELL-WEAVING)
@@ -458,11 +472,118 @@ export class FPViewmodel {
     this.leftHand.add(this.grimoireGroup);
 
     this.leftArmGroup.add(this.leftHand);
-    this.group.add(this.leftArmGroup);
+    this.proceduralGroup.add(this.leftArmGroup);
+
+    // Asynchronously load the 3D local rigged viewmodel & wand
+    this.loadRiggedModel(colorConfig);
+  }
+
+  loadRiggedModel(colorConfig) {
+    assetLoader.loadGLTFRaw('/models/fp_viewmodel_wand.glb')
+      .then((gltf) => {
+        const model = gltf.scene;
+        // Position and scale first-person viewmodel in front of camera
+        model.scale.set(0.68, 0.68, 0.68);
+        model.position.set(0.04, -0.28, -0.32);
+
+        // Customize materials and glowing crystal / runes
+        model.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+            if (child.name.includes('Crystal') || child.name.includes('Gem') || child.name.includes('Shard') || child.name.includes('Rune')) {
+              child.material = child.material.clone();
+              child.material.emissive = new THREE.Color(colorConfig.light);
+              child.material.emissiveIntensity = 4.2;
+              child.material.color = new THREE.Color(colorConfig.color);
+            }
+          }
+        });
+
+        // Wand Tip Effect: Add High-Intensity Elemental Point Light
+        let wandTip = model.getObjectByName('FocusCrystal') || model.getObjectByName('WandShaft') || model;
+        const wandLight = new THREE.PointLight(colorConfig.light, 3.4, 4.5);
+        wandTip.add(wandLight);
+        this.riggedWandLight = wandLight;
+
+        // Wand Tip Effect: Swirling Corona Aura Mesh
+        const auraGeo = new THREE.SphereGeometry(0.065, 14, 12);
+        const auraMat = new THREE.MeshBasicMaterial({
+          color: colorConfig.light,
+          transparent: true,
+          opacity: 0.65,
+          blending: THREE.AdditiveBlending,
+          wireframe: true
+        });
+        const auraMesh = new THREE.Mesh(auraGeo, auraMat);
+        wandTip.add(auraMesh);
+        this.riggedWandAura = auraMesh;
+
+        // Wand Tip Effect: Orbiting Elemental Sparkles
+        const sparkCount = 24;
+        const sparkGeo = new THREE.BufferGeometry();
+        const sparkPos = new Float32Array(sparkCount * 3);
+        for (let i = 0; i < sparkCount; i++) {
+          const theta = (i / sparkCount) * Math.PI * 2;
+          const rad = 0.05 + Math.random() * 0.04;
+          sparkPos[i * 3] = Math.cos(theta) * rad;
+          sparkPos[i * 3 + 1] = (Math.random() - 0.5) * 0.06;
+          sparkPos[i * 3 + 2] = Math.sin(theta) * rad;
+        }
+        sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
+        const sparkMat = new THREE.PointsMaterial({
+          color: colorConfig.light,
+          size: 0.024,
+          transparent: true,
+          opacity: 0.9,
+          blending: THREE.AdditiveBlending
+        });
+        const sparkPoints = new THREE.Points(sparkGeo, sparkMat);
+        wandTip.add(sparkPoints);
+        this.riggedWandSparks = sparkPoints;
+
+        // Setup Skeletal Animation Mixer
+        this.mixer = new THREE.AnimationMixer(model);
+        this.actions = {};
+        if (gltf.animations && gltf.animations.length > 0) {
+          gltf.animations.forEach((clip) => {
+            const act = this.mixer.clipAction(clip);
+            this.actions[clip.name] = act;
+          });
+          if (this.actions['Idle']) {
+            this.currentAction = this.actions['Idle'];
+            this.currentAction.play();
+          }
+        }
+
+        this.riggedGroup.add(model);
+        this.riggedGroup.visible = true;
+        this.hasRiggedModel = true;
+
+        // Hide procedural fallback viewmodel
+        if (this.proceduralGroup) {
+          this.proceduralGroup.visible = false;
+        }
+      })
+      .catch((err) => {
+        console.warn('[FPViewmodel] Could not load rigged 3D viewmodel, using procedural PBR fallback:', err);
+      });
   }
 
   triggerCast(slot = 'basic', intensity = 1.0) {
     this.currentSlot = slot;
+
+    // Trigger rigged 3D skeletal animation
+    if (this.hasRiggedModel && this.actions && this.actions['Cast_Basic']) {
+      const cast = this.actions['Cast_Basic'];
+      cast.reset();
+      cast.setLoop(THREE.LoopOnce);
+      cast.clampWhenFinished = false;
+      cast.play();
+    }
+    if (this.riggedWandLight) this.riggedWandLight.intensity = 6.8 * intensity;
+    if (this.riggedWandAura) this.riggedWandAura.scale.set(1.6, 1.6, 1.6);
+
     if (slot === 'ult') {
       this.recoil = 0.26 * intensity;
       this.castGesture = 1.8;
@@ -537,6 +658,57 @@ export class FPViewmodel {
       // Natural Lissajous breathing curve
       swayX = Math.sin(this.time * 1.8) * 0.009;
       swayY = Math.sin(this.time * 3.6) * 0.007;
+    }
+
+    // ==========================================
+    // UPDATE RIGGED 3D VIEWMODEL (MIXER & FX)
+    // ==========================================
+    if (this.mixer) {
+      this.mixer.update(deltaTime);
+
+      // Blend between Idle and Walk animations smoothly
+      const isCasting = this.actions['Cast_Basic'] && this.actions['Cast_Basic'].isRunning();
+      if (!isCasting) {
+        if (isMoving) {
+          if (this.actions['Walk'] && this.currentAction !== this.actions['Walk']) {
+            this.actions['Walk'].reset().fadeIn(0.22).play();
+            if (this.currentAction) this.currentAction.fadeOut(0.22);
+            this.currentAction = this.actions['Walk'];
+          }
+        } else {
+          if (this.actions['Idle'] && this.currentAction !== this.actions['Idle']) {
+            this.actions['Idle'].reset().fadeIn(0.22).play();
+            if (this.currentAction) this.currentAction.fadeOut(0.22);
+            this.currentAction = this.actions['Idle'];
+          }
+        }
+      }
+    }
+
+    // Rigged Model First-Person Transforms (Sway, Recoil, Jump Bob)
+    if (this.riggedGroup && this.hasRiggedModel) {
+      this.riggedGroup.position.set(
+        0.04 + swayX * 0.75 + this.lookSwayX,
+        -0.28 - swayY * 0.75 + this.lookSwayY + this.verticalBob,
+        -0.32 + this.recoil * 0.5
+      );
+      this.riggedGroup.rotation.x = this.lookSwayY * 1.3 - this.recoil * 0.7;
+      this.riggedGroup.rotation.y = -this.lookSwayX * 1.6;
+
+      // Wand Tip FX: Spinning Corona Aura, Sparkle Field, and PointLight
+      if (this.riggedWandAura) {
+        this.riggedWandAura.rotation.y += deltaTime * 4.2;
+        this.riggedWandAura.rotation.z += deltaTime * 2.8;
+        const pulse = 1.0 + Math.sin(this.time * 6.5) * 0.15 + (this.castGesture || 0) * 0.45;
+        this.riggedWandAura.scale.lerp(new THREE.Vector3(pulse, pulse, pulse), Math.min(1.0, deltaTime * 6));
+      }
+      if (this.riggedWandSparks) {
+        this.riggedWandSparks.rotation.y -= deltaTime * 3.6;
+        this.riggedWandSparks.rotation.x += deltaTime * 1.8;
+      }
+      if (this.riggedWandLight) {
+        this.riggedWandLight.intensity = THREE.MathUtils.lerp(this.riggedWandLight.intensity, 3.4, deltaTime * 5);
+      }
     }
 
     // Decay recoil and cast gesture smoothly
