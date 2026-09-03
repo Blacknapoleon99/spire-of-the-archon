@@ -777,6 +777,12 @@ export class ParticleSystem {
     // Trigger expanding ground shockwave ring
     this.spawnImpactShockwave(pos, color, 3.6, 0.45);
 
+    // Safety particle pool cap to prevent frame drops in intense combat
+    while (this.particles.length > 80) {
+      const old = this.particles.shift();
+      if (old && old.mesh) this.scene.remove(old.mesh);
+    }
+
     const geo1 = this.geoBurstDodeca;
     const geo2 = this.geoBurstOcta;
     const mat1 = this.trailMats[element] || this.trailMats.fire;

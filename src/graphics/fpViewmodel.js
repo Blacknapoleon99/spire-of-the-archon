@@ -573,10 +573,12 @@ export class FPViewmodel {
         this.riggedGroup.visible = true;
         this.hasRiggedModel = true;
 
-        // Hide procedural fallback viewmodel
+        // Hide procedural fallback viewmodel and disable dormant procedural lights
         if (this.proceduralGroup) {
           this.proceduralGroup.visible = false;
         }
+        if (this.staffLight) this.staffLight.intensity = 0;
+        if (this.leftHandLight) this.leftHandLight.intensity = 0;
       })
       .catch((err) => {
         console.warn('[FPViewmodel] Could not load rigged 3D viewmodel, using procedural PBR fallback:', err);
@@ -713,7 +715,7 @@ export class FPViewmodel {
         this.riggedWandAura.rotation.y += deltaTime * 4.2;
         this.riggedWandAura.rotation.z += deltaTime * 2.8;
         const pulse = 1.0 + Math.sin(this.time * 6.5) * 0.15 + (this.castGesture || 0) * 0.45;
-        this.riggedWandAura.scale.lerp(new THREE.Vector3(pulse, pulse, pulse), Math.min(1.0, deltaTime * 6));
+        this.riggedWandAura.scale.set(pulse, pulse, pulse);
       }
       if (this.riggedWandSparks) {
         this.riggedWandSparks.rotation.y -= deltaTime * 3.6;
@@ -722,35 +724,109 @@ export class FPViewmodel {
       if (this.riggedWandLight) {
         this.riggedWandLight.intensity = THREE.MathUtils.lerp(this.riggedWandLight.intensity, 3.4, deltaTime * 5);
       }
-    }
+    } else {
+      // Procedural Viewmodel updates (only when 3D rigged model is not active)
+      if (this.crystal) {
+        this.crystal.material.emissiveIntensity = THREE.MathUtils.lerp(this.crystal.material.emissiveIntensity, 2.2, deltaTime * 6);
+      }
+      if (this.staffLight) {
+        this.staffLight.intensity = THREE.MathUtils.lerp(this.staffLight.intensity, 2.8, deltaTime * 6);
+      }
+      if (this.leftHandLight) {
+        this.leftHandLight.intensity = THREE.MathUtils.lerp(this.leftHandLight.intensity, 1.4, deltaTime * 5);
+      }
 
-    // Decay recoil and cast gesture smoothly
-    if (this.recoil > 0) {
-      this.recoil = Math.max(0, this.recoil - deltaTime * 0.95);
-    }
-    if (this.castGesture > 0) {
-      this.castGesture = Math.max(0, this.castGesture - deltaTime * 2.6);
-    }
+      // Update Right Arm / Staff with sway, recoil, mouse inertia, and jump bob
+      this.rightArmGroup.position.set(
+        0.36 + swayX + this.lookSwayX,
+        -0.32 - swayY - this.recoil * 0.5 + this.lookSwayY + this.verticalBob,
+        -0.55 + this.recoil
+      );
+      this.staffGroup.rotation.x = -0.22 - this.recoil * 1.6 + this.lookSwayY * 1.6;
+      this.staffGroup.rotation.z = -0.14 - this.lookSwayX * 2.2;
 
-    // Restore crystal and light intensity smoothly
-    if (this.crystal) {
-      this.crystal.material.emissiveIntensity = THREE.MathUtils.lerp(this.crystal.material.emissiveIntensity, 2.2, deltaTime * 6);
-    }
-    if (this.staffLight) {
-      this.staffLight.intensity = THREE.MathUtils.lerp(this.staffLight.intensity, 2.8, deltaTime * 6);
-    }
-    if (this.leftHandLight) {
-      this.leftHandLight.intensity = THREE.MathUtils.lerp(this.leftHandLight.intensity, 1.4, deltaTime * 5);
-    }
+      // Rotate and pulse staff crystal and aura
+      if (this.crystal) {
+        this.crystal.rotation.y += deltaTime * 3.2;
+        this.crystal.rotation.z += deltaTime * 1.6;
+      }
+      if (this.crystalAura) {
+        this.crystalAura.rotation.y -= deltaTime * 3.8;
+        this.crystalAura.rotation.x += deltaTime * 2.4;
+        const auraPulse = 1.0 + Math.sin(this.time * 4.5) * 0.14 + this.castGesture * 0.5;
+        this.crystalAura.scale.set(auraPulse, auraPulse, auraPulse);
+      }
 
-    // Update Right Arm / Staff with sway, recoil, mouse inertia, and jump bob
-    this.rightArmGroup.position.set(
-      0.36 + swayX + this.lookSwayX,
-      -0.32 - swayY - this.recoil * 0.5 + this.lookSwayY + this.verticalBob,
-      -0.55 + this.recoil
-    );
-    this.staffGroup.rotation.x = -0.22 - this.recoil * 1.6 + this.lookSwayY * 1.6;
-    this.staffGroup.rotation.z = -0.14 - this.lookSwayX * 2.2;
+      // Class specific accessory rotations
+      if (this.chronoRing) {
+        this.chronoRing.rotation.z += deltaTime * 4.2;
+      }
+      if (this.chronoRing2) {
+        this.chronoRing2.rotation.y -= deltaTime * 3.5;
+      }
+      if (this.haloMesh) {
+        this.haloMesh.rotation.z += deltaTime * 1.8;
+      }
+
+      // Rotate orbiting shards and elemental sparks around crystal
+      if (this.orbitShards) {
+        this.orbitShards.forEach((shard, i) => {
+          const speed = i % 2 === 0 ? 3.8 : -3.0;
+          const theta = this.time * speed + (i * Math.PI * 2) / this.orbitShards.length;
+          const rad = i % 2 === 0 ? 0.18 : 0.14;
+          shard.position.set(
+            Math.cos(theta) * rad,
+            1.27 + Math.sin(theta * 2 + i) * 0.05,
+            -1.11 + Math.sin(theta) * rad
+          );
+          shard.rotation.x += deltaTime * 6;
+          shard.rotation.y += deltaTime * 5;
+        });
+      }
+
+      // Levitating Grimoire floating oscillation, page fluttering & glyph rotation
+      if (this.grimoireGroup) {
+        this.grimoireGroup.position.y = 0.08 + Math.sin(this.time * 2.4) * 0.014;
+        this.grimoireGroup.rotation.y = Math.sin(this.time * 1.6) * 0.09;
+        if (this.pageLeft && this.pageRight) {
+          const flutter = Math.sin(this.time * 8.0) * (0.04 + this.castGesture * 0.14);
+          this.pageLeft.rotation.z = 0.12 + flutter;
+          this.pageRight.rotation.z = -0.12 - flutter;
+        }
+        if (this.grimoireGlyph) {
+          this.grimoireGlyph.rotation.z += deltaTime * 2.8;
+          const gScale = 1.0 + Math.sin(this.time * 3.0) * 0.16 + this.castGesture * 0.35;
+          this.grimoireGlyph.scale.set(gScale, gScale, gScale);
+        }
+      }
+
+      // Update Left Somatic Hand with casting thrust and jump bob
+      const thrust = this.castGesture * 0.18;
+      this.leftArmGroup.position.set(
+        -0.35 - swayX - this.lookSwayX * 0.85 + thrust * 0.45,
+        -0.34 - swayY - this.lookSwayY * 0.85 + thrust * 0.85 + this.verticalBob,
+        -0.5 - thrust * 1.4
+      );
+      this.leftHand.rotation.x = this.castGesture * 0.9;
+
+      // Spin somatic rune rings and core
+      if (this.leftRuneRing) {
+        this.leftRuneRing.rotation.z += deltaTime * 5.0;
+        const runeScale = 1.0 + this.castGesture * 0.5;
+        this.leftRuneRing.scale.set(runeScale, runeScale, runeScale);
+      }
+      if (this.leftOuterRune) {
+        this.leftOuterRune.rotation.z -= deltaTime * 3.4;
+        const outerScale = 1.0 + this.castGesture * 0.7;
+        this.leftOuterRune.scale.set(outerScale, outerScale, outerScale);
+      }
+      if (this.palmCore) {
+        this.palmCore.rotation.x += deltaTime * 4.0;
+        this.palmCore.rotation.y += deltaTime * 3.0;
+        const coreScale = 1.0 + this.castGesture * 0.8;
+        this.palmCore.scale.set(coreScale, coreScale, coreScale);
+      }
+    }
 
     // Rotate and pulse staff crystal and aura
     if (this.crystal) {

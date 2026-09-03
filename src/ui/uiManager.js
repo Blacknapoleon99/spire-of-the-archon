@@ -452,6 +452,29 @@ export class UIManager {
       }
     }
 
+    // Graphics Quality Selector (Performance / Balanced / Ultra)
+    const btnGfxPerf = document.getElementById('btn-gfx-perf');
+    const btnGfxBal = document.getElementById('btn-gfx-balanced');
+    const btnGfxUltra = document.getElementById('btn-gfx-ultra');
+
+    if (btnGfxPerf && btnGfxBal && btnGfxUltra) {
+      const applyGfxPills = (quality) => {
+        this.settings.graphicsQuality = quality;
+        btnGfxPerf.classList.toggle('active', quality === 'performance');
+        btnGfxBal.classList.toggle('active', quality === 'balanced');
+        btnGfxUltra.classList.toggle('active', quality === 'ultra');
+        this.saveSettings();
+        if (this._onGraphicsQualityChange) this._onGraphicsQualityChange(quality);
+      };
+
+      btnGfxPerf.addEventListener('click', () => applyGfxPills('performance'));
+      btnGfxBal.addEventListener('click', () => applyGfxPills('balanced'));
+      btnGfxUltra.addEventListener('click', () => applyGfxPills('ultra'));
+
+      const currentQ = this.settings.graphicsQuality || 'balanced';
+      applyGfxPills(currentQ);
+    }
+
     // Toggles
     const fpsToggle = document.getElementById('setting-show-fps');
     if (fpsToggle) {
@@ -488,6 +511,9 @@ export class UIManager {
 
   /** Register an external toggle callback (e.g., for QuestJournalUI) */
   registerQuestJournalToggle(fn) { this._questJournalToggle = fn; }
+
+  /** Register Graphics Quality change listener */
+  onGraphicsQualityChange(callback) { this._onGraphicsQualityChange = callback; }
 
   /** Loading Screen Control */
   updateLoadingProgress(pct, statusText, loreTip = null) {

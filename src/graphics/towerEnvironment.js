@@ -182,7 +182,8 @@ export class TowerEnvironment {
       shelf.rotation.y = -angle + Math.PI / 2;
       this.roomGroup.add(shelf);
 
-      const torch = this.createTorch();
+      const includeLight = (i % 3 === 0);
+      const torch = this.createTorch(includeLight);
       torch.position.set(Math.cos(angle) * 21.2, 4.2, Math.sin(angle) * 21.2);
       torch.rotation.y = -angle - Math.PI / 2;
       this.roomGroup.add(torch);
@@ -390,12 +391,12 @@ export class TowerEnvironment {
     vaultGroup.add(archLintel);
 
     // Archway threshold torches
-    this.createVaultTorch(-2.6, 3.2, 18.6, 0xffb74d, vaultGroup);
-    this.createVaultTorch(2.6, 3.2, 18.6, 0xffb74d, vaultGroup);
+    this.createVaultTorch(-2.6, 3.2, 18.6, 0xffb74d, vaultGroup, true);
+    this.createVaultTorch(2.6, 3.2, 18.6, 0xffb74d, vaultGroup, false);
 
     // Torches illuminating the Runic Tablet on the South Wall
-    this.createVaultTorch(-6.2, 3.8, 35.2, 0xff9800, vaultGroup);
-    this.createVaultTorch(6.2, 3.8, 35.2, 0xff9800, vaultGroup);
+    this.createVaultTorch(-6.2, 3.8, 35.2, 0xff9800, vaultGroup, true);
+    this.createVaultTorch(6.2, 3.8, 35.2, 0xff9800, vaultGroup, false);
 
     // 8. Awakening Stone Cot with Broken Ethereal Shackles (Where the wizard awoke)
     const cotGroup = new THREE.Group();
@@ -765,7 +766,7 @@ export class TowerEnvironment {
     return true;
   }
 
-  createVaultTorch(x, y, z, colorHex, parentGroup) {
+  createVaultTorch(x, y, z, colorHex, parentGroup, includeLight = false) {
     const bracketGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.4, 8);
     const metalMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.3 });
     const bracket = new THREE.Mesh(bracketGeo, metalMat);
@@ -776,21 +777,23 @@ export class TowerEnvironment {
     const headMat = new THREE.MeshStandardMaterial({
       color: colorHex,
       emissive: colorHex,
-      emissiveIntensity: 1.6
+      emissiveIntensity: 1.8
     });
     const head = new THREE.Mesh(headGeo, headMat);
     head.position.set(x, y + 0.2, z);
     parentGroup.add(head);
 
-    const light = new THREE.PointLight(colorHex, 1.6, 7);
-    light.position.set(x, y + 0.25, z);
-    parentGroup.add(light);
+    if (includeLight) {
+      const light = new THREE.PointLight(colorHex, 1.4, 8);
+      light.position.set(x, y + 0.25, z);
+      parentGroup.add(light);
 
-    this.animatedProps.push({
-      type: 'torch',
-      light,
-      baseIntensity: 1.6
-    });
+      this.animatedProps.push({
+        type: 'torch',
+        light,
+        baseIntensity: 1.4
+      });
+    }
   }
 
   // =========================================================================
@@ -1387,7 +1390,7 @@ export class TowerEnvironment {
   /**
    * 3D Wrought-Iron Dragon Wall Sconce with Layered Animated 3D Flame Mesh
    */
-  createTorch() {
+  createTorch(includeLight = true) {
     const group = new THREE.Group();
     group.name = 'WroughtIronTorchSconce';
 
@@ -1450,10 +1453,13 @@ export class TowerEnvironment {
 
     group.add(flameGroup);
 
-    // 5. Dynamic Warm PointLight
-    const light = new THREE.PointLight(0xff9800, 2.2, 14);
-    light.position.set(0, 0.8, 0.55);
-    group.add(light);
+    // 5. Dynamic Warm PointLight (only created when requested to avoid light-overdraw lag)
+    let light = null;
+    if (includeLight) {
+      light = new THREE.PointLight(0xff9800, 1.8, 12);
+      light.position.set(0, 0.8, 0.55);
+      group.add(light);
+    }
 
     group.userData = { light, flame: flameGroup };
     return group;

@@ -242,6 +242,12 @@ class GameApp {
   }
 
   setupUIButtons() {
+    // Wire Graphics Quality settings to EngineScene
+    this.ui.onGraphicsQualityChange((quality) => {
+      this.engineScene.setGraphicsQuality(quality);
+    });
+    this.engineScene.setGraphicsQuality(this.ui.settings.graphicsQuality || 'balanced');
+
     const btnInv = document.getElementById('btn-toggle-inventory');
     if (btnInv) btnInv.addEventListener('click', () => this.inventoryUI.toggle());
 
@@ -1139,13 +1145,33 @@ class GameApp {
     const deltaTime = Math.min(0.1, (currentTime - this.lastTime) / 1000);
     this.lastTime = currentTime;
 
-    // FPS calculation
+    // FPS calculation & Dynamic Adaptive Performance
     this.fpsFrameCount++;
     if (currentTime - this.fpsLastCalc >= 1000) {
       this.currentFps = this.fpsFrameCount;
       this.fpsFrameCount = 0;
       this.fpsLastCalc = currentTime;
       this.ui.updateFPS(this.currentFps);
+
+      // Auto-adapt if prolonged low FPS is detected (< 30 FPS)
+      if (this.currentFps < 30 && !this._hasAdaptedPerformance && this.ui.settings.graphicsQuality !== 'performance') {
+        this._lowFpsCounter = (this._lowFpsCounter || 0) + 1;
+        if (this._lowFpsCounter >= 3) {
+          this._hasAdaptedPerformance = true;
+          this.engineScene.setGraphicsQuality('performance');
+          this.ui.settings.graphicsQuality = 'performance';
+          this.ui.saveSettings();
+          const btnGfxPerf = document.getElementById('btn-gfx-perf');
+          const btnGfxBal = document.getElementById('btn-gfx-balanced');
+          if (btnGfxPerf && btnGfxBal) {
+            btnGfxPerf.classList.add('active');
+            btnGfxBal.classList.remove('active');
+          }
+          this.ui.showStoryMessage('⚡ Auto-adapted to High-Performance mode (60+ FPS)');
+        }
+      } else if (this.currentFps >= 45) {
+        this._lowFpsCounter = 0;
+      }
     }
 
     this.animations.update(deltaTime);

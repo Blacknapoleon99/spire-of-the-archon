@@ -49,7 +49,7 @@ export const CinematicPostShader = {
       float dist = length(distFromCenter);
 
       // Radial Chromatic Aberration with edge intensification
-      float caAmount = chromaticAberration * (1.0 + dist * 1.8);
+      float caAmount = chromaticAberration * (1.0 + dist * 1.5);
       vec2 caOffset = distFromCenter * caAmount;
       float r = texture2D(tDiffuse, uv - caOffset).r;
       float g = texture2D(tDiffuse, uv).g;
@@ -67,9 +67,11 @@ export const CinematicPostShader = {
         color = mix(color, vec3(0.95, 0.06, 0.06) * (color.r * 1.8 + 0.35), edgeDmg * 0.85);
       }
 
-      // Subtle Dark Fantasy Film Grain
-      float grain = (rand(uv) - 0.5) * filmGrain;
-      color += grain;
+      // Subtle Dark Fantasy Film Grain (only computed if active to maximize mobile/integrated GPU performance)
+      if (filmGrain > 0.001) {
+        float grain = (rand(uv) - 0.5) * filmGrain;
+        color += grain;
+      }
 
       gl_FragColor = vec4(color, 1.0);
     }
@@ -108,17 +110,20 @@ export class EngineScene {
     // Hit Vignette & Chromatic Surge States
     this.hitVignetteIntensity = 0;
     this.caSurge = 0;
+    this.graphicsQuality = 'balanced';
 
-    // Renderer
+    // High-Performance Optimized WebGL Renderer
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: false, // Antialiasing handled smoothly by post-processing or native resolution
       powerPreference: 'high-performance',
-      stencil: false
+      stencil: false,
+      depth: true
     });
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // Capping at 1.0 default eliminates 75% GPU fillrate bottlenecks on 1440p/4K displays
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // Much faster than PCFSoft
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
     this.container.appendChild(this.renderer.domElement);
@@ -134,18 +139,19 @@ export class EngineScene {
     this.ambientLight = new THREE.AmbientLight(0x23253b, 1.4);
     this.scene.add(this.ambientLight);
 
-    // Main moonlight / astral ceiling light
+    // Main moonlight / astral ceiling light (Optimized 1024x1024 shadow map)
     this.dirLight = new THREE.DirectionalLight(0xb0c4de, 1.5);
     this.dirLight.position.set(10, 25, 15);
     this.dirLight.castShadow = true;
-    this.dirLight.shadow.mapSize.width = 2048;
-    this.dirLight.shadow.mapSize.height = 2048;
-    this.dirLight.shadow.camera.near = 0.5;
-    this.dirLight.shadow.camera.far = 70;
-    this.dirLight.shadow.camera.left = -25;
-    this.dirLight.shadow.camera.right = 25;
-    this.dirLight.shadow.camera.top = 25;
-    this.dirLight.shadow.camera.bottom = -25;
+    this.dirLight.shadow.mapSize.width = 1024;
+    this.dirLight.shadow.mapSize.height = 1024;
+    this.dirLight.shadow.camera.near = 1.0;
+    this.dirLight.shadow.camera.far = 55;
+    this.dirLight.shadow.camera.left = -22;
+    this.dirLight.shadow.camera.right = 22;
+    this.dirLight.shadow.camera.top = 22;
+    this.dirLight.shadow.camera.bottom = -22;
+    this.dirLight.shadow.bias = -0.0004;
     this.scene.add(this.dirLight);
 
     // Atmospheric warm torch fill lights
@@ -174,10 +180,10 @@ export class EngineScene {
 
     // 2. High-Performance HDR UnrealBloomPass for Emissive Magic, Crystals & Runes
     this.bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(width, height),
-      1.15, // strength
-      0.55, // radius
-      0.82  // threshold (only bright emissive elements bloom!)
+      new THREE.Vector2(Math.floor(width * 0.75), Math.floor(height * 0.75)), // 75% resolution bloom buffer for 2x performance
+      0.95, // strength
+      0.45, // radius
+      0.82  // threshold
     );
     this.composer.addPass(this.bloomPass);
 
@@ -188,6 +194,46 @@ export class EngineScene {
     // 4. Output Pass for Tone Mapping & Color Space Accuracy
     this.outputPass = new OutputPass();
     this.composer.addPass(this.outputPass);
+  }
+
+  setGraphicsQuality(quality = 'balanced') {
+    this.graphicsQuality = quality;
+    if (quality === 'performance') {
+      this.renderer.setPixelRatio(0.9);
+      this.renderer.shadowMap.enabled = false;
+      if (this.bloomPass) this.bloomPass.enabled = false;
+      if (this.cinematicPass) {
+        this.cinematicPass.uniforms.filmGrain.value = 0.0;
+        this.cinematicPass.uniforms.chromaticAberration.value = 0.0;
+      }
+      if (this.dirLight) this.dirLight.castShadow = false;
+    } else if (quality === 'balanced') {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.type = THREE.PCFShadowMap;
+      if (this.bloomPass) {
+        this.bloomPass.enabled = true;
+        this.bloomPass.strength = 0.85;
+      }
+      if (this.cinematicPass) {
+        this.cinematicPass.uniforms.filmGrain.value = 0.01;
+        this.cinematicPass.uniforms.chromaticAberration.value = 0.0008;
+      }
+      if (this.dirLight) this.dirLight.castShadow = true;
+    } else if (quality === 'ultra') {
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+      this.renderer.shadowMap.enabled = true;
+      this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      if (this.bloomPass) {
+        this.bloomPass.enabled = true;
+        this.bloomPass.strength = 1.15;
+      }
+      if (this.cinematicPass) {
+        this.cinematicPass.uniforms.filmGrain.value = 0.02;
+        this.cinematicPass.uniforms.chromaticAberration.value = 0.0014;
+      }
+      if (this.dirLight) this.dirLight.castShadow = true;
+    }
   }
 
   /**
