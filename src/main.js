@@ -153,50 +153,82 @@ class GameApp {
     this.initCombatInputs();
     this.setupUIButtons();
 
-    // Loading screen with random tip
-    const tip = LOADING_TIPS[Math.floor(Math.random() * LOADING_TIPS.length)];
-    this.ui.updateLoadingProgress(10, tip);
+    // 12-Second Cinematic Loading Sequence with Staged Progression & Complete Pre-warming
+    const TOTAL_LOAD_TIME = 12000; // 12.0 seconds (user requested 10-15s)
+    const loadStartTime = performance.now();
 
-    // Preload local 3D GLTF models (Characters, NPCs, Monsters)
+    // Kick off asynchronous asset preloading in background
     assetLoader.preloadAll().catch(err => console.warn('[AssetLoader] Preload notice:', err));
 
-    // Start building Floor 1
+    // Build Floor 1 and Awakening Vault
     this.tower.buildFloor(1);
     this.ambientParticles.setFloor(1);
     this.engineScene.setFloorLighting(1);
-    this.ui.updateLoadingProgress(60, 'Weaving the arcane wards...');
 
-    // Pre-warm WebGL shaders and materials during loading screen to eliminate combat stutter
-    this.engineScene.warmupShaders();
-    this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera);
-    this.ui.updateLoadingProgress(80, 'Pre-warming arcane spell matrices...');
+    // Staged progression milestones across the 12 seconds
+    const STAGES = [
+      { atPct: 0, text: 'Awakening Ancient Leylines & Vault...', tip: 'The Archon once held domain over past, present, and eternity...' },
+      { atPct: 20, text: 'Preloading 3D GLTF Entity & Monster Assets...', tip: 'Wizards who enter the Spire must master all elements to survive.' },
+      { atPct: 45, text: 'Pre-heating Infernal Tornado & Blizzard Vortex Shaders in GPU VRAM...', tip: 'Your Ultimate abilities unleash catastrophic elemental devastation.' },
+      { atPct: 70, text: 'Forging Arcane Spell Pipelines & Procedural PBR Textures...', tip: 'Proximity voice chat lets you strategize with companions in 3D audio space.' },
+      { atPct: 88, text: 'Binding 3D Spatial Proximity Voice Matrix & Network...', tip: 'Toggle your microphone with [V] or switch to Open Mic in Settings [ESC].' },
+      { atPct: 98, text: 'Harmonizing Astral Frequencies... The Spire Awaits.', tip: 'Ascension is imminent. Prepare your Grimoire.' }
+    ];
 
-    // Guarantee loading screen ALWAYS hides within 1.8s even if network handshake is slow
-    let isLoaded = false;
-    const finishLoading = () => {
-      if (isLoaded) return;
-      isLoaded = true;
-      this.ui.updateLoadingProgress(100, 'The Spire awaits.');
-      setTimeout(() => this.ui.hideLoadingScreen(), 300);
-      // Start background progressive lazy-loading of Floor 2 & 3
-      this.chunkLoader.startBackgroundPreload();
-      soundEngine.startMusic('archives');
+    let hasWarmedShaders = false;
+    let hasInitializedVoice = false;
+    let isLoadComplete = false;
 
-      // Initialize Studio Proximity Voice Chat
-      this.voiceChat.init().then(() => {
-        this.ui.updateVoiceStatus(!this.voiceChat.isMuted);
-      });
+    // Initialize WebRTC STUN network in background
+    onlineNetwork.init((peerId) => {
+      this.ui.setOnlinePeerId(peerId);
+    });
+
+    const updateLoading = () => {
+      if (isLoadComplete) return;
+      const elapsed = performance.now() - loadStartTime;
+      const progress = Math.min(100, (elapsed / TOTAL_LOAD_TIME) * 100);
+
+      // Trigger WebGL shader & Ultimate vortex pre-warm at 45% (so heavy compilation finishes well before game starts)
+      if (progress >= 45 && !hasWarmedShaders) {
+        hasWarmedShaders = true;
+        this.engineScene.warmupShaders();
+        this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera);
+      }
+
+      // Initialize voice chat at 80%
+      if (progress >= 80 && !hasInitializedVoice) {
+        hasInitializedVoice = true;
+        this.voiceChat.init().then(() => {
+          this.ui.updateVoiceStatus(this.voiceChat.isHardwareMuted, this.voiceChat.voiceMode, this.voiceChat.isLocalSpeaking);
+        });
+      }
+
+      // Find active stage text
+      let currentStage = STAGES[0];
+      for (const s of STAGES) {
+        if (progress >= s.atPct) currentStage = s;
+      }
+
+      this.ui.updateLoadingProgress(progress, currentStage.text, currentStage.tip);
+
+      if (progress >= 100) {
+        isLoadComplete = true;
+        this.ui.updateLoadingProgress(100, 'ASCENSION READY. THE SPIRE AWAITS.', 'Click or Press Space to enter the Vault.');
+        
+        // Present glowing "ENTER THE SPIRE [SPACE]" button
+        this.ui.showEnterSpireButton(() => {
+          this.ui.hideLoadingScreen();
+          this.chunkLoader.startBackgroundPreload();
+          soundEngine.startMusic('archives');
+        });
+        return;
+      }
+
+      requestAnimationFrame(updateLoading);
     };
 
-    const loadSafetyTimer = setTimeout(finishLoading, 1800);
-
-    // Initialize WebRTC STUN network
-    onlineNetwork.init((peerId) => {
-      clearTimeout(loadSafetyTimer);
-      this.ui.setOnlinePeerId(peerId);
-      this.ui.updateLoadingProgress(90, 'Connecting to the Spire network...');
-      setTimeout(finishLoading, 400);
-    });
+    requestAnimationFrame(updateLoading);
 
     // Register Quest Journal toggle
     this.ui.registerQuestJournalToggle(() => this.questJournalUI.toggle());

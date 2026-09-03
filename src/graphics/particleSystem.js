@@ -135,6 +135,103 @@ export class ParticleSystem {
     ];
     this.projectileLightsPool.forEach(l => this.scene.add(l));
     this.activeProjectileLights = new Set();
+
+    // Persistent Ultimate / Vortex Light (Never added/removed dynamically to prevent WebGL shader recompilation)
+    this.vortexLight = new THREE.PointLight(0xff5722, 0, 24);
+    this.scene.add(this.vortexLight);
+
+    // Pre-allocated Vortex Geometries for Zero-Allocation Ultimate Casting
+    this.geoVortexFunnel = new THREE.CylinderGeometry(3.6, 0.4, 7.5, 24, 8, true);
+    this.geoVortexCore = new THREE.CylinderGeometry(1.5, 0.25, 7.0, 16, 4, true);
+    this.geoVortexRibbons = [
+      new THREE.TorusGeometry(1.8, 0.14, 8, 32, Math.PI * 1.5),
+      new THREE.TorusGeometry(2.4, 0.14, 8, 32, Math.PI * 1.5),
+      new THREE.TorusGeometry(3.0, 0.14, 8, 32, Math.PI * 1.5)
+    ];
+    this.geoVortexRuneRing = new THREE.RingGeometry(0.3, 5.5, 32);
+    this.geoDomeHalf = new THREE.SphereGeometry(6.5, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+    this.geoDomeRuneRing = new THREE.RingGeometry(0.3, 6.5, 32);
+    this.geoIceSpire = new THREE.ConeGeometry(0.5, 4.2, 6);
+    this.geoIceShardSpire = new THREE.ConeGeometry(0.28, 2.2, 5);
+
+    // Pre-allocated Vortex Shared Materials
+    const lavaPBR = TextureGenerator.createLavaTexturePBR();
+    this.matVortexFunnel = new THREE.MeshStandardMaterial({
+      map: lavaPBR.diffuseMap,
+      color: 0xff3700,
+      emissive: new THREE.Color(0xff2200),
+      emissiveIntensity: 2.8,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.82
+    });
+    this.matVortexCore = new THREE.MeshBasicMaterial({
+      color: 0xffea00,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.88
+    });
+    this.matVortexRune = new THREE.MeshStandardMaterial({
+      map: lavaPBR.diffuseMap,
+      emissive: new THREE.Color(0xff4500),
+      emissiveIntensity: 2.2,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.9
+    });
+    this.matVortexRibbon1 = new THREE.MeshBasicMaterial({ color: 0xff9100, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+    this.matVortexRibbon2 = new THREE.MeshBasicMaterial({ color: 0xff3d00, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+
+    this.matDomeDivine = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      emissive: 0xffc107,
+      emissiveIntensity: 1.6,
+      transparent: true,
+      opacity: 0.38,
+      side: THREE.DoubleSide
+    });
+    this.matSealDivine = new THREE.MeshBasicMaterial({
+      color: 0xffd700,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.75
+    });
+
+    this.matDomeFrost = new THREE.MeshStandardMaterial({
+      color: 0x00e5ff,
+      emissive: 0x0a84ff,
+      emissiveIntensity: 1.8,
+      transparent: true,
+      opacity: 0.35,
+      side: THREE.DoubleSide
+    });
+    this.matRuneFrost = new THREE.MeshBasicMaterial({
+      color: 0x80d8ff,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.75
+    });
+    this.matSpireFrost = new THREE.MeshStandardMaterial({
+      color: 0xe0f7fa,
+      emissive: 0x00e5ff,
+      emissiveIntensity: 2.2,
+      roughness: 0.1
+    });
+
+    this.matDomeStasis = new THREE.MeshStandardMaterial({
+      color: 0xbf5af2,
+      emissive: 0x7b1fa2,
+      emissiveIntensity: 2.0,
+      transparent: true,
+      opacity: 0.38,
+      side: THREE.DoubleSide
+    });
+    this.matGearStasis = new THREE.MeshBasicMaterial({
+      color: 0xe040fb,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.75
+    });
   }
 
   acquireProjectileLight(colorHex, pos) {
@@ -335,50 +432,23 @@ export class ParticleSystem {
     group.position.copy(groundPos);
     group.position.y = 0.05;
 
-    // 1. Swirling Molten Scorch Rune Base on Ground with Lava PBR Texture
-    const lavaPBR = TextureGenerator.createLavaTexturePBR();
-    const groundRuneGeo = new THREE.RingGeometry(0.3, radius, 32);
-    const groundRuneMat = new THREE.MeshStandardMaterial({
-      map: lavaPBR.diffuseMap,
-      emissive: new THREE.Color(0xff4500),
-      emissiveIntensity: 2.2,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.9
-    });
-    const groundRune = new THREE.Mesh(groundRuneGeo, groundRuneMat);
+    // 1. Swirling Molten Scorch Rune Base on Ground with Pre-allocated Lava PBR Mesh
+    const groundRune = new THREE.Mesh(this.geoVortexRuneRing, this.matVortexRune);
     groundRune.rotation.x = -Math.PI / 2;
     group.add(groundRune);
 
     // 2. Multi-tier spinning fire vortex funnel
     const vortexGroup = new THREE.Group();
 
-    // Outer spiral fire funnel with texture wrapping & high emissive flame glow
-    const funnelGeo = new THREE.CylinderGeometry(3.6, 0.4, 7.5, 24, 8, true);
-    const funnelMat = new THREE.MeshStandardMaterial({
-      map: lavaPBR.diffuseMap,
-      color: 0xff3700,
-      emissive: new THREE.Color(0xff2200),
-      emissiveIntensity: 2.8,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.82
-    });
-    const funnel = new THREE.Mesh(funnelGeo, funnelMat);
+    // Outer spiral fire funnel with pre-allocated geometry and material
+    const funnel = new THREE.Mesh(this.geoVortexFunnel, this.matVortexFunnel);
     funnel.position.y = 3.75;
     vortexGroup.add(funnel);
 
     // 3 Helical Flame Spiral Ribbons swirling around the funnel
     const helixRibbons = [];
     for (let r = 0; r < 3; r++) {
-      const ribbonGeo = new THREE.TorusGeometry(1.8 + r * 0.6, 0.14, 8, 32, Math.PI * 1.5);
-      const ribbonMat = new THREE.MeshBasicMaterial({
-        color: r % 2 === 0 ? 0xff9100 : 0xff3d00,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.9
-      });
-      const ribbon = new THREE.Mesh(ribbonGeo, ribbonMat);
+      const ribbon = new THREE.Mesh(this.geoVortexRibbons[r] || this.geoVortexRibbons[0], r % 2 === 0 ? this.matVortexRibbon1 : this.matVortexRibbon2);
       ribbon.position.y = 1.5 + r * 2.0;
       ribbon.rotation.x = Math.PI / 2.5;
       ribbon.rotation.z = (r * Math.PI * 2) / 3;
@@ -386,24 +456,20 @@ export class ParticleSystem {
       helixRibbons.push(ribbon);
     }
 
-    // Inner blinding white/gold plasma core column
-    const coreGeo = new THREE.CylinderGeometry(1.5, 0.25, 7.0, 16, 4, true);
-    const coreMat = new THREE.MeshBasicMaterial({
-      color: 0xffea00,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.88
-    });
-    const core = new THREE.Mesh(coreGeo, coreMat);
+    // Inner blinding plasma core column
+    const core = new THREE.Mesh(this.geoVortexCore, this.matVortexCore);
     core.position.y = 3.5;
     vortexGroup.add(core);
 
     group.add(vortexGroup);
 
-    // Dynamic flickering flame point light
-    const light = new THREE.PointLight(0xff5722, 4.5, 20);
-    light.position.y = 3.5;
-    group.add(light);
+    // Modulate persistent vortex light (zero scene additions or shader recompilations)
+    if (this.vortexLight) {
+      this.vortexLight.color.setHex(0xff5722);
+      this.vortexLight.position.copy(groundPos);
+      this.vortexLight.position.y += 3.5;
+      this.vortexLight.intensity = 4.8;
+    }
 
     this.scene.add(group);
 
@@ -414,7 +480,7 @@ export class ParticleSystem {
       funnel,
       core,
       helixRibbons,
-      light,
+      light: this.vortexLight,
       groundRune,
       position: groundPos.clone(),
       life: duration,
@@ -434,41 +500,28 @@ export class ParticleSystem {
     group.position.copy(groundPos);
     group.position.y = 0.05;
 
-    // Glowing Cathedral Dome
-    const domeGeo = new THREE.SphereGeometry(radius, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const domeMat = new THREE.MeshStandardMaterial({
-      color: 0xffd700,
-      emissive: 0xffc107,
-      emissiveIntensity: 1.6,
-      transparent: true,
-      opacity: 0.38,
-      side: THREE.DoubleSide
-    });
-    const dome = new THREE.Mesh(domeGeo, domeMat);
+    // Glowing Cathedral Dome using pre-allocated half-sphere
+    const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeDivine);
     group.add(dome);
 
     // Ground celestial seal
-    const sealGeo = new THREE.RingGeometry(0.2, radius, 32);
-    const sealMat = new THREE.MeshBasicMaterial({
-      color: 0xffd700,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.75
-    });
-    const seal = new THREE.Mesh(sealGeo, sealMat);
+    const seal = new THREE.Mesh(this.geoDomeRuneRing, this.matSealDivine);
     seal.rotation.x = -Math.PI / 2;
     group.add(seal);
 
-    const light = new THREE.PointLight(0xffd700, 3.2, 18);
-    light.position.y = 2.0;
-    group.add(light);
+    if (this.vortexLight) {
+      this.vortexLight.color.setHex(0xffd700);
+      this.vortexLight.position.copy(groundPos);
+      this.vortexLight.position.y += 2.0;
+      this.vortexLight.intensity = 3.8;
+    }
 
     this.scene.add(group);
 
     this.vortices.push({
       type: 'divine_sanctuary',
       group,
-      light,
+      light: this.vortexLight,
       position: groundPos.clone(),
       life: duration,
       maxLife: duration,
@@ -487,52 +540,32 @@ export class ParticleSystem {
     group.position.y = 0.05;
 
     // Glowing Frost Dome
-    const domeGeo = new THREE.SphereGeometry(radius, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const domeMat = new THREE.MeshStandardMaterial({
-      color: 0x00e5ff,
-      emissive: 0x0a84ff,
-      emissiveIntensity: 1.8,
-      transparent: true,
-      opacity: 0.35,
-      side: THREE.DoubleSide
-    });
-    const dome = new THREE.Mesh(domeGeo, domeMat);
+    const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeFrost);
     group.add(dome);
 
     // Ground Runic Frost Ring
-    const runeGeo = new THREE.RingGeometry(0.5, radius, 32);
-    const runeMat = new THREE.MeshBasicMaterial({
-      color: 0x80d8ff,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.75
-    });
-    const rune = new THREE.Mesh(runeGeo, runeMat);
+    const rune = new THREE.Mesh(this.geoDomeRuneRing, this.matRuneFrost);
     rune.rotation.x = -Math.PI / 2;
     group.add(rune);
 
     // Central Ice Spire
-    const spireGeo = new THREE.ConeGeometry(0.5, 4.2, 6);
-    const spireMat = new THREE.MeshStandardMaterial({
-      color: 0xe0f7fa,
-      emissive: 0x00e5ff,
-      emissiveIntensity: 2.2,
-      roughness: 0.1
-    });
-    const spire = new THREE.Mesh(spireGeo, spireMat);
+    const spire = new THREE.Mesh(this.geoIceSpire, this.matSpireFrost);
     spire.position.y = 2.1;
     group.add(spire);
 
-    const light = new THREE.PointLight(0x00e5ff, 3.5, 16);
-    light.position.y = 2.0;
-    group.add(light);
+    if (this.vortexLight) {
+      this.vortexLight.color.setHex(0x00e5ff);
+      this.vortexLight.position.copy(groundPos);
+      this.vortexLight.position.y += 2.0;
+      this.vortexLight.intensity = 3.6;
+    }
 
     this.scene.add(group);
 
     this.vortices.push({
       type: 'blizzard',
       group,
-      light,
+      light: this.vortexLight,
       position: groundPos.clone(),
       life: duration,
       maxLife: duration,
@@ -552,40 +585,27 @@ export class ParticleSystem {
     group.position.y = 0.05;
 
     // Violet Temporal Dome
-    const domeGeo = new THREE.SphereGeometry(radius, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    const domeMat = new THREE.MeshStandardMaterial({
-      color: 0xbf5af2,
-      emissive: 0x7b1fa2,
-      emissiveIntensity: 2.0,
-      transparent: true,
-      opacity: 0.38,
-      side: THREE.DoubleSide
-    });
-    const dome = new THREE.Mesh(domeGeo, domeMat);
+    const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeStasis);
     group.add(dome);
 
     // Chronometer Gear Ring on Ground
-    const gearGeo = new THREE.RingGeometry(1.0, radius, 32);
-    const gearMat = new THREE.MeshBasicMaterial({
-      color: 0xe040fb,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.8
-    });
-    const gear = new THREE.Mesh(gearGeo, gearMat);
+    const gear = new THREE.Mesh(this.geoDomeRuneRing, this.matGearStasis);
     gear.rotation.x = -Math.PI / 2;
     group.add(gear);
 
-    const light = new THREE.PointLight(0xbf5af2, 3.5, 16);
-    light.position.y = 2.0;
-    group.add(light);
+    if (this.vortexLight) {
+      this.vortexLight.color.setHex(0xbf5af2);
+      this.vortexLight.position.copy(groundPos);
+      this.vortexLight.position.y += 2.0;
+      this.vortexLight.intensity = 3.6;
+    }
 
     this.scene.add(group);
 
     this.vortices.push({
-      type: 'temporal_stasis',
+      type: 'stasis_dome',
       group,
-      light,
+      light: this.vortexLight,
       position: groundPos.clone(),
       life: duration,
       maxLife: duration,
@@ -1151,6 +1171,7 @@ export class ParticleSystem {
 
       if (v.life <= 0) {
         this.spawnBurst(v.position, v.type === 'fire_tornado' ? 'fire' : 'light', 32);
+        if (v.light) v.light.intensity = 0;
         this.scene.remove(v.group);
         this.vortices.splice(i, 1);
       }
@@ -1287,10 +1308,16 @@ export class ParticleSystem {
       // 3. Pre-warm muzzle flash
       this.spawnMuzzleFlash(dummyOrigin, dummyDir, 'fire');
 
-      // 4. Force WebGL driver to compile every material shader & bind all textures in GPU VRAM
+      // 4. Pre-warm all 4 class Ultimate Vortex & AoE spells (Tornado, Sanctuary, Blizzard, Stasis)
+      this.spawnFireTornado(dummyOrigin, 0.05, 1);
+      this.spawnDivineSanctuary(dummyOrigin, 0.05);
+      this.spawnBlizzardZone(dummyOrigin, 0.05);
+      this.spawnTemporalStasisDome(dummyOrigin, 0.05);
+
+      // 5. Force WebGL driver to compile every material shader & bind all textures in GPU VRAM
       renderer.compile(this.scene, camera);
 
-      // 5. Clean up dummy warmup entities
+      // 6. Clean up dummy warmup entities
       for (let i = this.projectiles.length - 1; i >= 0; i--) {
         const p = this.projectiles[i];
         if (p.mesh.position.y < -9000) {
@@ -1306,8 +1333,16 @@ export class ParticleSystem {
           this.particles.splice(i, 1);
         }
       }
+      for (let i = this.vortices.length - 1; i >= 0; i--) {
+        const v = this.vortices[i];
+        if (v.position.y < -9000) {
+          this.scene.remove(v.group);
+          this.vortices.splice(i, 1);
+        }
+      }
+      if (this.vortexLight) this.vortexLight.intensity = 0;
 
-      console.log('[ParticleSystem] All spell visuals, procedural PBR textures & WebGL pipelines pre-warmed & cached in VRAM.');
+      console.log('[ParticleSystem] All spell visuals, Ultimate vortices, procedural PBR textures & WebGL pipelines pre-warmed & cached in VRAM.');
     } catch (err) {
       console.warn('[ParticleSystem] Spell visuals pre-warming notice:', err);
     }
@@ -1320,6 +1355,7 @@ export class ParticleSystem {
     for (const part of this.particles) this.scene.remove(part.mesh);
     for (const ft of this.floatingTexts) this.scene.remove(ft.sprite);
     for (const c of this.physicalCoins) this.scene.remove(c.mesh);
+    if (this.vortexLight) this.vortexLight.intensity = 0;
     if (this.decalManager) this.decalManager.clear();
     this.projectiles = [];
     this.shockwaves = [];

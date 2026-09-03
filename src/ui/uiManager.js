@@ -490,15 +490,43 @@ export class UIManager {
   registerQuestJournalToggle(fn) { this._questJournalToggle = fn; }
 
   /** Loading Screen Control */
-  updateLoadingProgress(pct, tip) {
-    if (this.loadingBarFill) this.loadingBarFill.style.width = `${pct}%`;
-    if (this.loadingPercentText) this.loadingPercentText.textContent = `${Math.round(pct)}%`;
-    if (this.loadingStatusText && tip) this.loadingStatusText.textContent = tip.toUpperCase();
-    if (tip && this.loadingTip) this.loadingTip.textContent = tip;
+  updateLoadingProgress(pct, statusText, loreTip = null) {
+    const clamped = Math.min(100, Math.max(0, pct));
+    if (this.loadingBarFill) this.loadingBarFill.style.width = `${clamped}%`;
+    if (this.loadingPercentText) this.loadingPercentText.textContent = `${Math.round(clamped)}%`;
+    if (this.loadingStatusText && statusText) this.loadingStatusText.textContent = statusText.toUpperCase();
+    if (loreTip && this.loadingTip) this.loadingTip.textContent = loreTip;
+  }
+
+  showEnterSpireButton(onEnter) {
+    const btn = document.getElementById('btn-enter-spire');
+    if (!btn) {
+      if (onEnter) onEnter();
+      return;
+    }
+    btn.classList.remove('hidden');
+
+    const handleEnter = (e) => {
+      if (e.type === 'keydown' && e.code !== 'Space' && e.code !== 'Enter') return;
+      window.removeEventListener('keydown', handleEnter);
+      btn.removeEventListener('click', handleEnter);
+      btn.classList.add('hidden');
+      if (onEnter) onEnter();
+    };
+
+    btn.addEventListener('click', handleEnter);
+    window.addEventListener('keydown', handleEnter);
   }
 
   hideLoadingScreen() {
-    if (this.loadingScreen) this.loadingScreen.classList.add('hidden');
+    if (this.loadingScreen) {
+      this.loadingScreen.style.transition = 'opacity 0.8s ease-out';
+      this.loadingScreen.style.opacity = '0';
+      setTimeout(() => {
+        this.loadingScreen.classList.add('hidden');
+        this.loadingScreen.style.opacity = '';
+      }, 800);
+    }
     if (this._embersAnimationId) {
       cancelAnimationFrame(this._embersAnimationId);
       this._embersAnimationId = null;
@@ -516,38 +544,66 @@ export class UIManager {
     resize();
     window.addEventListener('resize', resize);
 
-    const embers = [];
-    for (let i = 0; i < 48; i++) {
-      embers.push({
+    // Multi-layer 3D Depth Particle System (Far stars, Mid embers, Close blazing sparks)
+    const particles = [];
+    const colors = ['#ffd700', '#ff9100', '#00e5ff', '#bf5af2', '#ffffff'];
+
+    for (let i = 0; i < 90; i++) {
+      const depth = Math.random(); // 0 = far, 1 = near
+      particles.push({
         x: Math.random() * canvas.width,
         y: Math.random() * canvas.height,
-        radius: Math.random() * 2.2 + 0.8,
-        vy: -(Math.random() * 1.4 + 0.4),
-        vx: (Math.random() - 0.5) * 0.6,
-        alpha: Math.random() * 0.7 + 0.3,
-        color: Math.random() > 0.4 ? '#ffd700' : '#bf5af2'
+        depth,
+        radius: depth > 0.7 ? Math.random() * 3.0 + 1.8 : depth > 0.35 ? Math.random() * 1.8 + 0.9 : Math.random() * 1.0 + 0.4,
+        vy: -(depth * 1.8 + 0.3),
+        vx: (Math.random() - 0.5) * (depth * 0.8 + 0.2),
+        wobbleSpeed: Math.random() * 0.03 + 0.01,
+        wobbleAmp: Math.random() * 25 + 5,
+        baseAlpha: depth > 0.7 ? 0.9 : depth > 0.35 ? 0.65 : 0.4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        pulseOffset: Math.random() * Math.PI * 2
       });
     }
 
+    let time = 0;
     const animate = () => {
+      time += 0.016;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      for (const e of embers) {
-        e.y += e.vy;
-        e.x += e.vx + Math.sin(e.y * 0.02) * 0.3;
-        if (e.y < -10) {
-          e.y = canvas.height + 10;
-          e.x = Math.random() * canvas.width;
+
+      for (const p of particles) {
+        p.y += p.vy;
+        p.x += p.vx + Math.sin(time * p.wobbleSpeed * 60 + p.pulseOffset) * 0.4;
+
+        if (p.y < -20) {
+          p.y = canvas.height + 20;
+          p.x = Math.random() * canvas.width;
         }
+
+        const alphaPulse = Math.sin(time * 3 + p.pulseOffset) * 0.25;
+        const currentAlpha = Math.max(0.1, Math.min(1.0, p.baseAlpha + alphaPulse));
+
         ctx.save();
-        ctx.globalAlpha = e.alpha * (0.6 + Math.sin(e.y * 0.05) * 0.4);
-        ctx.fillStyle = e.color;
-        ctx.shadowColor = e.color;
-        ctx.shadowBlur = 8;
+        ctx.globalAlpha = currentAlpha;
+        ctx.fillStyle = p.color;
+        ctx.shadowColor = p.color;
+        ctx.shadowBlur = p.depth > 0.6 ? 16 : 6;
+
         ctx.beginPath();
-        ctx.arc(e.x, e.y, e.radius, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
         ctx.fill();
+
+        // Extra motion flare for close blazing sparks
+        if (p.depth > 0.75) {
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x - p.vx * 4, p.y - p.vy * 5);
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = p.radius * 0.6;
+          ctx.stroke();
+        }
         ctx.restore();
       }
+
       this._embersAnimationId = requestAnimationFrame(animate);
     };
     animate();
