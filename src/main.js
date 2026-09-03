@@ -152,6 +152,8 @@ class GameApp {
     this.fpsFrameCount = 0;
     this.fpsLastCalc = performance.now();
     this.currentFps = 60;
+    this.targetFps = 0; // 0 = unlimited, or 60, 120, 144, 240
+    this.lastRenderTime = performance.now();
 
     this.initNetworkListeners();
     this.initCombatInputs();
@@ -247,6 +249,12 @@ class GameApp {
       this.engineScene.setGraphicsQuality(quality);
     });
     this.engineScene.setGraphicsQuality(this.ui.settings.graphicsQuality || 'balanced');
+
+    // Wire Frame Rate Limit settings (60, 120, 144, 240, Unlimited)
+    this.setFpsLimit(this.ui.settings.fpsLimit || 'unlimited');
+    this.ui.onFpsLimitChange((limit) => {
+      this.setFpsLimit(limit);
+    });
 
     const btnInv = document.getElementById('btn-toggle-inventory');
     if (btnInv) btnInv.addEventListener('click', () => this.inventoryUI.toggle());
@@ -1139,8 +1147,32 @@ class GameApp {
     }
   }
 
+  setFpsLimit(limit) {
+    if (!limit || limit === 'unlimited' || limit === '0' || limit === 0) {
+      this.targetFps = 0;
+      console.log('[Performance] Target Framerate: UNLIMITED');
+    } else {
+      const parsed = parseInt(limit, 10);
+      this.targetFps = isNaN(parsed) ? 0 : parsed;
+      console.log(`[Performance] Target Framerate locked to: ${this.targetFps} FPS`);
+    }
+  }
+
   loop(currentTime) {
     requestAnimationFrame((t) => this.loop(t));
+
+    // Target Frame Rate Limiter (60, 120, 144, 240 Hz or Unlimited)
+    if (this.targetFps > 0) {
+      const elapsed = currentTime - (this.lastRenderTime || 0);
+      const targetInterval = 1000 / this.targetFps;
+      // 1.0ms margin prevents timer jitter from skipping valid frames
+      if (elapsed < targetInterval - 1.0) {
+        return;
+      }
+      this.lastRenderTime = currentTime - (elapsed % targetInterval);
+    } else {
+      this.lastRenderTime = currentTime;
+    }
 
     const deltaTime = Math.min(0.1, (currentTime - this.lastTime) / 1000);
     this.lastTime = currentTime;

@@ -34,6 +34,8 @@ export class UIManager {
       masterVol: 70, sfxVol: 80, musicVol: 35, voiceVol: 90,
       micMode: 'open_mic', micThreshold: 14,
       sensitivity: 100, fov: 75,
+      graphicsQuality: 'balanced',
+      fpsLimit: 'unlimited', // '60', '120', '144', '240', 'unlimited'
       showFps: false, showDmgNumbers: true
     };
     try {
@@ -475,6 +477,28 @@ export class UIManager {
       applyGfxPills(currentQ);
     }
 
+    // Frame Rate Limit Selector (60, 120, 144, 240, Unlimited)
+    const fpsLimitPills = document.querySelectorAll('#group-fps-limit .setting-pill');
+    if (fpsLimitPills && fpsLimitPills.length > 0) {
+      const applyFpsLimit = (limit) => {
+        this.settings.fpsLimit = String(limit);
+        fpsLimitPills.forEach(p => {
+          p.classList.toggle('active', p.dataset.fps === String(limit));
+        });
+        this.saveSettings();
+        if (this._onFpsLimitChange) this._onFpsLimitChange(limit);
+      };
+
+      fpsLimitPills.forEach(pill => {
+        pill.addEventListener('click', () => {
+          applyFpsLimit(pill.dataset.fps);
+        });
+      });
+
+      const currentFpsLimit = this.settings.fpsLimit || 'unlimited';
+      applyFpsLimit(currentFpsLimit);
+    }
+
     // Toggles
     const fpsToggle = document.getElementById('setting-show-fps');
     if (fpsToggle) {
@@ -514,6 +538,9 @@ export class UIManager {
 
   /** Register Graphics Quality change listener */
   onGraphicsQualityChange(callback) { this._onGraphicsQualityChange = callback; }
+
+  /** Register FPS Limit change listener */
+  onFpsLimitChange(callback) { this._onFpsLimitChange = callback; }
 
   /** Loading Screen Control */
   updateLoadingProgress(pct, statusText, loreTip = null) {
