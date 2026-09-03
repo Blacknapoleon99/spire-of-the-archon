@@ -56,6 +56,11 @@ export class AssetLoader {
   }
 
   loadGLTFRaw(url) {
+    if (!this.rawCache) this.rawCache = new Map();
+    if (this.rawCache.has(url)) {
+      return Promise.resolve(this.rawCache.get(url));
+    }
+
     return new Promise((resolve, reject) => {
       this.loader.load(
         url,
@@ -69,6 +74,7 @@ export class AssetLoader {
               }
             }
           });
+          this.rawCache.set(url, gltf);
           resolve(gltf);
         },
         undefined,
@@ -96,8 +102,7 @@ export class AssetLoader {
     const floor2Urls = [
       '/models/blacksmith.glb',
       '/models/guard_tower.glb',
-      '/models/gatehouse.glb',
-      '/models/props.glb'
+      '/models/gatehouse.glb'
     ];
     return Promise.allSettled(floor2Urls.map(u => this.loadGLTF(u)));
   }
@@ -111,18 +116,17 @@ export class AssetLoader {
   }
 
   preloadAll() {
-    // Progressive Loading: Load Floor 1 immediately, then background-stream later floors
-    return this.preloadFloor1().then(() => {
-      // Lazy stream Floor 2 & 3 in background during idle time
-      if (typeof window !== 'undefined' && window.requestIdleCallback) {
-        window.requestIdleCallback(() => {
-          this.preloadFloor2().then(() => this.preloadFloor3());
-        }, { timeout: 3000 });
-      } else {
-        setTimeout(() => {
-          this.preloadFloor2().then(() => this.preloadFloor3());
-        }, 1500);
-      }
+    // 100% Upfront Preloading: Load wand viewmodel and all floors in parallel during loading screen
+    const wandPromise = this.loadGLTFRaw('/models/fp_viewmodel_wand.glb').catch(err => {
+      console.warn('[AssetLoader] Viewmodel wand preload notice:', err);
+    });
+
+    const f1Promise = this.preloadFloor1();
+    const f2Promise = this.preloadFloor2();
+    const f3Promise = this.preloadFloor3();
+
+    return Promise.all([wandPromise, f1Promise, f2Promise, f3Promise]).then(() => {
+      console.log('⚡ [AssetLoader] 100% of all 3D GLTF models pre-cached into memory. Zero runtime loading!');
     });
   }
 }

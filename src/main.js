@@ -181,6 +181,7 @@ class GameApp {
       { atPct: 98, text: 'Harmonizing Astral Frequencies... The Spire Awaits.', tip: 'Ascension is imminent. Prepare your Grimoire.' }
     ];
 
+    let hasPreloadedTextures = false;
     let hasWarmedShaders = false;
     let hasInitializedVoice = false;
     let isLoadComplete = false;
@@ -195,8 +196,14 @@ class GameApp {
       const elapsed = performance.now() - loadStartTime;
       const progress = Math.min(100, (elapsed / TOTAL_LOAD_TIME) * 100);
 
-      // Trigger WebGL shader & Ultimate vortex pre-warm at 45% (so heavy compilation finishes well before game starts)
-      if (progress >= 45 && !hasWarmedShaders) {
+      // Pre-generate and upload all 25 PBR textures across all 3 floors to GPU VRAM at 30%
+      if (progress >= 30 && !hasPreloadedTextures) {
+        hasPreloadedTextures = true;
+        this.chunkLoader.preloadEverything(this.engineScene.renderer);
+      }
+
+      // Trigger WebGL shader & Ultimate vortex pre-warm at 55% (so all compilation finishes upfront)
+      if (progress >= 55 && !hasWarmedShaders) {
         hasWarmedShaders = true;
         this.engineScene.warmupShaders();
         this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera);
@@ -222,10 +229,9 @@ class GameApp {
         isLoadComplete = true;
         this.ui.updateLoadingProgress(100, 'ASCENSION READY. THE SPIRE AWAITS.', 'Click or Press Space to enter the Vault.');
         
-        // Present glowing "ENTER THE SPIRE [SPACE]" button
+        // Present glowing "ENTER THE SPIRE [SPACE]" button (Zero background loading during gameplay)
         this.ui.showEnterSpireButton(() => {
           this.ui.hideLoadingScreen();
-          this.chunkLoader.startBackgroundPreload();
           soundEngine.startMusic('archives');
         });
         return;
