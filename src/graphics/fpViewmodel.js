@@ -18,6 +18,7 @@ export class FPViewmodel {
     this.walkCycle = 0;
     this.lookSwayX = 0;
     this.lookSwayY = 0;
+    this.verticalBob = 0;
 
     this.initViewmodel();
   }
@@ -32,9 +33,14 @@ export class FPViewmodel {
     };
     const colorConfig = classColors[this.wizardClass] || classColors.pyromancer;
 
+    // High-Fidelity PBR Materials
+    const gauntletPBR = TextureGenerator.createArchmageGauntletPBR(colorConfig.hex);
+    const gauntletMat = gauntletPBR.material;
+    const elderwoodPBR = TextureGenerator.createTwistedElderwoodPBR();
+    const staffWoodMat = elderwoodPBR.material;
+    const leatherWrapPBR = TextureGenerator.createLeatherWrapPBR();
+    const leatherWrapMat = leatherWrapPBR.material;
     const clothMat = TextureGenerator.createClothWeavePBR(colorConfig.hex).material;
-    const skinMat = TextureGenerator.createSkinPBR().material;
-    const woodMat = TextureGenerator.createWoodGrainPBR().material;
     const brassPBR = TextureGenerator.createGildedBrassPBR();
     const goldMat = brassPBR.material;
 
@@ -44,75 +50,133 @@ export class FPViewmodel {
     this.rightArmGroup = new THREE.Group();
     this.rightArmGroup.position.set(0.36, -0.32, -0.55);
 
-    // Forearm Sleeve
-    const sleeveGeo = new THREE.CylinderGeometry(0.065, 0.082, 0.46, 14);
+    // Forearm Velvet/Cloth Sleeve
+    const sleeveGeo = new THREE.CylinderGeometry(0.065, 0.082, 0.46, 16);
     const sleeve = new THREE.Mesh(sleeveGeo, clothMat);
     sleeve.position.set(0, -0.16, 0.2);
     sleeve.rotation.x = Math.PI / 3;
     this.rightArmGroup.add(sleeve);
 
-    // Gilded Archmage Bracer
-    const bracerGeo = new THREE.CylinderGeometry(0.07, 0.076, 0.14, 14);
-    const bracerMat = new THREE.MeshStandardMaterial({ color: 0x2b1d16, roughness: 0.6 });
+    // Gilded Archmage Bracer with Gold Filigree Trim
+    const bracerGeo = new THREE.CylinderGeometry(0.072, 0.078, 0.14, 16);
+    const bracerMat = new THREE.MeshStandardMaterial({
+      color: 0x1c1322,
+      roughness: 0.32,
+      metalness: 0.65
+    });
     const bracer = new THREE.Mesh(bracerGeo, bracerMat);
     bracer.position.set(0, -0.05, 0.12);
     bracer.rotation.x = Math.PI / 3;
     this.rightArmGroup.add(bracer);
 
-    const bracerRingGeo = new THREE.TorusGeometry(0.077, 0.008, 8, 16);
-    const bracerRing = new THREE.Mesh(bracerRingGeo, goldMat);
-    bracerRing.position.set(0, -0.05, 0.12);
-    bracerRing.rotation.x = Math.PI / 3;
-    this.rightArmGroup.add(bracerRing);
+    const bracerRing1 = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.007, 8, 20), goldMat);
+    bracerRing1.position.set(0, -0.01, 0.10);
+    bracerRing1.rotation.x = Math.PI / 3;
+    this.rightArmGroup.add(bracerRing1);
+
+    const bracerRing2 = new THREE.Mesh(new THREE.TorusGeometry(0.074, 0.007, 8, 20), goldMat);
+    bracerRing2.position.set(0, -0.09, 0.14);
+    bracerRing2.rotation.x = Math.PI / 3;
+    this.rightArmGroup.add(bracerRing2);
 
     // ==========================================
-    // ANATOMICAL RIGHT HAND (CLASPING STAFF)
+    // ANATOMICAL RIGHT HAND (GAUNTLET & CLASP)
     // ==========================================
     this.rightHand = new THREE.Group();
     this.rightHand.position.set(0, 0.02, 0.02);
 
-    // Contoured Palm
-    const palmGeo = new THREE.BoxGeometry(0.072, 0.048, 0.085);
-    const palm = new THREE.Mesh(palmGeo, skinMat);
+    // Organic Contoured Palm (Rounded & Beveled)
+    const palmGeo = new THREE.SphereGeometry(0.046, 14, 12);
+    const palm = new THREE.Mesh(palmGeo, gauntletMat);
+    palm.scale.set(1.0, 0.74, 1.25);
     this.rightHand.add(palm);
 
-    // Articulated Thumb curling over front of shaft
-    const thumbProximalGeo = new THREE.CylinderGeometry(0.014, 0.016, 0.042, 8);
-    const thumbProximal = new THREE.Mesh(thumbProximalGeo, skinMat);
-    thumbProximal.position.set(-0.038, 0.012, -0.015);
-    thumbProximal.rotation.z = 0.55;
-    thumbProximal.rotation.y = 0.45;
+    // Thenar Muscle Base (Fleshy thumb root)
+    const thenarGeo = new THREE.SphereGeometry(0.024, 10, 10);
+    const thenar = new THREE.Mesh(thenarGeo, gauntletMat);
+    thenar.scale.set(1.1, 0.9, 1.3);
+    thenar.position.set(-0.028, -0.008, 0.01);
+    this.rightHand.add(thenar);
 
-    const thumbDistalGeo = new THREE.CylinderGeometry(0.012, 0.014, 0.038, 8);
-    const thumbDistal = new THREE.Mesh(thumbDistalGeo, skinMat);
-    thumbDistal.position.set(-0.01, 0.03, -0.015);
-    thumbDistal.rotation.x = -0.6;
-    thumbProximal.add(thumbDistal);
-    this.rightHand.add(thumbProximal);
+    // Dorsal Arcane Metacarpal Plate with Gold Inlay
+    const dorsalPlateGeo = new THREE.BoxGeometry(0.055, 0.012, 0.058);
+    const dorsalPlateMat = new THREE.MeshStandardMaterial({
+      color: 0x241a2e,
+      roughness: 0.25,
+      metalness: 0.75
+    });
+    const dorsalPlate = new THREE.Mesh(dorsalPlateGeo, dorsalPlateMat);
+    dorsalPlate.position.set(0, 0.028, -0.005);
+    this.rightHand.add(dorsalPlate);
 
-    // 4 Curved Fingers wrapped tightly around staff
+    // 4 Articulated Fingers (3 Anatomical Segments + Spherical Knuckles Each)
     const fingerConfigs = [
-      { x: 0.025, len1: 0.042, len2: 0.038 }, // Index
-      { x: 0.009, len1: 0.046, len2: 0.040 }, // Middle
-      { x: -0.007, len1: 0.043, len2: 0.037 }, // Ring
-      { x: -0.023, len1: 0.036, len2: 0.032 }  // Pinky
+      { x: 0.024, l1: 0.028, l2: 0.024, l3: 0.020, curl: 1.1 }, // Index
+      { x: 0.008, l1: 0.031, l2: 0.026, l3: 0.022, curl: 1.15 }, // Middle
+      { x: -0.008, l1: 0.029, l2: 0.024, l3: 0.020, curl: 1.1 }, // Ring
+      { x: -0.024, l1: 0.024, l2: 0.020, l3: 0.017, curl: 1.05 }  // Pinky
     ];
 
     fingerConfigs.forEach(fc => {
-      const p1Geo = new THREE.CylinderGeometry(0.011, 0.013, fc.len1, 8);
-      const p1 = new THREE.Mesh(p1Geo, skinMat);
-      p1.position.set(fc.x, 0.024, -0.042);
-      p1.rotation.x = -1.2;
+      // Metacarpophalangeal (MCP) Knuckle Guard Sphere
+      const knuckleGeo = new THREE.SphereGeometry(0.013, 8, 8);
+      const knuckle = new THREE.Mesh(knuckleGeo, goldMat);
+      knuckle.position.set(fc.x, 0.022, -0.040);
+      this.rightHand.add(knuckle);
 
-      const p2Geo = new THREE.CylinderGeometry(0.009, 0.011, fc.len2, 8);
-      const p2 = new THREE.Mesh(p2Geo, skinMat);
-      p2.position.set(0, fc.len1 * 0.5, 0.012);
-      p2.rotation.x = -0.9;
+      // Proximal Phalanx
+      const p1Geo = new THREE.CylinderGeometry(0.010, 0.012, fc.l1, 8);
+      const p1 = new THREE.Mesh(p1Geo, gauntletMat);
+      p1.position.set(fc.x, 0.018, -0.046);
+      p1.rotation.x = -fc.curl;
+
+      // PIP Joint Knuckle Sphere
+      const pipKnuckle = new THREE.Mesh(new THREE.SphereGeometry(0.010, 8, 8), goldMat);
+      pipKnuckle.position.set(0, fc.l1 * 0.5, 0);
+      p1.add(pipKnuckle);
+
+      // Intermediate Phalanx
+      const p2Geo = new THREE.CylinderGeometry(0.009, 0.010, fc.l2, 8);
+      const p2 = new THREE.Mesh(p2Geo, gauntletMat);
+      p2.position.set(0, fc.l1 * 0.5 + fc.l2 * 0.5, 0.006);
+      p2.rotation.x = -0.7;
       p1.add(p2);
+
+      // DIP Joint Knuckle & Fingertip Claws
+      const dipKnuckle = new THREE.Mesh(new THREE.SphereGeometry(0.008, 8, 8), goldMat);
+      dipKnuckle.position.set(0, fc.l2 * 0.5, 0);
+      p2.add(dipKnuckle);
+
+      const p3Geo = new THREE.ConeGeometry(0.008, fc.l3, 8);
+      const p3 = new THREE.Mesh(p3Geo, goldMat);
+      p3.position.set(0, fc.l2 * 0.5 + fc.l3 * 0.5, 0.004);
+      p3.rotation.x = -0.5;
+      p2.add(p3);
 
       this.rightHand.add(p1);
     });
 
+    // 3-Segment Articulated Thumb wrapped around front of staff
+    const thumbKnuckle = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 8), goldMat);
+    thumbKnuckle.position.set(-0.036, 0.012, -0.012);
+    this.rightHand.add(thumbKnuckle);
+
+    const thumbP1 = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.034, 8), gauntletMat);
+    thumbP1.position.set(-0.036, 0.012, -0.012);
+    thumbP1.rotation.z = 0.55;
+    thumbP1.rotation.y = 0.45;
+
+    const thumbP2 = new THREE.Mesh(new THREE.CylinderGeometry(0.010, 0.012, 0.028, 8), gauntletMat);
+    thumbP2.position.set(-0.008, 0.026, -0.012);
+    thumbP2.rotation.x = -0.65;
+    thumbP1.add(thumbP2);
+
+    const thumbTip = new THREE.Mesh(new THREE.ConeGeometry(0.009, 0.022, 8), goldMat);
+    thumbTip.position.set(0, 0.022, -0.005);
+    thumbTip.rotation.x = -0.4;
+    thumbP2.add(thumbTip);
+
+    this.rightHand.add(thumbP1);
     this.rightArmGroup.add(this.rightHand);
 
     // ==========================================
@@ -123,101 +187,103 @@ export class FPViewmodel {
     this.staffGroup.rotation.x = -0.22;
     this.staffGroup.rotation.z = -0.14;
 
-    // Carved Walnut Staff Shaft
-    const shaftGeo = new THREE.CylinderGeometry(0.024, 0.028, 1.85, 14);
-    const shaft = new THREE.Mesh(shaftGeo, woodMat);
+    // Carved Elderwood Staff Shaft with PBR Wood Texture
+    const shaftGeo = new THREE.CylinderGeometry(0.022, 0.027, 1.95, 16);
+    const shaft = new THREE.Mesh(shaftGeo, staffWoodMat);
     shaft.position.set(0, 0.48, -0.32);
     shaft.rotation.x = Math.PI / 4;
     this.staffGroup.add(shaft);
 
-    // Gold Spiral Ribbons & Bands along shaft
-    for (let i = 0; i < 4; i++) {
-      const ringGeo = new THREE.TorusGeometry(0.032, 0.007, 8, 16);
-      const ring = new THREE.Mesh(ringGeo, goldMat);
-      ring.position.set(0, 0.55 + i * 0.22, -0.38 - i * 0.22);
-      ring.rotation.x = Math.PI / 4;
-      this.staffGroup.add(ring);
-    }
+    // Cross-Stitched Leather Wrap Handle Grip
+    const gripGeo = new THREE.CylinderGeometry(0.026, 0.026, 0.28, 16);
+    const grip = new THREE.Mesh(gripGeo, leatherWrapMat);
+    grip.position.set(0, 0.08, 0.02);
+    grip.rotation.x = Math.PI / 4;
+    this.staffGroup.add(grip);
 
-    // Crown Filigree Head Mount
-    const mountGeo = new THREE.CylinderGeometry(0.055, 0.022, 0.16, 8);
+    // Spiral Gold Filigree Vines winding up along the entire shaft length
+    const vineKnot = new THREE.Mesh(new THREE.TorusKnotGeometry(0.030, 0.005, 64, 8, 2, 9), goldMat);
+    vineKnot.position.set(0, 0.65, -0.48);
+    vineKnot.rotation.x = Math.PI / 4;
+    vineKnot.scale.set(1.0, 1.0, 4.2);
+    this.staffGroup.add(vineKnot);
+
+    // Lower Staff Pommel with Gold Ferrule & Counterweight Crystal
+    const pommelGeo = new THREE.CylinderGeometry(0.034, 0.018, 0.12, 12);
+    const pommel = new THREE.Mesh(pommelGeo, goldMat);
+    pommel.position.set(0, -0.22, 0.38);
+    pommel.rotation.x = Math.PI / 4;
+    this.staffGroup.add(pommel);
+
+    const pommelGem = new THREE.Mesh(new THREE.OctahedronGeometry(0.028, 0), new THREE.MeshStandardMaterial({
+      color: colorConfig.color,
+      emissive: colorConfig.color,
+      emissiveIntensity: 1.4
+    }));
+    pommelGem.position.set(0, -0.28, 0.44);
+    this.staffGroup.add(pommelGem);
+
+    // Crown Capital Mount
+    const mountGeo = new THREE.CylinderGeometry(0.058, 0.024, 0.18, 12);
     const mount = new THREE.Mesh(mountGeo, goldMat);
     mount.position.set(0, 1.18, -1.02);
     mount.rotation.x = Math.PI / 4;
     this.staffGroup.add(mount);
 
-    // Class-specific Crown & Relic Details
-    if (this.wizardClass === 'luminary') {
-      const haloGeo = new THREE.TorusGeometry(0.18, 0.018, 8, 24);
-      const halo = new THREE.Mesh(haloGeo, goldMat);
-      halo.position.set(0, 1.27, -1.11);
-      this.staffGroup.add(halo);
-      this.haloMesh = halo;
-    } else if (this.wizardClass === 'chronomancer') {
-      const ring1 = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.014, 8, 20), goldMat);
-      ring1.position.set(0, 1.27, -1.11);
-      ring1.rotation.x = Math.PI / 3;
-      this.staffGroup.add(ring1);
-      this.chronoRing = ring1;
-
-      const ring2 = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.01, 8, 16), goldMat);
-      ring2.position.set(0, 1.27, -1.11);
-      ring2.rotation.y = Math.PI / 4;
-      this.staffGroup.add(ring2);
-      this.chronoRing2 = ring2;
-    } else if (this.wizardClass === 'stormcaller') {
-      // Crackling Storm Rods
-      for (let s = 0; s < 3; s++) {
-        const rodGeo = new THREE.ConeGeometry(0.014, 0.18, 5);
-        const rod = new THREE.Mesh(rodGeo, goldMat);
-        const a = (s * Math.PI * 2) / 3;
-        rod.position.set(Math.cos(a) * 0.06, 1.26, -1.11 + Math.sin(a) * 0.06);
-        rod.rotation.x = Math.PI / 4;
-        this.staffGroup.add(rod);
-      }
-    } else {
-      // 4 Arcane Dragon Claws holding crystal
-      for (let c = 0; c < 4; c++) {
-        const clawGeo = new THREE.ConeGeometry(0.012, 0.14, 6);
-        const claw = new THREE.Mesh(clawGeo, goldMat);
-        const angle = (c * Math.PI) / 2;
-        claw.position.set(Math.cos(angle) * 0.045, 1.25 + Math.sin(angle) * 0.01, -1.09);
-        claw.rotation.x = Math.PI / 4;
-        claw.rotation.z = angle;
-        this.staffGroup.add(claw);
-      }
+    // 4 Swept Dragon Talons Grasping the Focus Orb
+    for (let c = 0; c < 4; c++) {
+      const angle = (c * Math.PI) / 2;
+      const claw = new THREE.Mesh(new THREE.ConeGeometry(0.014, 0.18, 6), goldMat);
+      claw.position.set(Math.cos(angle) * 0.052, 1.25 + Math.sin(angle) * 0.012, -1.09);
+      claw.rotation.x = Math.PI / 4;
+      claw.rotation.z = angle;
+      this.staffGroup.add(claw);
     }
 
-    // Glowing Prismatic Crystal Head
-    const crystalGeo = new THREE.OctahedronGeometry(0.095, 1);
+    // Dual Counter-Rotating Astrolabe Rings around the crystal
+    const astrolabeOuter = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.008, 8, 24), goldMat);
+    astrolabeOuter.position.set(0, 1.27, -1.11);
+    astrolabeOuter.rotation.x = Math.PI / 3;
+    this.staffGroup.add(astrolabeOuter);
+    this.chronoRing = astrolabeOuter;
+
+    const astrolabeInner = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.006, 8, 20), goldMat);
+    astrolabeInner.position.set(0, 1.27, -1.11);
+    astrolabeInner.rotation.y = Math.PI / 4;
+    this.staffGroup.add(astrolabeInner);
+    this.chronoRing2 = astrolabeInner;
+
+    // Glowing Prismatic Faceted Crystal Focus Head
+    const crystalGeo = new THREE.OctahedronGeometry(0.105, 1);
     const crystalMat = new THREE.MeshStandardMaterial({
       color: colorConfig.color,
       emissive: colorConfig.color,
-      emissiveIntensity: 1.8,
-      roughness: 0.06,
-      metalness: 0.2
+      emissiveIntensity: 2.2,
+      roughness: 0.04,
+      metalness: 0.35,
+      transparent: true,
+      opacity: 0.95
     });
     this.crystal = new THREE.Mesh(crystalGeo, crystalMat);
     this.crystal.position.set(0, 1.27, -1.11);
     this.staffGroup.add(this.crystal);
 
     // Glowing Arcane Aura Core around Crystal
-    const auraGeo = new THREE.IcosahedronGeometry(0.13, 1);
+    const auraGeo = new THREE.IcosahedronGeometry(0.14, 1);
     const auraMat = new THREE.MeshBasicMaterial({
       color: colorConfig.light,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.45,
       wireframe: true
     });
     this.crystalAura = new THREE.Mesh(auraGeo, auraMat);
     this.crystalAura.position.set(0, 1.27, -1.11);
     this.staffGroup.add(this.crystalAura);
 
-    // Orbiting Mini Crystals & Elemental Sparks
+    // 6 Orbiting Mini Crystals & Elemental Sparks
     this.orbitShards = [];
-    const shardCount = this.wizardClass === 'stormcaller' || this.wizardClass === 'pyromancer' ? 6 : 4;
-    for (let s = 0; s < shardCount; s++) {
-      const shardGeo = new THREE.OctahedronGeometry(s % 2 === 0 ? 0.038 : 0.024, 0);
+    for (let s = 0; s < 6; s++) {
+      const shardGeo = new THREE.OctahedronGeometry(s % 2 === 0 ? 0.036 : 0.024, 0);
       const shardMat = new THREE.MeshBasicMaterial({
         color: s % 2 === 0 ? colorConfig.light : 0xffffff
       });
@@ -226,8 +292,8 @@ export class FPViewmodel {
       this.orbitShards.push(shard);
     }
 
-    // Dynamic Staff Light
-    this.staffLight = new THREE.PointLight(colorConfig.light, 2.4, 10);
+    // Dynamic Staff PointLight
+    this.staffLight = new THREE.PointLight(colorConfig.light, 2.8, 11);
     this.staffLight.position.set(0, 1.27, -1.11);
     this.staffGroup.add(this.staffLight);
 
@@ -246,30 +312,70 @@ export class FPViewmodel {
     leftSleeve.rotation.x = Math.PI / 3;
     this.leftArmGroup.add(leftSleeve);
 
-    // Left Hand Palm
+    // Left Hand
     this.leftHand = new THREE.Group();
     this.leftHand.position.set(0, 0.02, 0.02);
 
-    const leftPalmGeo = new THREE.BoxGeometry(0.07, 0.045, 0.08);
-    const leftPalm = new THREE.Mesh(leftPalmGeo, skinMat);
+    // Organic Contoured Left Palm
+    const leftPalm = new THREE.Mesh(palmGeo, gauntletMat);
+    leftPalm.scale.set(1.0, 0.74, 1.25);
     this.leftHand.add(leftPalm);
 
-    // Elegantly Splayed Somatic Fingers
-    const leftFingerAngles = [-0.3, -0.1, 0.1, 0.3];
+    // Thenar Muscle Base
+    const leftThenar = new THREE.Mesh(thenarGeo, gauntletMat);
+    leftThenar.scale.set(1.1, 0.9, 1.3);
+    leftThenar.position.set(0.028, -0.008, 0.01);
+    this.leftHand.add(leftThenar);
+
+    // Dorsal Arcane Metacarpal Plate
+    const leftDorsalPlate = new THREE.Mesh(dorsalPlateGeo, dorsalPlateMat);
+    leftDorsalPlate.position.set(0, 0.028, -0.005);
+    this.leftHand.add(leftDorsalPlate);
+
+    // 4 Splayed Somatic Fingers with 3 Segments & Rounded Knuckles
+    const leftFingerAngles = [-0.35, -0.12, 0.12, 0.35];
     leftFingerAngles.forEach((ang, idx) => {
-      const fGeo = new THREE.CylinderGeometry(0.009, 0.012, 0.055, 8);
-      const f = new THREE.Mesh(fGeo, skinMat);
-      f.position.set((idx - 1.5) * 0.018, 0.015, -0.05);
-      f.rotation.z = ang;
-      f.rotation.x = 0.35;
-      this.leftHand.add(f);
+      const fx = (idx - 1.5) * 0.018;
+
+      const knuckle = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 8), goldMat);
+      knuckle.position.set(fx, 0.020, -0.045);
+      this.leftHand.add(knuckle);
+
+      const f1 = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.011, 0.028, 8), gauntletMat);
+      f1.position.set(fx, 0.018, -0.052);
+      f1.rotation.z = ang;
+      f1.rotation.x = 0.35;
+
+      const midKnuckle = new THREE.Mesh(new THREE.SphereGeometry(0.009, 8, 8), goldMat);
+      midKnuckle.position.set(0, 0.016, 0);
+      f1.add(midKnuckle);
+
+      const f2 = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.009, 0.024, 8), gauntletMat);
+      f2.position.set(0, 0.028, -0.006);
+      f2.rotation.x = 0.25;
+      f1.add(f2);
+
+      const tipClaw = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.018, 8), goldMat);
+      tipClaw.position.set(0, 0.020, -0.004);
+      tipClaw.rotation.x = 0.15;
+      f2.add(tipClaw);
+
+      this.leftHand.add(f1);
     });
 
-    // Somatic Thumb
-    const leftThumbGeo = new THREE.CylinderGeometry(0.012, 0.014, 0.045, 8);
-    const leftThumb = new THREE.Mesh(leftThumbGeo, skinMat);
-    leftThumb.position.set(0.038, 0.01, -0.02);
+    // Articulated Somatic Thumb
+    const leftThumbK = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 8), goldMat);
+    leftThumbK.position.set(0.036, 0.010, -0.018);
+    this.leftHand.add(leftThumbK);
+
+    const leftThumb = new THREE.Mesh(new THREE.CylinderGeometry(0.011, 0.013, 0.034, 8), gauntletMat);
+    leftThumb.position.set(0.036, 0.010, -0.018);
     leftThumb.rotation.z = -0.55;
+    leftThumb.rotation.x = 0.25;
+
+    const leftThumbTip = new THREE.Mesh(new THREE.ConeGeometry(0.009, 0.022, 8), goldMat);
+    leftThumbTip.position.set(0, 0.022, -0.004);
+    leftThumb.add(leftThumbTip);
     this.leftHand.add(leftThumb);
 
     // Multi-tier Somatic Arcane Glyph System
@@ -389,8 +495,23 @@ export class FPViewmodel {
     this.triggerCast('basic', intensity);
   }
 
+  triggerJump() {
+    this.verticalBob = -0.07;
+  }
+
+  triggerLanding() {
+    this.verticalBob = 0.055;
+  }
+
   update(deltaTime, isMoving, mouseDelta) {
     this.time += deltaTime;
+
+    // Smoothly decay jump/landing vertical bob
+    if (this.verticalBob !== undefined && Math.abs(this.verticalBob) > 0.001) {
+      this.verticalBob = THREE.MathUtils.lerp(this.verticalBob, 0, Math.min(1.0, deltaTime * 8));
+    } else {
+      this.verticalBob = 0;
+    }
 
     // Mouse look inertia sway (lag behind camera turns)
     if (mouseDelta) {
@@ -428,19 +549,19 @@ export class FPViewmodel {
 
     // Restore crystal and light intensity smoothly
     if (this.crystal) {
-      this.crystal.material.emissiveIntensity = THREE.MathUtils.lerp(this.crystal.material.emissiveIntensity, 1.8, deltaTime * 6);
+      this.crystal.material.emissiveIntensity = THREE.MathUtils.lerp(this.crystal.material.emissiveIntensity, 2.2, deltaTime * 6);
     }
     if (this.staffLight) {
-      this.staffLight.intensity = THREE.MathUtils.lerp(this.staffLight.intensity, 2.4, deltaTime * 6);
+      this.staffLight.intensity = THREE.MathUtils.lerp(this.staffLight.intensity, 2.8, deltaTime * 6);
     }
     if (this.leftHandLight) {
       this.leftHandLight.intensity = THREE.MathUtils.lerp(this.leftHandLight.intensity, 1.4, deltaTime * 5);
     }
 
-    // Update Right Arm / Staff with sway and recoil and mouse inertia
+    // Update Right Arm / Staff with sway, recoil, mouse inertia, and jump bob
     this.rightArmGroup.position.set(
       0.36 + swayX + this.lookSwayX,
-      -0.32 - swayY - this.recoil * 0.5 + this.lookSwayY,
+      -0.32 - swayY - this.recoil * 0.5 + this.lookSwayY + this.verticalBob,
       -0.55 + this.recoil
     );
     this.staffGroup.rotation.x = -0.22 - this.recoil * 1.6 + this.lookSwayY * 1.6;
@@ -501,11 +622,11 @@ export class FPViewmodel {
       }
     }
 
-    // Update Left Somatic Hand with casting thrust
+    // Update Left Somatic Hand with casting thrust and jump bob
     const thrust = this.castGesture * 0.18;
     this.leftArmGroup.position.set(
       -0.35 - swayX - this.lookSwayX * 0.85 + thrust * 0.45,
-      -0.34 - swayY - this.lookSwayY * 0.85 + thrust * 0.85,
+      -0.34 - swayY - this.lookSwayY * 0.85 + thrust * 0.85 + this.verticalBob,
       -0.5 - thrust * 1.4
     );
     this.leftHand.rotation.x = this.castGesture * 0.9;

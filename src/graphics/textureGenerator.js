@@ -1338,8 +1338,8 @@ export class TextureGenerator {
         items: [
           { key: '[ W A S D ]', desc: 'Traverse Stone Vaults' },
           { key: '[ MOUSE ]', desc: 'First-Person Look & Aim' },
-          { key: '[ SPACE ]', desc: 'Dimensional Blink Dash' },
-          { key: '[ SHIFT ]', desc: 'Arcane Sprint Cadence' }
+          { key: '[ SPACE ]', desc: 'Arcane Jump & Vault' },
+          { key: '[ SHIFT ]', desc: 'Dimensional Blink Dash' }
         ]
       },
       {
@@ -2310,6 +2310,215 @@ export class TextureGenerator {
 
     this.cache[key] = { material, diffuseMap };
     return this.cache[key];
+  }
+
+  /**
+   * High-Fidelity Archmage Dragon-Leather Gauntlet with Glowing Runic Veins & Sobel Normals
+   */
+  static createArchmageGauntletPBR(colorHex = '#ff5722', width = 512, height = 512) {
+    const key = `gauntlet_${colorHex}`;
+    if (this.cache[key]) return this.cache[key];
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    // Deep weathered obsidian dragon-leather tone
+    ctx.fillStyle = '#17131b';
+    ctx.fillRect(0, 0, width, height);
+
+    // Heightmap canvas for tactile normal relief
+    const heightCanvas = document.createElement('canvas');
+    heightCanvas.width = width;
+    heightCanvas.height = height;
+    const hCtx = heightCanvas.getContext('2d');
+    hCtx.fillStyle = '#303030';
+    hCtx.fillRect(0, 0, width, height);
+
+    // Leather pore & grain micro-texture
+    for (let i = 0; i < 4000; i++) {
+      const x = Math.random() * width;
+      const y = Math.random() * height;
+      const r = 1 + Math.random() * 2;
+      ctx.fillStyle = Math.random() > 0.5 ? 'rgba(38, 28, 44, 0.4)' : 'rgba(8, 6, 12, 0.5)';
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      hCtx.fillStyle = Math.random() > 0.5 ? '#555555' : '#151515';
+      hCtx.beginPath();
+      hCtx.arc(x, y, r, 0, Math.PI * 2);
+      hCtx.fill();
+    }
+
+    // Stitched leather seams & gold filigree trim
+    ctx.strokeStyle = '#c4a962';
+    ctx.lineWidth = 3;
+    hCtx.strokeStyle = '#ffffff';
+    hCtx.lineWidth = 4;
+    for (let s = 1; s <= 3; s++) {
+      const y = s * (height / 4);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+
+      hCtx.beginPath();
+      hCtx.moveTo(0, y);
+      hCtx.lineTo(width, y);
+      hCtx.stroke();
+    }
+
+    // Glowing Arcane Runic Veins along dorsal tendons
+    const emissiveCanvas = document.createElement('canvas');
+    emissiveCanvas.width = width;
+    emissiveCanvas.height = height;
+    const eCtx = emissiveCanvas.getContext('2d');
+    eCtx.clearRect(0, 0, width, height);
+
+    eCtx.strokeStyle = colorHex;
+    eCtx.shadowColor = colorHex;
+    eCtx.shadowBlur = 12;
+    eCtx.lineWidth = 3.5;
+
+    // 4 Metacarpal Leyline Veins
+    for (let v = 0; v < 4; v++) {
+      const startX = width * 0.2 + v * (width * 0.2);
+      eCtx.beginPath();
+      eCtx.moveTo(startX, height);
+      eCtx.bezierCurveTo(startX + 15, height * 0.6, startX - 10, height * 0.3, startX, 0);
+      eCtx.stroke();
+    }
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    const normalMap = this.generateNormalMapFromHeight(heightCanvas, 2.4);
+    const emissiveMap = new THREE.CanvasTexture(emissiveCanvas);
+
+    const material = new THREE.MeshStandardMaterial({
+      map: diffuseMap,
+      normalMap,
+      normalScale: new THREE.Vector2(1.4, 1.4),
+      emissive: new THREE.Color(colorHex),
+      emissiveMap,
+      emissiveIntensity: 1.6,
+      roughness: 0.35,
+      metalness: 0.25
+    });
+
+    this.cache[key] = { material, diffuseMap, normalMap, emissiveMap };
+    return this.cache[key];
+  }
+
+  /**
+   * Twisted Ancient Elderwood Staff Texture with Deep Knots & Sobel Normals
+   */
+  static createTwistedElderwoodPBR(width = 512, height = 512) {
+    if (this.cache.elderwood) return this.cache.elderwood;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    // Deep antique dark mahogany / elderwood base
+    ctx.fillStyle = '#26140d';
+    ctx.fillRect(0, 0, width, height);
+
+    const heightCanvas = document.createElement('canvas');
+    heightCanvas.width = width;
+    heightCanvas.height = height;
+    const hCtx = heightCanvas.getContext('2d');
+    hCtx.fillStyle = '#404040';
+    hCtx.fillRect(0, 0, width, height);
+
+    // Flowing wood grain rings and knots
+    ctx.lineWidth = 2.5;
+    for (let i = 0; i < 60; i++) {
+      const y = (i / 60) * height;
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(70, 42, 28, 0.7)' : 'rgba(20, 10, 6, 0.85)';
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x <= width; x += 30) {
+        ctx.lineTo(x, y + Math.sin(x * 0.03 + i) * 8 + Math.cos(x * 0.08) * 4);
+      }
+      ctx.stroke();
+
+      hCtx.strokeStyle = i % 2 === 0 ? 'rgba(200, 200, 200, 0.4)' : 'rgba(20, 20, 20, 0.5)';
+      hCtx.lineWidth = 3;
+      hCtx.beginPath();
+      hCtx.moveTo(0, y);
+      for (let x = 0; x <= width; x += 30) {
+        hCtx.lineTo(x, y + Math.sin(x * 0.03 + i) * 8 + Math.cos(x * 0.08) * 4);
+      }
+      hCtx.stroke();
+    }
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    diffuseMap.wrapS = THREE.RepeatWrapping;
+    diffuseMap.wrapT = THREE.RepeatWrapping;
+
+    const normalMap = this.generateNormalMapFromHeight(heightCanvas, 2.6);
+
+    const material = new THREE.MeshStandardMaterial({
+      map: diffuseMap,
+      normalMap,
+      normalScale: new THREE.Vector2(1.2, 1.2),
+      roughness: 0.38,
+      metalness: 0.15
+    });
+
+    this.cache.elderwood = { material, diffuseMap, normalMap };
+    return this.cache.elderwood;
+  }
+
+  /**
+   * Cross-Stitched Handle Leather Wrap for Staff Grip
+   */
+  static createLeatherWrapPBR(width = 256, height = 256) {
+    if (this.cache.leatherWrap) return this.cache.leatherWrap;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#4a2818';
+    ctx.fillRect(0, 0, width, height);
+
+    // Diagonal wrap bands
+    ctx.strokeStyle = '#2b160c';
+    ctx.lineWidth = 8;
+    for (let i = -width; i < width * 2; i += 32) {
+      ctx.beginPath();
+      ctx.moveTo(i, 0);
+      ctx.lineTo(i + height, height);
+      ctx.stroke();
+    }
+
+    // Gold stitching
+    ctx.strokeStyle = '#c4a962';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 6]);
+    for (let i = -width; i < width * 2; i += 32) {
+      ctx.beginPath();
+      ctx.moveTo(i + 4, 0);
+      ctx.lineTo(i + height + 4, height);
+      ctx.stroke();
+    }
+
+    const diffuseMap = new THREE.CanvasTexture(canvas);
+    diffuseMap.wrapS = THREE.RepeatWrapping;
+    diffuseMap.wrapT = THREE.RepeatWrapping;
+
+    const material = new THREE.MeshStandardMaterial({
+      map: diffuseMap,
+      roughness: 0.5,
+      metalness: 0.1
+    });
+
+    this.cache.leatherWrap = { material, diffuseMap };
+    return this.cache.leatherWrap;
   }
 }
 

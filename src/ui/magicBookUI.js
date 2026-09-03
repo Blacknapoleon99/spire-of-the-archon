@@ -25,7 +25,8 @@ export const MAGIC_BOOKS = {
           <p>• <strong>Signature Skill [Q]</strong>: High-damage direct strike (e.g. <em>Fireball</em> / <em>Ice Lance</em> / <em>Radiant Heal</em> / <em>Temporal Rewind</em>). Cast on cooldown!</p>
           <p>• <strong>Tactical Skill [E]</strong>: Contextual spell or wave (e.g. <em>Flame Wave</em> / <em>Glacial Bulwark</em> / <em>Cleansing Wave</em> / <em>Time Dilation</em>). If near an interactable, [E] interacts; otherwise it unleashes your spell!</p>
           <p>• <strong>Ultimate Cataclysm [R]</strong>: Area-of-Effect devastation (e.g. <em>Infernal Fire Tornado</em> / <em>Glacial Blizzard</em> / <em>Divine Sanctuary</em> / <em>Temporal Stasis</em>). Requires 55-65 MP.</p>
-          <p>• <strong>Blink Dash [SPACE]</strong>: Instant dimensional teleportation with full invulnerability frames. Essential for slipping through Golem shockwaves and Sentinel laser beams!</p>
+          <p>• <strong>Blink Dash [SHIFT]</strong>: Instant dimensional teleportation with full invulnerability frames. Essential for slipping through Golem shockwaves and Sentinel laser beams!</p>
+          <p>• <strong>Jump [SPACE]</strong>: Leap over enemy ground slams, shockwaves, and environmental obstacles.</p>
         `
       },
       {

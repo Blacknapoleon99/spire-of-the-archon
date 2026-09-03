@@ -142,6 +142,10 @@ class GameApp {
     this.footstepTimer = 0;
     this.lootCount = 0;
 
+    // Jumping Physics
+    this.isGrounded = true;
+    this.playerVelocityY = 0;
+
     // Timing
     this.lastTime = performance.now();
     this.lastNetworkSend = 0;
@@ -806,6 +810,10 @@ class GameApp {
       } else if (e.code === 'KeyR') {
         this.tryCastSpell('ult', spells.ult);
       } else if (e.code === 'Space') {
+        e.preventDefault();
+        this.tryJump();
+      } else if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        e.preventDefault();
         this.tryDash();
       } else if (e.code === 'KeyF') {
         this.tryInteract();
@@ -849,6 +857,7 @@ class GameApp {
       this.ui.showActiveSpellTimer('Infernal Fire Tornado', '🌪️', 5.0);
       this.activeVortexTimer = { remaining: 5.0, total: 5.0 };
       soundEngine.playFlameExplosion();
+      soundEngine.playTornadoWindRoar(5.0);
     } else if (spellConfig.id === 'divine_sanctuary') {
       const groundTarget = this.localPlayer.position.clone();
       groundTarget.y = 0;
@@ -872,6 +881,7 @@ class GameApp {
     } else if (!spellConfig.heal) {
       // Instantly spawn projectile for Skill 1 (Q), Skill 2 (E), and basic attacks
       this.particles.spawnProjectile(origin, dir, slot, spellConfig.element);
+      this.particles.spawnMuzzleFlash(origin, dir, spellConfig.element);
     }
 
     onlineNetwork.castSpell({
@@ -969,6 +979,16 @@ class GameApp {
         this.spellAudioMap.set(key, audio);
       });
     });
+  }
+
+  tryJump() {
+    if (!this.isGrounded) return;
+    this.isGrounded = false;
+    this.playerVelocityY = 8.5; // Crisp, responsive upward leap
+    soundEngine.playJump();
+    if (this.fpViewmodel && this.fpViewmodel.triggerJump) {
+      this.fpViewmodel.triggerJump();
+    }
   }
 
   tryDash() {
@@ -1164,15 +1184,33 @@ class GameApp {
           this.physics.resolveCollision(this.localPlayer.position, 0.7, this.tower.colliders, maxRadius, this.tower.currentFloor);
 
           // Footstep audio synchronization
-          this.footstepTimer += deltaTime;
-          const cadence = 0.36 / Math.max(0.5, derived.moveSpeed / 6.0);
-          if (this.footstepTimer >= cadence) {
-            this.footstepTimer = 0;
-            const surface = this.currentFloor === 2 ? 'metal' : (this.currentFloor === 3 ? 'crystal' : 'stone');
-            soundEngine.playFootstep(surface);
+          if (this.isGrounded) {
+            this.footstepTimer += deltaTime;
+            const cadence = 0.36 / Math.max(0.5, derived.moveSpeed / 6.0);
+            if (this.footstepTimer >= cadence) {
+              this.footstepTimer = 0;
+              const surface = this.currentFloor === 2 ? 'metal' : (this.currentFloor === 3 ? 'crystal' : 'stone');
+              soundEngine.playFootstep(surface);
+            }
           }
         } else {
           this.footstepTimer = 0.28;
+        }
+
+        // Vertical Jump Physics & Gravity
+        if (!this.isGrounded) {
+          this.playerVelocityY -= 26.0 * deltaTime; // gravity
+          this.localPlayer.position.y += this.playerVelocityY * deltaTime;
+          if (this.localPlayer.position.y <= 0) {
+            this.localPlayer.position.y = 0;
+            this.playerVelocityY = 0;
+            this.isGrounded = true;
+            const surface = this.currentFloor === 2 ? 'metal' : (this.currentFloor === 3 ? 'crystal' : 'stone');
+            soundEngine.playFootstep(surface);
+            if (this.fpViewmodel && this.fpViewmodel.triggerLanding) {
+              this.fpViewmodel.triggerLanding();
+            }
+          }
         }
 
         this.localPlayer.rotationY = this.physics.yaw;
@@ -1184,14 +1222,18 @@ class GameApp {
           this.fpViewmodel.update(deltaTime, this.localPlayer.isMoving, mouseDelta);
         }
 
-        // First-Person LMB Attack
-        if (this.physics.isLMBDown && this.cooldowns.isReady('basic') && this.physics.isLocked) {
+        // First-Person LMB Attack (Shoots basic elemental projectile)
+        if (this.physics.isLMBDown && this.cooldowns.isReady('basic')) {
           const spells = CLASS_SPELLS[this.localPlayer.wizardClass] || CLASS_SPELLS.pyromancer;
           this.cooldowns.trigger('basic', spells.basic.cd, derived.cdr);
 
           const dir = this.physics.updateCrosshairAim();
           const origin = this.engineScene.camera.position.clone();
           const basicDmg = Math.round(spells.basic.damage * derived.spellPowerMultiplier);
+
+          // Instantly spawn local projectile & muzzle flash!
+          this.particles.spawnProjectile(origin, dir, 'basic', spells.basic.element);
+          this.particles.spawnMuzzleFlash(origin, dir, spells.basic.element);
 
           onlineNetwork.castSpell({
             spellId: spells.basic.id,
@@ -1206,7 +1248,7 @@ class GameApp {
           // SFX & Voiced Incantation
           this.playSpellAudioAndVoice(this.localPlayer.wizardClass, 'basic', spells.basic.element);
 
-          if (this.fpViewmodel) this.fpViewmodel.triggerRecoil(0.8);
+          if (this.fpViewmodel) this.fpViewmodel.triggerRecoil(0.85);
           this.basicAttackCount++;
           if (this.basicAttackCount === 3) this.tutorial.tryShowTip('abilities');
         }

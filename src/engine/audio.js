@@ -310,6 +310,139 @@ export class SoundEngine {
     });
   }
 
+  // Infernal Tornado Cyclonic Wind Roar & Buffeting Vortex
+  playTornadoWindRoar(duration = 5.0) {
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+
+    try {
+      const sampleRate = this.ctx.sampleRate;
+      const bufferSize = Math.floor(sampleRate * Math.min(6.0, duration));
+      const buffer = this.ctx.createBuffer(1, bufferSize, sampleRate);
+      const data = buffer.getChannelData(0);
+
+      // Pink/Brown noise with howling gusts
+      let b0 = 0, b1 = 0, b2 = 0;
+      for (let i = 0; i < bufferSize; i++) {
+        const white = Math.random() * 2 - 1;
+        b0 = 0.99 * b0 + white * 0.05;
+        b1 = 0.95 * b1 + white * 0.1;
+        b2 = 0.85 * b2 + white * 0.2;
+        data[i] = (b0 + b1 + b2) * 0.85;
+      }
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      // Swept resonant bandpass filter simulating whistling vortex wind
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.Q.value = 3.5;
+      filter.frequency.setValueAtTime(320, this.ctx.currentTime);
+
+      // LFO for swirling cyclonic wind buffeting
+      const lfo = this.ctx.createOscillator();
+      const lfoGain = this.ctx.createGain();
+      lfo.frequency.setValueAtTime(2.8, this.ctx.currentTime);
+      lfoGain.gain.setValueAtTime(220, this.ctx.currentTime);
+      lfo.connect(lfoGain);
+      lfoGain.connect(filter.frequency);
+
+      // Deep Sub-Bass Vortex Core Rumble
+      const subOsc = this.ctx.createOscillator();
+      const subGain = this.ctx.createGain();
+      subOsc.type = 'triangle';
+      subOsc.frequency.setValueAtTime(55, this.ctx.currentTime);
+      subGain.gain.setValueAtTime(0.45, this.ctx.currentTime);
+      subGain.gain.linearRampToValueAtTime(0.65, this.ctx.currentTime + 0.8);
+      subGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+      const mainGain = this.ctx.createGain();
+      mainGain.gain.setValueAtTime(0.01, this.ctx.currentTime);
+      mainGain.gain.linearRampToValueAtTime(0.75, this.ctx.currentTime + 0.4);
+      mainGain.gain.setValueAtTime(0.7, this.ctx.currentTime + duration - 0.8);
+      mainGain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + duration);
+
+      noise.connect(filter);
+      filter.connect(mainGain);
+      mainGain.connect(this.sfxGain);
+
+      subOsc.connect(subGain);
+      subGain.connect(this.sfxGain);
+
+      noise.start();
+      lfo.start();
+      subOsc.start();
+
+      noise.stop(this.ctx.currentTime + duration);
+      lfo.stop(this.ctx.currentTime + duration);
+      subOsc.stop(this.ctx.currentTime + duration);
+    } catch (e) {
+      console.warn('[SoundEngine] Tornado wind roar error:', e);
+    }
+  }
+
+  // Tornado Wind Shredding Tick (for DPS hits inside vortex)
+  playTornadoWindTick() {
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const bufferSize = Math.floor(this.ctx.sampleRate * 0.12);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * 0.5;
+      }
+
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(800 + Math.random() * 400, now);
+      filter.Q.value = 4.0;
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.12);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.sfxGain);
+
+      noise.start();
+    } catch (e) {}
+  }
+
+  // Player Jump / Ascend Sound
+  playJump() {
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(140, now);
+      osc.frequency.exponentialRampToValueAtTime(320, now + 0.15);
+
+      gain.gain.setValueAtTime(0.3, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain);
+
+      osc.start();
+      osc.stop(now + 0.18);
+    } catch (e) {}
+  }
+
   // 4. Ice Lance crystal ping & freeze
   playIceLance() {
     if (this.isMuted) return;

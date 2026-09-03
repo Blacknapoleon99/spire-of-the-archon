@@ -16,8 +16,8 @@ export class TutorialSystem {
     };
 
     this.tips = {
-      movement: "Click to lock your mouse. Move with W, A, S, D.",
-      combat: "Press LMB to cast your basic spell at enemies.",
+      movement: "Move with W, A, S, D. Jump with SPACE. Dash with SHIFT.",
+      combat: "Click LMB to shoot your basic spell projectile at enemies.",
       abilities: "Press Q for your first ability. Watch your mana!",
       interact: "Press F near glowing objects to interact.",
       inventory: "Press I to open your inventory and equip gear.",

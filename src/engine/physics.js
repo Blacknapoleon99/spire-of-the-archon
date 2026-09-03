@@ -75,12 +75,17 @@ export class PhysicsController {
       this.updateCameraRotation();
     });
 
-    // Mouse Clicks for Spells
+    // Mouse Clicks for Spells & Combat
     window.addEventListener('mousedown', (e) => {
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.closest('.modal-card')) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.closest('.modal-card') || e.target.closest('.quest-journal-modal') || e.target.closest('.book-modal')) {
         return;
       }
-      if (e.button === 0) this.isLMBDown = true;
+      if (e.button === 0) {
+        this.isLMBDown = true;
+        if (!this.isLocked && (e.target === this.domElement || e.target.id === 'three-canvas' || e.target.id === 'reticle' || e.target.id === 'hud-overlay')) {
+          this.domElement.requestPointerLock();
+        }
+      }
       if (e.button === 2) this.isRMBDown = true;
     });
 
