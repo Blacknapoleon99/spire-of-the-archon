@@ -157,6 +157,10 @@ export class NetworkClient {
   sendChat(message) {
     this.socket.emit('send_chat', { message });
   }
+
+  takeHazardDamage(damage) {
+    this.socket.emit('hazard_damage', { damage });
+  }
 }
 
 export const networkClient = new NetworkClient();

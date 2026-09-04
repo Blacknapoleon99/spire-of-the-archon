@@ -52,6 +52,9 @@ export class AssetLoader {
     if (this.cache.has(url)) {
       return this.cache.get(url).clone();
     }
+    if (this.rawCache && this.rawCache.has(url)) {
+      return this.rawCache.get(url).scene.clone();
+    }
     return null;
   }
 
@@ -75,6 +78,7 @@ export class AssetLoader {
             }
           });
           this.rawCache.set(url, gltf);
+          this.cache.set(url, gltf.scene);
           resolve(gltf);
         },
         undefined,
@@ -115,8 +119,20 @@ export class AssetLoader {
     return Promise.allSettled(floor3Urls.map(u => this.loadGLTF(u)));
   }
 
+  preloadBossesAndNPCs() {
+    const urls = [
+      '/models/boss_ignis.glb',
+      '/models/boss_xyris.glb',
+      '/models/boss_valerius.glb',
+      '/models/npc_merchant.glb',
+      '/models/npc_alchemist.glb',
+      '/models/npc_quest_giver.glb'
+    ];
+    return Promise.allSettled(urls.map(u => this.loadGLTFRaw(u)));
+  }
+
   preloadAll() {
-    // 100% Upfront Preloading: Load wand viewmodel and all floors in parallel during loading screen
+    // 100% Upfront Preloading: Load wand viewmodel, all floors, rigged bosses and NPCs in parallel
     const wandPromise = this.loadGLTFRaw('/models/fp_viewmodel_wand.glb').catch(err => {
       console.warn('[AssetLoader] Viewmodel wand preload notice:', err);
     });
@@ -124,9 +140,10 @@ export class AssetLoader {
     const f1Promise = this.preloadFloor1();
     const f2Promise = this.preloadFloor2();
     const f3Promise = this.preloadFloor3();
+    const bossPromise = this.preloadBossesAndNPCs();
 
-    return Promise.all([wandPromise, f1Promise, f2Promise, f3Promise]).then(() => {
-      console.log('⚡ [AssetLoader] 100% of all 3D GLTF models pre-cached into memory. Zero runtime loading!');
+    return Promise.all([wandPromise, f1Promise, f2Promise, f3Promise, bossPromise]).then(() => {
+      console.log('⚡ [AssetLoader] 100% of all 3D GLTF models, rigged bosses & NPCs pre-cached into memory. Zero runtime loading!');
     });
   }
 }

@@ -941,7 +941,7 @@ export class ModelFactory {
    * Grand Scribe Alistair — 3D Ethereal Quest Giver (Floor 1)
    */
   static createScribeGhostMesh() {
-    const glb = assetLoader.getModel('/models/elf_mage.glb');
+    const glb = assetLoader.getModel('/models/npc_quest_giver.glb') || assetLoader.getModel('/models/elf_mage.glb');
     if (glb) {
       const group = new THREE.Group();
       group.name = 'GrandScribeAlistair_GLTF';
@@ -1041,7 +1041,7 @@ export class ModelFactory {
    * Alchemist Ignatius — 3D Forge Master Quest Giver (Floor 2)
    */
   static createAlchemistMesh() {
-    const glb = assetLoader.getModel('/models/blacksmith.glb');
+    const glb = assetLoader.getModel('/models/npc_alchemist.glb') || assetLoader.getModel('/models/blacksmith.glb');
     if (glb) {
       const group = new THREE.Group();
       group.name = 'AlchemistIgnatius_GLTF';

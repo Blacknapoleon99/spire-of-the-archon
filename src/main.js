@@ -30,6 +30,7 @@ import { achievementSystem } from './systems/achievementSystem.js';
 import { storyLoreManager } from './systems/storyLore.js';
 import { assetLoader } from './graphics/assetLoader.js';
 import { VoiceChatSystem } from './systems/voiceChatSystem.js';
+import { GroundSpellManager } from './graphics/groundSpells.js';
 
 /** Loading screen lore tips */
 const LOADING_TIPS = [
@@ -52,6 +53,7 @@ class GameApp {
     this.tower = new TowerEnvironment(this.engineScene.scene);
     this.animations = new AnimationController();
     this.particles = new ParticleSystem(this.engineScene.scene);
+    this.groundSpells = new GroundSpellManager(this.engineScene.scene);
     this.cooldowns = new CooldownManager();
     this.questManager = new QuestManager(this.engineScene.scene);
     this.ui = new UIManager(onlineNetwork);
@@ -506,6 +508,27 @@ class GameApp {
         }
       }
 
+      // Check if active boss was defeated
+      if (this.boss && !serverEnemyIds.has(this.boss.id)) {
+        this.particles.spawnSoulDissolution(this.boss.position, 0xffd700, 48);
+        this.engineScene.addScreenShake(0.45, 0.6);
+        const xpAmount = XP_SOURCES.BOSS_KILL;
+        const lvlResult = this.progression.addXP(xpAmount);
+        this.ui.updateXPBar(this.progression.xp, this.progression.getXPToNextLevel(), this.progression.level);
+        if (lvlResult.leveledUp) this.ui.showLevelUp(lvlResult.newLevel);
+        this.ui.addKillFeedEntry(`Defeated ${this.boss.name}! (+${xpAmount} XP, +100 Gold)`);
+        this.particles.spawnPhysicalCoins(this.boss.position, 8, 100, (val) => {
+          if (this.localPlayer) this.localPlayer.gold = (this.localPlayer.gold || 100) + val;
+          soundEngine.playCoinPickup();
+        });
+        this.boss.triggerDeath();
+        const defeatedBoss = this.boss;
+        this.boss = null;
+        setTimeout(() => {
+          defeatedBoss.destroy();
+        }, 2000);
+      }
+
       data.enemies.forEach(eData => {
         if (eData.type === 'boss') {
           if (!this.boss) {
@@ -579,6 +602,9 @@ class GameApp {
 
     onlineNetwork.on('enemy_attack', (data) => {
       soundEngine.playEnemyMelee();
+      if (this.boss && data.enemyId === this.boss.id) {
+        this.boss.triggerAttack('stomp');
+      }
     });
 
     onlineNetwork.on('enemy_ability', (data) => {
@@ -634,6 +660,11 @@ class GameApp {
           this.questManager.advanceStep();
           voiceEngine.speak('alistair_prism_aligned');
 
+          if (this.boss && this.boss.bossType === 'xyris') {
+            this.groundSpells.spawnPrismaticMandala(this.boss.position, 8.0, 6.0);
+            this.ui.showStoryMessage('✨ Prismatic Convergence! The 4 beams focus on Xyris, shattering the Void Ward!');
+          }
+
           // XP for puzzle
           const lvlResult = this.progression.addXP(XP_SOURCES.PUZZLE_SOLVED);
           this.ui.updateXPBar(this.progression.xp, this.progression.getXPToNextLevel(), this.progression.level);
@@ -645,6 +676,10 @@ class GameApp {
         if (data.step >= 3) {
           this.questManager.advanceStep();
           voiceEngine.speak('ignatius_act2_complete');
+          if (this.boss && this.boss.bossType === 'ignis') {
+            this.groundSpells.spawnMoltenSurge(this.boss.position, 12.0, 2.5);
+            this.ui.showStoryMessage('⚡ The Crucible Triad detonates! Ignis Molten Shield is shattered!');
+          }
           const lvlResult = this.progression.addXP(XP_SOURCES.PUZZLE_SOLVED);
           this.ui.updateXPBar(this.progression.xp, this.progression.getXPToNextLevel(), this.progression.level);
           if (lvlResult.leveledUp) this.ui.showLevelUp(lvlResult.newLevel);
@@ -665,6 +700,10 @@ class GameApp {
         if (data.allActive) {
           this.questManager.advanceStep();
           voiceEngine.speak('valerius_shield_down');
+          if (this.boss && this.boss.bossType === 'valerius') {
+            this.groundSpells.spawnAstralNovaSigil(this.boss.position, 14.0, 3.0);
+            this.ui.showStoryMessage('🌌 All 4 Temporal Keystones overloaded! Chrono Shield disrupted!');
+          }
           const lvlResult = this.progression.addXP(XP_SOURCES.PUZZLE_SOLVED);
           this.ui.updateXPBar(this.progression.xp, this.progression.getXPToNextLevel(), this.progression.level);
           if (lvlResult.leveledUp) this.ui.showLevelUp(lvlResult.newLevel);
@@ -695,6 +734,12 @@ class GameApp {
 
     onlineNetwork.on('floor_changed', (data) => {
       this.currentFloor = data.floor;
+      if (this.groundSpells) this.groundSpells.clear();
+      if (this.boss) {
+        this.boss.destroy();
+        this.boss = null;
+      }
+
       this.tower.buildFloor(this.currentFloor);
       this.ambientParticles.setFloor(this.currentFloor);
       this.engineScene.setFloorLighting(this.currentFloor);
@@ -710,6 +755,15 @@ class GameApp {
         achievementSystem.unlock('crucible_breaker');
         soundEngine.startMusic('forge');
         setTimeout(() => voiceEngine.speak('ignatius_act2_intro'), 800);
+      } else if (this.currentFloor === 5) {
+        soundEngine.startMusic('boss');
+        this.ui.showStoryMessage('⚔️ BOSS ENCOUNTER: IGNIS THE MOLTEN BEHEMOTH! Complete the Crucible Triad while fighting!');
+      } else if (this.currentFloor === 10) {
+        soundEngine.startMusic('boss');
+        this.ui.showStoryMessage('⚔️ BOSS ENCOUNTER: XYRIS THE VOID SOVEREIGN! Rotate 4 Prismatic Mirrors to penetrate the Void Ward!');
+      } else if (this.currentFloor === 15) {
+        soundEngine.startMusic('boss');
+        this.ui.showStoryMessage('⚔️ FINAL CONFRONTATION: ARCHON VALERIUS ASCENDANT! Disrupt 4 Temporal Keystones!');
       } else if (this.currentFloor === 3) {
         soundEngine.startMusic('boss');
         setTimeout(() => voiceEngine.speak('valerius_encounter'), 800);
@@ -728,22 +782,59 @@ class GameApp {
     onlineNetwork.on('boss_special', (data) => {
       if (data.voiceKey) voiceEngine.speak(data.voiceKey, null, null, true);
 
-      if (data.ability === 'arcane_barrage') {
-        const targetPos = new THREE.Vector3(data.targetX, 0, data.targetZ);
+      // Trigger animation on rigged 3D boss model
+      if (this.boss) {
+        this.boss.triggerAttack(data.ability);
+      }
+
+      if (data.ability === 'magma_slam') {
+        const targetPos = new THREE.Vector3(data.targetX || 0, 0, data.targetZ || -12);
+        this.groundSpells.spawnMagmaCaldera(targetPos, data.duration || 6.0, 5.5, 35);
+        this.engineScene.addScreenShake(0.42, 0.6);
+        soundEngine.playGolemSlam();
+        soundEngine.playFlameExplosion();
+        this.ui.showStoryMessage('🌋 IGNIS MAGMA SLAM! Boiling lava caldera erupts on the floor!');
+        this.ui.showActiveSpellTimer('Magma Caldera', '🌋', data.duration || 6.0);
+      } else if (data.ability === 'magma_surge') {
+        const pos = this.boss ? this.boss.position : new THREE.Vector3(0, 0, -12);
+        this.groundSpells.spawnMoltenSurge(pos, 14.0, data.duration || 2.5);
+        this.engineScene.addScreenShake(0.38, 0.5);
+        soundEngine.playFlameExplosion();
+        this.ui.showStoryMessage('🔥 IGNIS MOLTEN SURGE! Re-align the 3 Crucibles (Fire -> Frost -> Storm)!');
+        this.ui.showActiveSpellTimer('Molten Surge', '🔥', data.duration || 2.5);
+      } else if (data.ability === 'void_cataclysm') {
+        const pos = this.boss ? this.boss.position : new THREE.Vector3(0, 0, -14);
+        this.groundSpells.spawnVoidCataclysm(pos, data.duration || 6.5, 6.5, 40);
+        this.engineScene.addScreenShake(0.5, 0.7);
+        soundEngine.playShadeBolt();
+        this.ui.showStoryMessage('🔮 VOID CATACLYSM! An abyssal event horizon chasm tears open the floor!');
+        this.ui.showActiveSpellTimer('Void Cataclysm', '🔮', data.duration || 6.5);
+      } else if (data.ability === 'void_missiles') {
+        const targetPos = new THREE.Vector3(data.targetX || 0, 0, data.targetZ || -14);
+        this.groundSpells.spawnVoidCataclysm(targetPos, data.duration || 4.0, 3.5, 25);
+        soundEngine.playShadeBolt();
+        this.ui.showStoryMessage('⚠️ Xyris fires Abyssal Missiles — evade ground void rifts!');
+        this.ui.showActiveSpellTimer('Abyssal Missiles', '👁️', data.duration || 4.0);
+      } else if (data.ability === 'arcane_barrage') {
+        const targetPos = new THREE.Vector3(data.targetX || 0, 0, data.targetZ || -15);
         this.particles.spawnArcaneBarrageTelegraph(targetPos, data.duration || 2.0);
+        this.groundSpells.spawnChronoDilationDial(targetPos, data.duration || 2.5, 3.2, 25);
         this.ui.showStoryMessage('⚠️ Valerius rains an Arcane Barrage from the cosmos!');
         this.ui.showActiveSpellTimer('Arcane Barrage', '☄️', data.duration || 2.0);
       } else if (data.ability === 'astral_nova') {
-        this.particles.spawnAstralNova(new THREE.Vector3(data.x, 0, data.z), 18.0, data.duration || 3.0);
+        const pos = new THREE.Vector3(data.x || 0, 0, data.z || 0);
+        this.groundSpells.spawnAstralNovaSigil(pos, 18.0, data.duration || 3.2);
+        this.particles.spawnAstralNova(pos, 18.0, data.duration || 3.0);
         soundEngine.playChrono();
-        this.engineScene.addScreenShake(0.35, 0.5);
+        this.engineScene.addScreenShake(0.45, 0.6);
         this.ui.showStoryMessage('⚠️ ASTRAL NOVA! Dash [Space] to evade the expanding temporal shockwave!');
-        this.ui.showActiveSpellTimer('Astral Nova', '🌟', data.duration || 3.0);
+        this.ui.showActiveSpellTimer('Astral Nova', '🌟', data.duration || 3.2);
       } else if (data.ability === 'chrono_vortex') {
-        const vortexPos = new THREE.Vector3(data.x, 0, data.z);
+        const vortexPos = new THREE.Vector3(data.x || 0, 0, data.z || 0);
+        this.groundSpells.spawnChronoDilationDial(vortexPos, data.duration || 6.0, 7.0, 35);
         this.particles.spawnChronoVortex(vortexPos, data.duration || 4.0);
         soundEngine.playFrostNova();
-        this.ui.showStoryMessage('⚠️ Chrono Vortex active! Time is dilating!');
+        this.ui.showStoryMessage('⚠️ Chrono Vortex active! Time is dilating on the floor!');
         this.ui.showActiveSpellTimer('Chrono Vortex', '⌛', data.duration || 4.0);
       }
     });
@@ -1579,6 +1670,19 @@ class GameApp {
       },
       this.localPlayer?.position
     );
+
+    // Update Boss & Floor Ground Spells with Hazard Damage
+    if (this.groundSpells) {
+      this.groundSpells.update(deltaTime, this.localPlayer ? this.localPlayer.position : null, (damage, type) => {
+        if (this.localPlayer && !this.isDead) {
+          this.engineScene.addScreenShake(0.22, 0.25);
+          this.engineScene.triggerDamageFlash(0.35);
+          this.particles.spawnFloatingText(this.localPlayer.position, `-${damage} HP`, '#ff3b30');
+          soundEngine.playDamage();
+          onlineNetwork.takeHazardDamage(damage);
+        }
+      });
+    }
 
     // Frustum Culling Matrix Optimization for off-screen entities (Zero-Allocation)
     this._cullingMatrix.multiplyMatrices(this.engineScene.camera.projectionMatrix, this.engineScene.camera.matrixWorldInverse);

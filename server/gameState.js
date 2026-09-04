@@ -1309,6 +1309,17 @@ export class GameState {
     }
   }
 
+  handleHazardDamage(playerId, damage) {
+    const player = this.players.get(playerId);
+    if (!player || !player.isAlive) return;
+    player.health = Math.max(0, player.health - damage);
+    if (player.health <= 0) {
+      player.health = 0;
+      player.isAlive = false;
+      this.io.to(this.roomId).emit('player_died', { playerId });
+    }
+  }
+
   broadcastState() {
     this.io.to(this.roomId).emit('state_snapshot', {
       players: Array.from(this.players.values()),

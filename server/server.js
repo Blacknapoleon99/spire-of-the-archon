@@ -84,6 +84,13 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('hazard_damage', ({ damage }) => {
+    const room = roomManager.getRoomBySocket(socket);
+    if (room && room.gameState) {
+      room.gameState.handleHazardDamage(socket.id, damage);
+    }
+  });
+
   // Puzzles (Floors 1, 2, 3, and Boss Floors 5, 10, 15)
   socket.on('rotate_prism', ({ prismId }) => {
     const room = roomManager.getRoomBySocket(socket);
