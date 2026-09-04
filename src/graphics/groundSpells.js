@@ -592,6 +592,250 @@ export class GroundSpellManager {
   }
 
   // =========================================================================
+  // 7. ASTRAEA: BRIMSTONE SERAPH CALDERA (Dual Holy/Hellfire Fissure)
+  // =========================================================================
+  spawnBrimstoneSeraphCaldera(pos, duration = 8.0, radius = 6.5, tickDamage = 38) {
+    const group = new THREE.Group();
+    group.position.set(pos.x, 0.03, pos.z);
+
+    // Layer 1: Dual-Element Split Caldera Floor
+    // Left: Celestial Pearlescent Light Disc
+    const celestialMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffe082,
+      emissiveIntensity: 3.2,
+      roughness: 0.2,
+      metalness: 0.5,
+      transparent: true,
+      opacity: 0.92
+    });
+    const cDisc = new THREE.Mesh(this.geoGroundCircle, celestialMat);
+    cDisc.rotation.x = -Math.PI / 2;
+    cDisc.position.set(-radius * 0.2, 0.01, 0);
+    cDisc.scale.set(radius * 0.75, radius * 0.95, 1);
+    group.add(cDisc);
+
+    // Right: Abyssal Volcanic Brimstone Disc
+    const brimstoneMat = new THREE.MeshStandardMaterial({
+      color: 0x110202,
+      emissive: 0xff3300,
+      emissiveIntensity: 3.5,
+      roughness: 0.3,
+      metalness: 0.3,
+      transparent: true,
+      opacity: 0.92
+    });
+    const bDisc = new THREE.Mesh(this.geoGroundCircle, brimstoneMat);
+    bDisc.rotation.x = -Math.PI / 2;
+    bDisc.position.set(radius * 0.2, 0.01, 0);
+    bDisc.scale.set(radius * 0.75, radius * 0.95, 1);
+    group.add(bDisc);
+
+    // Layer 2: Outer Dual Prismatic Glyph Ring
+    const ringMat = new THREE.MeshStandardMaterial({
+      color: 0xffaa00,
+      emissive: 0xff6600,
+      emissiveIntensity: 4.0,
+      transparent: true,
+      opacity: 0.88
+    });
+    const outerRing = new THREE.Mesh(this.geoGroundRing, ringMat);
+    outerRing.rotation.x = -Math.PI / 2;
+    outerRing.position.y = 0.02;
+    outerRing.scale.setScalar(radius);
+    group.add(outerRing);
+
+    // Layer 3: 4 Erupting Columns (2 Holy Pillars, 2 Brimstone Spouts)
+    const columns = [];
+    for (let i = 0; i < 4; i++) {
+      const angle = (i / 4) * Math.PI * 2;
+      const isHoly = i % 2 === 0;
+      const cx = Math.cos(angle) * (radius * 0.65);
+      const cz = Math.sin(angle) * (radius * 0.65);
+
+      const colMat = new THREE.MeshStandardMaterial({
+        color: isHoly ? 0xffffff : 0xff2200,
+        emissive: isHoly ? 0xffea00 : 0xff3300,
+        emissiveIntensity: 4.5,
+        transparent: true,
+        opacity: 0.85
+      });
+      const col = new THREE.Mesh(this.geoLavaGeyser, colMat);
+      col.position.set(cx, 1.2, cz);
+      group.add(col);
+      columns.push({ mesh: col, baseScale: 1.0, isHoly });
+    }
+
+    // Dynamic dual light (Golden / Crimson)
+    const light = new THREE.PointLight(0xff7722, 4.2, radius * 3.5);
+    light.position.set(0, 2.0, 0);
+    group.add(light);
+
+    this.scene.add(group);
+
+    const spell = {
+      id: `seraph_caldera_${Date.now()}`,
+      type: 'brimstone_seraph_caldera',
+      group,
+      outerRing,
+      columns,
+      light,
+      position: pos,
+      radius,
+      duration,
+      life: duration,
+      tickDamage,
+      tickRate: 0.5,
+      nextTick: 0.5,
+      onUpdate: (dt, s) => {
+        s.outerRing.rotation.z += dt * 0.7;
+        const pulse = 1.0 + Math.sin(s.life * 6.0) * 0.3;
+        s.columns.forEach((col, idx) => {
+          col.mesh.scale.y = 1.0 + Math.sin(s.life * 8.0 + idx * 1.5) * 0.45;
+          col.mesh.rotation.y += dt * 2.0;
+        });
+        const fade = Math.min(1.0, s.life / 1.0);
+        s.light.intensity = 4.2 * fade * pulse;
+      }
+    };
+
+    this.activeSpells.push(spell);
+    return spell;
+  }
+
+  // =========================================================================
+  // 8. ASTRAEA: HALO SINGULARITY RIFT (Gravitational Burning Vortex)
+  // =========================================================================
+  spawnHaloSingularityRift(pos, duration = 7.0, radius = 7.5, tickDamage = 32) {
+    const group = new THREE.Group();
+    group.position.set(pos.x, 0.04, pos.z);
+
+    // Burning Fire Halo Centerpiece
+    const haloMat = new THREE.MeshStandardMaterial({
+      color: 0xff9900,
+      emissive: 0xff3300,
+      emissiveIntensity: 4.8,
+      roughness: 0.1,
+      metalness: 0.8
+    });
+    const haloTorus = new THREE.Mesh(this.geoGearRing, haloMat);
+    haloTorus.rotation.x = Math.PI / 2;
+    haloTorus.scale.setScalar(radius * 0.45);
+    group.add(haloTorus);
+
+    // Outer Void Gravitational Disc
+    const voidMat = this.matVoidGround.clone();
+    voidMat.opacity = 0.9;
+    const voidDisc = new THREE.Mesh(this.geoGroundCircle, voidMat);
+    voidDisc.rotation.x = -Math.PI / 2;
+    voidDisc.scale.setScalar(radius);
+    group.add(voidDisc);
+
+    // Dynamic Pulsing Vortex Light
+    const light = new THREE.PointLight(0xff5500, 4.5, radius * 3.0);
+    light.position.set(0, 1.8, 0);
+    group.add(light);
+
+    this.scene.add(group);
+
+    const spell = {
+      id: `halo_singularity_${Date.now()}`,
+      type: 'halo_singularity',
+      group,
+      haloTorus,
+      voidDisc,
+      light,
+      position: pos,
+      radius,
+      duration,
+      life: duration,
+      tickDamage,
+      tickRate: 0.5,
+      nextTick: 0.5,
+      onUpdate: (dt, s) => {
+        s.haloTorus.rotation.z += dt * 3.2;
+        s.voidDisc.rotation.z -= dt * 1.5;
+        const progress = 1.0 - (s.life / s.duration);
+        const breathe = 1.0 + Math.sin(s.life * 5.0) * 0.15;
+        s.haloTorus.scale.setScalar(s.radius * 0.45 * breathe);
+      }
+    };
+
+    this.activeSpells.push(spell);
+    return spell;
+  }
+
+  // =========================================================================
+  // 9. ASTRAEA: TWIN PRISMATIC RUPTURE (Sweeping Laser Line Telegraphs)
+  // =========================================================================
+  spawnTwinPrismaticRupture(pos, angle = 0, length = 20, duration = 3.5, damage = 50) {
+    const group = new THREE.Group();
+    group.position.set(pos.x, 0.05, pos.z);
+
+    // Line 1: Holy Radiant Beam (Yellow/White)
+    const lineMat1 = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      emissive: 0xffea00,
+      emissiveIntensity: 5.0,
+      transparent: true,
+      opacity: 0.9
+    });
+    const lineGeo = new THREE.BoxGeometry(0.35, 0.06, length);
+    const beam1 = new THREE.Mesh(lineGeo, lineMat1);
+    beam1.rotation.y = angle;
+    group.add(beam1);
+
+    // Line 2: Brimstone Darkfire Beam (Cross Angle)
+    const lineMat2 = new THREE.MeshStandardMaterial({
+      color: 0xff2200,
+      emissive: 0x990000,
+      emissiveIntensity: 5.0,
+      transparent: true,
+      opacity: 0.9
+    });
+    const beam2 = new THREE.Mesh(lineGeo, lineMat2);
+    beam2.rotation.y = angle + Math.PI / 2;
+    group.add(beam2);
+
+    this.scene.add(group);
+
+    const spell = {
+      id: `twin_rupture_${Date.now()}`,
+      type: 'twin_prismatic_rupture',
+      group,
+      beam1,
+      beam2,
+      position: pos,
+      radius: length * 0.5,
+      duration,
+      life: duration,
+      tickDamage: damage,
+      tickRate: 0.8,
+      nextTick: 1.5, // 1.5s telegraph before first damage tick
+      onUpdate: (dt, s) => {
+        const telegraphPhase = s.duration - s.life < 1.5;
+        if (telegraphPhase) {
+          // Blinking warning indicator
+          const blink = (Math.sin(s.life * 18.0) + 1.0) * 0.5;
+          s.beam1.material.opacity = 0.4 + blink * 0.5;
+          s.beam2.material.opacity = 0.4 + blink * 0.5;
+          s.beam1.scale.x = 0.3;
+          s.beam2.scale.x = 0.3;
+        } else {
+          // Erupted full-width plasma curtains
+          s.beam1.material.opacity = 0.95;
+          s.beam2.material.opacity = 0.95;
+          s.beam1.scale.x = 2.5;
+          s.beam2.scale.x = 2.5;
+        }
+      }
+    };
+
+    this.activeSpells.push(spell);
+    return spell;
+  }
+
+  // =========================================================================
   // UPDATE LOOP: Call every frame from main animation loop
   // =========================================================================
   update(deltaTime, playerPos = null, onPlayerDamaged = null) {

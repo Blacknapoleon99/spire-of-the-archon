@@ -1305,4 +1305,72 @@ export class UIManager {
       };
     }
   }
+
+  // ─────────── Emergency Core Meltdown Banner ───────────
+
+  showMeltdownBanner(seconds, pedestals) {
+    const banner = document.getElementById('meltdown-timer-banner');
+    if (!banner) return;
+    banner.classList.remove('hidden');
+    this.updateMeltdownBanner(seconds, pedestals);
+  }
+
+  updateMeltdownBanner(seconds, pedestals) {
+    const banner = document.getElementById('meltdown-timer-banner');
+    if (!banner) return;
+
+    const titleText = document.getElementById('meltdown-title-text');
+    if (titleText) {
+      titleText.textContent = `CORE DESTABILIZATION IN ${seconds.toFixed(2)}s!`;
+    }
+
+    const fill = document.getElementById('meltdown-fill');
+    if (fill) {
+      const ratio = Math.max(0, Math.min(1, seconds / 15.0));
+      fill.style.width = `${ratio * 100}%`;
+    }
+
+    if (pedestals) {
+      const pFire = document.getElementById('prism-status-fire');
+      const pFrost = document.getElementById('prism-status-frost');
+      const pChrono = document.getElementById('prism-status-chrono');
+
+      if (pFire) {
+        pFire.className = `prism-badge ${pedestals.pyretic?.isAligned ? 'aligned' : 'unaligned'}`;
+        pFire.textContent = `CRUCIBLE: ${pedestals.pyretic?.isAligned ? '🔒 LOCKED' : '⚠️ UNALIGNED'}`;
+      }
+      if (pFrost) {
+        pFrost.className = `prism-badge ${pedestals.cryo?.isAligned ? 'aligned' : 'unaligned'}`;
+        pFrost.textContent = `OBELISK: ${pedestals.cryo?.isAligned ? '🔒 LOCKED' : '⚠️ UNALIGNED'}`;
+      }
+      if (pChrono) {
+        pChrono.className = `prism-badge ${pedestals.chrono?.isAligned ? 'aligned' : 'unaligned'}`;
+        pChrono.textContent = `MONOLITH: ${pedestals.chrono?.isAligned ? '🔒 LOCKED' : '⚠️ UNALIGNED'}`;
+      }
+    }
+  }
+
+  setMeltdownContained() {
+    const banner = document.getElementById('meltdown-timer-banner');
+    if (!banner) return;
+
+    const titleText = document.getElementById('meltdown-title-text');
+    if (titleText) {
+      titleText.textContent = '✨ CORE STABILIZED — CONTAINMENT COMPLETE! ✨';
+      titleText.style.color = '#80f7ff';
+      titleText.style.textShadow = '0 0 15px #00e5ff';
+    }
+    banner.style.borderColor = '#00e5ff';
+    banner.style.boxShadow = '0 0 35px rgba(0, 229, 255, 0.8)';
+    banner.style.animation = 'none';
+
+    setTimeout(() => {
+      banner.classList.add('hidden');
+    }, 4500);
+  }
+
+  hideMeltdownBanner() {
+    const banner = document.getElementById('meltdown-timer-banner');
+    if (banner) banner.classList.add('hidden');
+  }
 }

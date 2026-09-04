@@ -113,6 +113,20 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('puzzle_leyline_charge', ({ pedestalKey }) => {
+    const room = roomManager.getRoomBySocket(socket);
+    if (room && room.gameState) {
+      room.gameState.chargeLeylinePedestal(pedestalKey);
+    }
+  });
+
+  socket.on('puzzle_leyline_align', ({ pedestalKey }) => {
+    const room = roomManager.getRoomBySocket(socket);
+    if (room && room.gameState) {
+      room.gameState.alignLeylinePedestal(pedestalKey);
+    }
+  });
+
   // Quizzes
   socket.on('trigger_quiz', ({ quizId }) => {
     const room = roomManager.getRoomBySocket(socket);

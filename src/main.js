@@ -25,6 +25,8 @@ import { TutorialSystem } from './systems/tutorialSystem.js';
 import { PlayerEntity } from './entities/player.js';
 import { EnemyEntity } from './entities/enemy.js';
 import { BossEntity } from './entities/boss.js';
+import { BossAstraeaEntity } from './entities/bossAstraea.js';
+import { PuzzleBossArena } from './systems/puzzleBossArena.js';
 import { voiceEngine } from './engine/voiceNarration.js';
 import { achievementSystem } from './systems/achievementSystem.js';
 import { storyLoreManager } from './systems/storyLore.js';
@@ -529,12 +531,38 @@ class GameApp {
         setTimeout(() => {
           defeatedBoss.destroy();
         }, 2000);
+
+        // 15-SECOND POST-KILL MELTDOWN FAIL-SAFE CHECK
+        if (this.puzzleArena && !this.puzzleArena.isContained && this.puzzleArena.alignedCount < this.puzzleArena.totalBeams) {
+          this.ui.showMeltdownBanner(15.0, this.puzzleArena.pedestals);
+          this.puzzleArena.startMeltdown(
+            (rem) => this.ui.updateMeltdownBanner(rem, this.puzzleArena.pedestals),
+            () => {
+              this.ui.setMeltdownContained();
+              this.ui.showStoryMessage('✨ MELTDOWN CONTAINED! Leylines stabilized before catastrophic detonation!');
+              achievementSystem.unlock('leyline_savior');
+            },
+            () => {
+              this.ui.showStoryMessage('💥 CORE DETONATION! The chamber collapsed!');
+              if (this.localPlayer) {
+                this.localPlayer.health = 0;
+                this.isDead = true;
+                this.respawnTimer = 10.0;
+                this.ui.showDeathScreen(10);
+              }
+            }
+          );
+        }
       }
 
       data.enemies.forEach(eData => {
         if (eData.type === 'boss') {
           if (!this.boss) {
-            this.boss = new BossEntity(this.engineScene.scene, eData);
+            if (eData.bossType === 'astraea' || eData.id?.includes('astraea')) {
+              this.boss = new BossAstraeaEntity(this.engineScene.scene, eData);
+            } else {
+              this.boss = new BossEntity(this.engineScene.scene, eData);
+            }
             this.tutorial.tryShowTip('combat');
           } else {
             this.boss.sync(eData);
@@ -741,6 +769,11 @@ class GameApp {
         this.boss.destroy();
         this.boss = null;
       }
+      if (this.puzzleArena) {
+        this.puzzleArena.destroy();
+        this.puzzleArena = null;
+        this.ui.hideMeltdownBanner();
+      }
 
       this.tower.buildFloor(this.currentFloor);
       this.ambientParticles.setFloor(this.currentFloor);
@@ -762,7 +795,14 @@ class GameApp {
         this.ui.showStoryMessage('⚔️ BOSS ENCOUNTER: IGNIS THE MOLTEN BEHEMOTH! Complete the Crucible Triad while fighting!');
       } else if (this.currentFloor === 10) {
         soundEngine.startMusic('boss');
-        this.ui.showStoryMessage('⚔️ BOSS ENCOUNTER: XYRIS THE VOID SOVEREIGN! Rotate 4 Prismatic Mirrors to penetrate the Void Ward!');
+        this.ui.showStoryMessage('⚔️ CLIMACTIC BOSS ENCOUNTER: ASTRAEA, THE DEMON-ANGEL SOVEREIGN! Align the 3 Elemental Leylines to shatter her Prismatic Shield!');
+        this.puzzleArena = new PuzzleBossArena(this.engineScene.scene, this.particles, this.engineScene);
+        this.puzzleArena.onBeamAligned = (aligned, total) => {
+          this.ui.showStoryMessage(`⚡ Leyline Aligned (${aligned}/${total})! Astraea's shield destabilizes!`);
+          if (this.boss && this.boss.setAlignedBeams) {
+            this.boss.setAlignedBeams(aligned);
+          }
+        };
       } else if (this.currentFloor === 15) {
         soundEngine.startMusic('boss');
         this.ui.showStoryMessage('⚔️ FINAL CONFRONTATION: ARCHON VALERIUS ASCENDANT! Disrupt 4 Temporal Keystones!');
@@ -838,6 +878,85 @@ class GameApp {
         soundEngine.playFrostNova();
         this.ui.showStoryMessage('⚠️ Chrono Vortex active! Time is dilating on the floor!');
         this.ui.showActiveSpellTimer('Chrono Vortex', '⌛', data.duration || 4.0);
+      } else if (data.ability === 'seraph_caldera') {
+        const pos = this.boss ? this.boss.position : new THREE.Vector3(0, 0, -14);
+        this.groundSpells.spawnBrimstoneSeraphCaldera(pos, data.duration || 6.5, 6.0, 35);
+        if (this.boss && this.boss.triggerAttack) this.boss.triggerAttack('seraph_caldera');
+        this.engineScene.addScreenShake(0.42, 0.5);
+        soundEngine.playFlameExplosion();
+        this.ui.showStoryMessage('🔥 BRIMSTONE SERAPH CALDERA! Sacred magma errupts beneath your feet!');
+        this.ui.showActiveSpellTimer('Seraph Caldera', '🔥', data.duration || 6.5);
+      } else if (data.ability === 'halo_singularity') {
+        const targetPos = new THREE.Vector3(data.targetX || 0, 0, data.targetZ || -14);
+        this.groundSpells.spawnHaloSingularityRift(targetPos, data.duration || 5.0, 5.0, 30);
+        if (this.boss && this.boss.triggerAttack) this.boss.triggerAttack('queen_cast');
+        soundEngine.playShadeBolt();
+        this.ui.showStoryMessage('☀️ HALO SINGULARITY RIFT! Gravitational rift pulls wizards inward!');
+        this.ui.showActiveSpellTimer('Halo Singularity', '☀️', data.duration || 5.0);
+      } else if (data.ability === 'twin_rupture') {
+        const targetPos = new THREE.Vector3(data.targetX || 0, 0, data.targetZ || -14);
+        this.groundSpells.spawnTwinPrismaticRupture(targetPos, data.duration || 4.5, 18.0, 40);
+        if (this.boss && this.boss.triggerAttack) this.boss.triggerAttack('queen_cast');
+        this.engineScene.addScreenShake(0.35, 0.45);
+        soundEngine.playChrono();
+        this.ui.showStoryMessage('⚡ TWIN PRISMATIC RUPTURE! Dual holy-void energy beams sweep the arena!');
+        this.ui.showActiveSpellTimer('Twin Rupture', '⚡', data.duration || 4.5);
+      } else if (data.ability === 'wing_dash') {
+        if (this.boss && this.boss.triggerAttack) this.boss.triggerAttack('wing_dash');
+        this.engineScene.addScreenShake(0.2, 0.3);
+        this.ui.showStoryMessage('💨 Astraea performs a Winged Tempest Dash!');
+      }
+    });
+
+    onlineNetwork.on('boss_meltdown_started', (data) => {
+      this.engineScene.addScreenShake(0.6, 1.2);
+      this.ui.showStoryMessage(data.message || '⚠️ EMERGENCY: 15 SECONDS TO ALIGN LEYLINES OR WIPE!');
+      if (this.puzzleArena && !this.puzzleArena.isMeltdownActive) {
+        this.ui.showMeltdownBanner(data.duration || 15.0, this.puzzleArena.pedestals);
+        this.puzzleArena.startMeltdown(
+          (rem) => this.ui.updateMeltdownBanner(rem, this.puzzleArena.pedestals),
+          () => {
+            this.ui.setMeltdownContained();
+            this.ui.showStoryMessage('✨ MELTDOWN CONTAINED! Leylines stabilized!');
+          },
+          () => {
+            this.ui.showStoryMessage('💥 CORE DETONATION!');
+            if (this.localPlayer) {
+              this.localPlayer.health = 0;
+              this.isDead = true;
+              this.respawnTimer = 10.0;
+              this.ui.showDeathScreen(10);
+            }
+          }
+        );
+      }
+    });
+
+    onlineNetwork.on('meltdown_contained', (data) => {
+      if (this.puzzleArena) this.puzzleArena.containMeltdown();
+      this.ui.setMeltdownContained();
+      this.ui.showStoryMessage(data.message || '✨ CORE STABILIZED!');
+    });
+
+    onlineNetwork.on('encounter_wipe', (data) => {
+      this.engineScene.addScreenShake(0.8, 1.5);
+      this.ui.showStoryMessage(data.message || 'Encounter Wipe! Floor resetting.');
+    });
+
+    onlineNetwork.on('leyline_aligned', (data) => {
+      if (this.puzzleArena) {
+        const ped = this.puzzleArena.pedestals[data.pedestalKey];
+        if (ped && !ped.isAligned) {
+          ped.isCharged = true;
+          ped.isAligned = true;
+          ped.angle = ped.targetAngle;
+          if (ped.mirrorGroup) ped.mirrorGroup.rotation.y = ped.targetAngle;
+          this.puzzleArena.createBeam(ped, data.pedestalKey);
+          this.puzzleArena.alignedCount = data.alignedCount;
+        }
+      }
+      if (this.boss && this.boss.setAlignedBeams) {
+        this.boss.setAlignedBeams(data.alignedCount);
       }
     });
 
@@ -1168,6 +1287,14 @@ class GameApp {
   }
 
   tryInteract() {
+    if (this.puzzleArena && this.localPlayer) {
+      const pRes = this.puzzleArena.interactPedestal(this.localPlayer.position);
+      if (pRes && pRes.handled) {
+        if (pRes.message) this.ui.showStoryMessage(pRes.message);
+        return;
+      }
+    }
+
     const interactable = this.physics.getNearbyInteractable(this.localPlayer.position, this.tower.interactables);
     if (!interactable) {
       if (this.tower.exitPortal) {
@@ -1463,7 +1590,10 @@ class GameApp {
         this.ui.updateQuestTracker(questInfo.quest, questInfo.distance);
 
         // Nearby interactable HUD prompt
-        const nearby = this.physics.getNearbyInteractable(this.localPlayer.position, this.tower.interactables);
+        let nearby = this.physics.getNearbyInteractable(this.localPlayer.position, this.tower.interactables);
+        if (!nearby && this.puzzleArena) {
+          nearby = this.puzzleArena.getNearbyInteractable(this.localPlayer.position);
+        }
         if (nearby) {
           this.ui.showInteractionPrompt(true, nearby.prompt);
         } else if (this.tower.exitPortal) {
@@ -1551,6 +1681,12 @@ class GameApp {
           if (bossDist < 2.6) {
             onlineNetwork.hitEnemy(this.boss.id, projectile.spellType === 'ult' ? 140 : 50, projectile.element);
             this.ui.triggerHitmarker();
+            return true;
+          }
+        }
+
+        if (this.puzzleArena) {
+          if (this.puzzleArena.checkProjectileHit(projectile)) {
             return true;
           }
         }
@@ -1708,6 +1844,9 @@ class GameApp {
         }
         enemy.mesh.matrixAutoUpdate = false;
       }
+    }
+    if (this.puzzleArena) {
+      this.puzzleArena.update(deltaTime);
     }
     if (this.boss) {
       this.boss.update(deltaTime, this.animations);

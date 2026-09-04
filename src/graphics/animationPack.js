@@ -82,6 +82,22 @@ export class AnimationPackManager {
       {
         promptKeywords: ['awaken', 'rise', 'resurrect', 'spawn'],
         clipNames: ['Skeletons_Awaken_Floor', 'Skeletons_Awaken_Standing', 'Spawn_Ground']
+      },
+      {
+        promptKeywords: ['demon angel idle', 'angel idle', 'winged idle', 'queen idle', 'hover idle', 'float'],
+        clipNames: ['DemonAngelIdle_60f_60', 'Idle_A', 'Idle']
+      },
+      {
+        promptKeywords: ['angel walk', 'winged walk', 'glide', 'float walk', 'queen walk', 'catwalk'],
+        clipNames: ['AngelWalk90_90f_90', 'AzerothNaturalWalk_90f_90', 'QUEEN_Catwalk_Loop', 'Walk']
+      },
+      {
+        promptKeywords: ['queen cast', 'angel cast', 'seraph cast', 'wing cast', 'spellcast'],
+        clipNames: ['QUEEN_SpellCast', 'Ranged_Magic_Spellcasting']
+      },
+      {
+        promptKeywords: ['winged dash', 'sprint', 'wing burst', 'sellsword run', 'dash'],
+        clipNames: ['sellsword_run_90f_90', 'Running_A', 'Walk']
       }
     ];
   }
@@ -100,7 +116,12 @@ export class AnimationPackManager {
       '/animations/KayKit_Character_Animations_1.1/Animations/gltf/Rig_Medium/Rig_Medium_CombatRanged.glb',
       '/animations/KayKit_Character_Animations_1.1/Animations/gltf/Rig_Medium/Rig_Medium_Special.glb',
       '/animations/KayKit_Character_Animations_1.1/Animations/gltf/Rig_Large/Rig_Large_CombatMelee.glb',
-      '/animations/KayKit_Character_Animations_1.1/Animations/gltf/Rig_Large/Rig_Large_General.glb'
+      '/animations/KayKit_Character_Animations_1.1/Animations/gltf/Rig_Large/Rig_Large_General.glb',
+      '/animations/kimodo/DemonAngelIdle_60f_60.glb',
+      '/animations/kimodo/AngelWalk90_90f_90.glb',
+      '/animations/kimodo/AzerothNaturalWalk_90f_90.glb',
+      '/animations/kimodo/sellsword_run_90f_90.glb',
+      '/animations/kimodo/sellsword_jump_60f_60.glb'
     ];
 
     this._loadPromise = Promise.allSettled(

@@ -466,6 +466,84 @@ body, html {
 .boss-track { height: 14px; } .boss-fill { background: linear-gradient(90deg,#b71c1c,#ff5722); box-shadow: 0 0 15px rgba(255,87,34,0.8); }
 .boss-shield-badge { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 0.65rem; font-weight: 800; color: #ffd60a; letter-spacing: 1px; }
 
+/* ===== EMERGENCY CORE MELTDOWN BANNER ===== */
+.meltdown-timer-banner {
+  position: absolute;
+  top: 115px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 540px;
+  max-width: 90%;
+  background: rgba(30, 5, 5, 0.96);
+  border: 2px solid #ff2200;
+  border-radius: 12px;
+  padding: 12px 18px;
+  box-shadow: 0 0 35px rgba(255, 34, 0, 0.7);
+  z-index: 55;
+  text-align: center;
+  animation: emergencyAlarmPulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes emergencyAlarmPulse {
+  0% { box-shadow: 0 0 20px rgba(255, 34, 0, 0.5); border-color: #ff3300; }
+  100% { box-shadow: 0 0 45px rgba(255, 0, 0, 0.95); border-color: #ffaa00; }
+}
+.meltdown-title {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  font-family: 'Cinzel', serif;
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: #fff;
+  text-shadow: 0 0 10px #ff2200;
+  letter-spacing: 1px;
+}
+.meltdown-subtext {
+  font-size: 0.72rem;
+  color: #ffbb88;
+  letter-spacing: 0.5px;
+  margin: 4px 0 8px 0;
+  font-weight: 600;
+}
+.meltdown-prisms-status {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.prism-badge {
+  font-size: 0.65rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+  letter-spacing: 0.5px;
+}
+.prism-badge.unaligned {
+  background: rgba(255, 50, 0, 0.25);
+  border: 1px solid #ff4400;
+  color: #ffaa88;
+}
+.prism-badge.aligned {
+  background: rgba(0, 229, 255, 0.3);
+  border: 1px solid #00e5ff;
+  color: #80f7ff;
+  text-shadow: 0 0 8px #00e5ff;
+}
+.meltdown-track {
+  height: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid #ff4400;
+}
+.meltdown-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff0000, #ff8800);
+  box-shadow: 0 0 15px #ff4400;
+  transition: width 0.1s linear;
+}
+
 /* ===== INTERACTION PROMPT ===== */
 .interaction-prompt { position: absolute; bottom: 170px; left: 50%; transform: translateX(-50%); background: rgba(15,12,28,0.95); border: 1px solid var(--gold); border-radius: 16px; padding: 8px 20px; display: flex; align-items: center; gap: 10px; font-family: 'Cinzel', serif; font-size: 0.95rem; color: #fffae6; box-shadow: 0 0 15px var(--gold-glow); pointer-events: none; }
 .interact-key { background: var(--gold); color: #12101e; padding: 2px 8px; border-radius: 6px; font-weight: 800; }

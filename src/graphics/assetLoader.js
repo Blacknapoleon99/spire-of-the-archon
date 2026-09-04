@@ -124,6 +124,7 @@ export class AssetLoader {
       '/models/boss_ignis.glb',
       '/models/boss_xyris.glb',
       '/models/boss_valerius.glb',
+      '/models/boss_astraea.glb',
       '/models/npc_merchant.glb',
       '/models/npc_alchemist.glb',
       '/models/npc_quest_giver.glb',

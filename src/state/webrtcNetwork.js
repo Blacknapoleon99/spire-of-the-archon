@@ -232,6 +232,14 @@ export class WebRTCNetwork {
     this.socket.emit('activate_keystone', { keystoneId });
   }
 
+  chargeLeyline(pedestalKey) {
+    this.socket.emit('puzzle_leyline_charge', { pedestalKey });
+  }
+
+  alignLeyline(pedestalKey) {
+    this.socket.emit('puzzle_leyline_align', { pedestalKey });
+  }
+
   triggerQuiz(quizId) {
     this.socket.emit('trigger_quiz', { quizId });
   }

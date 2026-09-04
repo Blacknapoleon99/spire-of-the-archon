@@ -119,7 +119,7 @@ export class GameState {
         unlocked: false,
         bossShieldActive: true
       },
-      // FLOOR 10 BOSS ROOM PUZZLE: Simultaneous 4-Mirror Prismatic Beam Alignment during Void Annihilation
+      // FLOOR 10 BOSS ROOM PUZZLE: Simultaneous Tri-Elemental Leylines & Meltdown Fail-Safe
       floor10: {
         mirrors: [
           { id: 1, angle: 0, targetAngle: 90, isAligned: false },
@@ -127,9 +127,17 @@ export class GameState {
           { id: 3, angle: 90, targetAngle: 0, isAligned: false },
           { id: 4, angle: 270, targetAngle: 180, isAligned: false }
         ],
+        pedestals: {
+          pyretic: { isCharged: false, isAligned: false },
+          cryo: { isCharged: false, isAligned: false },
+          chrono: { isCharged: false, isAligned: false }
+        },
+        alignedCount: 0,
         annihilationTimer: 14.0,
         unlocked: false,
-        bossShieldActive: true
+        bossShieldActive: true,
+        meltdownActive: false,
+        meltdownTimer: 15.0
       },
       // FLOOR 15 GRAND FINALE BOSS ROOM PUZZLE: Simultaneous 4 Temporal Paradox Keystones
       floor15: {
@@ -228,11 +236,19 @@ export class GameState {
       this.spawnEnemy('sentry', 0, 0, -24, 220, 26, 'Abyssal Eye');
       this.broadcastStory('Floor 9: The Void-Touched Catwalks. The fabric of reality thins as the Void Nexus approaches!');
     } else if (floorNumber === 10) {
-      // Floor 10: BOSS LEVEL & BOSS ROOM - Xyris the Void Sovereign
-      this.spawnBossXyris(0, 0, -14);
+      // Floor 10: BOSS LEVEL & BOSS ROOM - Astraea the Demon-Angel Sovereign
+      this.spawnBossAstraea(0, 0, -14);
       this.puzzles.floor10.bossShieldActive = true;
+      this.puzzles.floor10.alignedCount = 0;
+      this.puzzles.floor10.meltdownActive = false;
+      this.puzzles.floor10.meltdownTimer = 15.0;
+      if (this.puzzles.floor10.pedestals) {
+        this.puzzles.floor10.pedestals.pyretic = { isCharged: false, isAligned: false };
+        this.puzzles.floor10.pedestals.cryo = { isCharged: false, isAligned: false };
+        this.puzzles.floor10.pedestals.chrono = { isCharged: false, isAligned: false };
+      }
       this.puzzles.floor10.mirrors.forEach(m => m.isAligned = false);
-      this.broadcastStory('FLOOR 10 [BOSS ROOM]: The Void Nexus! Xyris the Void Sovereign manifests! Align all 4 Prismatic Mirrors into a light circuit to pierce his Void Shield before Void Annihilation triggers!');
+      this.broadcastStory('FLOOR 10 [BOSS ROOM]: The Astral-Brimstone Sanctum! Astraea the Demon-Angel Sovereign descends! Align the 3 Elemental Leylines during combat to pierce her Prismatic Shield — beware the 15-second core meltdown if she falls before containment!');
     }
 
     // =========================================================================
@@ -360,6 +376,35 @@ export class GameState {
       cooldown: 0,
       specialTimer: 8.0,
       channelingAnnihilation: false,
+      channelTimer: 0,
+      stunnedTimer: 0,
+      isAlive: true
+    });
+  }
+
+  spawnBossAstraea(x, y, z) {
+    const id = 'boss_astraea';
+    const asc = this.ascensionTier || 0;
+    const health = Math.round(42000 * (1 + asc * 0.45));
+    const damage = Math.round(52 * (1 + asc * 0.3));
+
+    this.enemies.set(id, {
+      id,
+      type: 'boss',
+      bossType: 'astraea',
+      name: asc > 0 ? `[NG+${asc}] Astraea, Demon-Angel Sovereign` : 'Astraea, the Demon-Angel Sovereign',
+      x, y, z,
+      health,
+      maxHealth: health,
+      damage,
+      speed: 4.0,
+      state: 'combat',
+      targetId: null,
+      phase: 1,
+      invulnerable: false,
+      shieldReduction: 0.75, // 75% damage reduction until leylines align
+      cooldown: 0,
+      specialTimer: 5.5,
       channelTimer: 0,
       stunnedTimer: 0,
       isAlive: true
@@ -505,13 +550,25 @@ export class GameState {
         });
         return;
       }
-      if (this.floor === 10 && this.puzzles.floor10?.bossShieldActive) {
-        this.io.to(this.roomId).emit('floating_text', {
-          x: enemy.x, y: enemy.y + 2.5, z: enemy.z,
-          text: 'VOID WARD (Align 4 Mirrors!)',
-          color: '#9333ea'
-        });
-        return;
+      if (this.floor === 10) {
+        if (enemy.bossType === 'astraea') {
+          const reduction = enemy.shieldReduction !== undefined ? enemy.shieldReduction : 0.75;
+          if (reduction > 0) {
+            damage = Math.max(1, Math.round(damage * (1 - reduction)));
+            this.io.to(this.roomId).emit('floating_text', {
+              x: enemy.x, y: enemy.y + 2.5, z: enemy.z,
+              text: `PRISMATIC SHIELD (-${Math.round(reduction * 100)}% DMG)`,
+              color: '#00e5ff'
+            });
+          }
+        } else if (this.puzzles.floor10?.bossShieldActive) {
+          this.io.to(this.roomId).emit('floating_text', {
+            x: enemy.x, y: enemy.y + 2.5, z: enemy.z,
+            text: 'VOID WARD (Align 4 Mirrors!)',
+            color: '#9333ea'
+          });
+          return;
+        }
       }
       if (this.floor === 15 && this.puzzles.floor15?.bossShieldActive) {
         this.io.to(this.roomId).emit('floating_text', {
@@ -597,7 +654,89 @@ export class GameState {
             message: 'Tier 1 Conquered! The Alchemical Under-Spire Awaits.'
           });
         } else if (this.floor === 10) {
-          this.broadcastStory('XYRIS HAS PERISHED! The Void Nexus dissolves, revealing the star-gate to Tier 3 (Floor 11: The Celestial Pinnacle)!');
+          const puzzle = this.puzzles.floor10;
+          const isPuzzleSolved = puzzle && (puzzle.unlocked || (puzzle.alignedCount !== undefined && puzzle.alignedCount >= 3));
+          if (isPuzzleSolved) {
+            this.broadcastStory('ASTRAEA HAS FALLEN! The Leylines are stabilized, revealing the star-gate to Tier 3 (Floor 11: The Celestial Pinnacle)!');
+            this.io.to(this.roomId).emit('boss_defeated_advancement', {
+              nextFloor: 11,
+              message: 'Tier 2 Conquered! The Celestial Pinnacle Awaits.'
+            });
+          } else {
+            // 15-SECOND POST-KILL MELTDOWN FAIL-SAFE!
+            puzzle.meltdownActive = true;
+            puzzle.meltdownTimer = 15.0;
+            this.broadcastStory('⚠️ EMERGENCY: ASTRAEA DEFEATED BUT CORE DESTABILIZING! 15 SECONDS TO ALIGN LEYLINES OR PERISH!');
+            this.io.to(this.roomId).emit('boss_meltdown_started', {
+              duration: 15.0,
+              message: 'EMERGENCY: Complete the Leyline Matrix within 15 seconds!'
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Tri-Elemental Leylines (Floor 10 Boss Astraea)
+  chargeLeylinePedestal(pedestalKey) {
+    if (this.floor !== 10) return;
+    const puzzle = this.puzzles.floor10;
+    if (!puzzle.pedestals) {
+      puzzle.pedestals = {
+        pyretic: { isCharged: false, isAligned: false },
+        cryo: { isCharged: false, isAligned: false },
+        chrono: { isCharged: false, isAligned: false }
+      };
+    }
+    const ped = puzzle.pedestals[pedestalKey];
+    if (ped && !ped.isCharged) {
+      ped.isCharged = true;
+      this.io.to(this.roomId).emit('leyline_charged', { pedestalKey });
+    }
+  }
+
+  alignLeylinePedestal(pedestalKey) {
+    if (this.floor !== 10) return;
+    const puzzle = this.puzzles.floor10;
+    if (!puzzle.pedestals) {
+      puzzle.pedestals = {
+        pyretic: { isCharged: false, isAligned: false },
+        cryo: { isCharged: false, isAligned: false },
+        chrono: { isCharged: false, isAligned: false }
+      };
+    }
+    const ped = puzzle.pedestals[pedestalKey];
+    if (ped && !ped.isAligned) {
+      ped.isCharged = true;
+      ped.isAligned = true;
+      puzzle.alignedCount = (puzzle.alignedCount || 0) + 1;
+
+      const boss = this.enemies.get('boss_astraea');
+      if (boss && boss.isAlive) {
+        boss.shieldReduction = Math.max(0, (boss.shieldReduction !== undefined ? boss.shieldReduction : 0.75) - 0.25);
+        if (puzzle.alignedCount >= 3) {
+          boss.shieldReduction = 0;
+          boss.stunnedTimer = 6.0;
+          this.broadcastStory('✨ TRIPLE LEYLINE CONVERGENCE! Astraea\'s Prismatic Shield shattered! SHE IS STUNNED FOR 6s (+150% DMG)!');
+        }
+      }
+
+      this.io.to(this.roomId).emit('leyline_aligned', {
+        pedestalKey,
+        alignedCount: puzzle.alignedCount,
+        totalBeams: 3,
+        shieldReduction: boss ? boss.shieldReduction : 0
+      });
+
+      if (puzzle.alignedCount >= 3) {
+        puzzle.unlocked = true;
+        puzzle.bossShieldActive = false;
+        if (puzzle.meltdownActive) {
+          puzzle.meltdownActive = false;
+          this.broadcastStory('✨ CORE STABILIZED! Meltdown averted with seconds to spare! The star-gate to Tier 3 (Floor 11) is revealed!');
+          this.io.to(this.roomId).emit('meltdown_contained', {
+            message: 'Core Stabilized! Victory Secured.'
+          });
           this.io.to(this.roomId).emit('boss_defeated_advancement', {
             nextFloor: 11,
             message: 'Tier 2 Conquered! The Celestial Pinnacle Awaits.'
@@ -931,6 +1070,30 @@ export class GameState {
       }
     }
 
+    // Floor 10 Meltdown Fail-Safe Loop
+    if (this.floor === 10 && this.puzzles.floor10?.meltdownActive) {
+      const puzzle = this.puzzles.floor10;
+      puzzle.meltdownTimer -= deltaTime;
+      if (puzzle.meltdownTimer <= 0) {
+        puzzle.meltdownActive = false;
+        this.broadcastStory('💥 CATASTROPHIC CORE DETONATION! The chamber collapsed! (15s Fail-Safe Expired)');
+        for (const p of this.players.values()) {
+          if (p.isAlive) {
+            p.health = 0;
+            p.isAlive = false;
+            this.io.to(this.roomId).emit('player_died', { playerId: p.id });
+          }
+        }
+        this.io.to(this.roomId).emit('encounter_wipe', {
+          floor: 10,
+          message: 'Core Meltdown wiped the party. Floor resetting.'
+        });
+        setTimeout(() => {
+          this.initFloor(10);
+        }, 3500);
+      }
+    }
+
     // Handle player respawns (10-second temporal resurrection loop)
     for (const player of this.players.values()) {
       if (!player.isAlive) {
@@ -1224,6 +1387,44 @@ export class GameState {
           targetX: target.x,
           targetZ: target.z,
           duration: 2.5
+        });
+      }
+    }
+
+    // -------------------------------------------------------------------------
+    // BOSS 2 (ALTERNATE/ENHANCED): ASTRAEA THE DEMON-ANGEL SOVEREIGN (Floor 10)
+    // -------------------------------------------------------------------------
+    else if (boss.bossType === 'astraea') {
+      const hpRatio = boss.health / boss.maxHealth;
+      if (hpRatio < 0.35 && boss.phase !== 3) {
+        boss.phase = 3;
+        this.broadcastStory('ASTRAEA: "Mortal insects! Witness the celestial cataclysm of holy wrath and netherflame!" (Phase 3: Nether-Seraph Enrage!)');
+        this.io.to(this.roomId).emit('boss_phase_change', {
+          bossId: boss.id,
+          phase: 3,
+          title: 'PHASE 3: NETHER-SERAPH ENRAGE'
+        });
+      } else if (hpRatio < 0.70 && boss.phase === 1) {
+        boss.phase = 2;
+        this.broadcastStory('ASTRAEA: "Ascend to the heavens or burn in the caldera!" (Phase 2: Celestial Flight)');
+        this.io.to(this.roomId).emit('boss_phase_change', {
+          bossId: boss.id,
+          phase: 2,
+          title: 'PHASE 2: CELESTIAL FLIGHT'
+        });
+      }
+
+      if (boss.specialTimer <= 0) {
+        const abilities = ['seraph_caldera', 'halo_singularity', 'twin_rupture', 'wing_dash'];
+        const chosenAbility = abilities[Math.floor(Math.random() * (boss.phase >= 2 ? 4 : 2))];
+        boss.specialTimer = boss.phase === 3 ? 4.5 : 6.0;
+
+        this.io.to(this.roomId).emit('boss_special', {
+          bossId: boss.id,
+          ability: chosenAbility,
+          targetX: target.x,
+          targetZ: target.z,
+          duration: 3.0
         });
       }
     }
