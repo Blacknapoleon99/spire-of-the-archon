@@ -24,7 +24,11 @@ export class ChunkLoader {
     const rndr = renderer || this.renderer;
 
     // 1. Preload and GPU-cache all 25 procedural PBR textures
-    TextureGenerator.preloadAllTextures(rndr);
+    try {
+      TextureGenerator.preloadAllTextures(rndr);
+    } catch (err) {
+      console.warn('[ChunkLoader] Texture preloading note:', err);
+    }
 
     // 2. Pre-fetch Floor 2 & Floor 3 voice lines into browser cache
     const voices = [

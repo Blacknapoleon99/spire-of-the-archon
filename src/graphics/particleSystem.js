@@ -159,8 +159,9 @@ export class ParticleSystem {
 
     // Pre-allocated Vortex Shared Materials
     const lavaPBR = TextureGenerator.createLavaTexturePBR();
+    const lavaTex = (lavaPBR && (lavaPBR.diffuseMap || lavaPBR.diffuseTex)) || null;
     this.matVortexFunnel = new THREE.MeshStandardMaterial({
-      map: lavaPBR.diffuseMap,
+      map: lavaTex,
       color: 0xff3700,
       emissive: new THREE.Color(0xff2200),
       emissiveIntensity: 2.8,
@@ -175,7 +176,7 @@ export class ParticleSystem {
       opacity: 0.88
     });
     this.matVortexRune = new THREE.MeshStandardMaterial({
-      map: lavaPBR.diffuseMap,
+      map: lavaTex,
       emissive: new THREE.Color(0xff4500),
       emissiveIntensity: 2.2,
       side: THREE.DoubleSide,

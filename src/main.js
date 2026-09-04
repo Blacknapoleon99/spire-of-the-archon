@@ -208,15 +208,18 @@ class GameApp {
     Promise.allSettled([
       assetLoader.preloadAll(),
       animationPackManager.loadPack(),
-      this.chunkLoader.preloadEverything(this.engineScene.renderer),
-      ModelFactory.preloadAllEntities(this.engineScene.scene, this.engineScene.camera, this.engineScene.renderer),
-      this.tower.preloadAllFloors(this.engineScene.renderer, this.engineScene.camera),
-      this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera),
+      Promise.resolve().then(() => this.chunkLoader.preloadEverything(this.engineScene.renderer)),
+      Promise.resolve().then(() => ModelFactory.preloadAllEntities(this.engineScene.scene, this.engineScene.camera, this.engineScene.renderer)),
+      Promise.resolve().then(() => this.tower.preloadAllFloors(this.engineScene.renderer, this.engineScene.camera)),
+      Promise.resolve().then(() => this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera)),
       this.voiceChat.init().catch(() => {})
     ]).then(() => {
       isPreloadFinished = true;
-      this.engineScene.warmupShaders();
+      try { this.engineScene.warmupShaders(); } catch (e) {}
       console.log('⚡ [SpireGame] 100% of all models, textures, floors, entities, audio & shaders completely pre-warmed!');
+    }).catch(err => {
+      console.warn('[Preload] Non-critical warning:', err);
+      isPreloadFinished = true;
     });
 
     const updateLoading = () => {

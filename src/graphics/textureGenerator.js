@@ -6,7 +6,18 @@ import * as THREE from 'three';
  * entirely in memory via HTML5 Canvas and Sobel gradient algorithms (zero external image download dependencies).
  */
 export class TextureGenerator {
-  static cache = {};
+  static cache = new Proxy({}, {
+    set(target, prop, value) {
+      if (value && typeof value === 'object') {
+        if (value.diffuseTex && !value.diffuseMap) value.diffuseMap = value.diffuseTex;
+        if (value.diffuseMap && !value.diffuseTex) value.diffuseTex = value.diffuseMap;
+        if (value.normalTex && !value.normalMap) value.normalMap = value.normalTex;
+        if (value.normalMap && !value.normalTex) value.normalTex = value.normalMap;
+      }
+      target[prop] = value;
+      return true;
+    }
+  });
 
   /**
    * Analytical Sobel Normal Map Generator.
@@ -77,37 +88,67 @@ export class TextureGenerator {
     return tex;
   }
 
+  static createGothicWoodPBR(width = 512, height = 512) {
+    return this.createTwistedElderwoodPBR(width, height);
+  }
+
+  static createMarbleTilesPBR(width = 1024, height = 1024) {
+    return this.createMarbleTilePBR(width, height);
+  }
+
+  static createSmeltedBrassPBR(width = 512, height = 512) {
+    return this.createGildedBrassPBR(width, height);
+  }
+
+  static createAstralMarblePBR(width = 1024, height = 1024) {
+    return this.createAstralCosmosPBR(width, height);
+  }
+
+  static createCelestialGoldPBR(width = 512, height = 512) {
+    return this.createGoldCoinPBR(width, height);
+  }
+
   /**
    * Pre-generates all 25 procedural PBR textures for all 3 floors and spells upfront during the loading screen.
    */
   static preloadAllTextures(renderer = null) {
-    const list = [
-      this.createStoneBrickPBR(),
-      this.createGothicPillarPBR(),
-      this.createPrisonFloorPBR(),
-      this.createRunicWallTexturePBR(),
-      this.createGothicWoodPBR(),
-      this.createWoodGrainPBR(),
-      this.createMarbleTilesPBR(),
-      this.createLavaBasaltPBR(),
-      this.createObsidianRockPBR(),
-      this.createRustedIronPBR(),
-      this.createSmeltedBrassPBR(),
-      this.createGildedBrassPBR(),
-      this.createLavaTexturePBR(),
-      this.createAstralMarblePBR(),
-      this.createCelestialGoldPBR(),
-      this.createStainedGlassPBR(),
-      this.createParchmentPBR(),
-      this.createFlamePlasmaPBR(),
-      this.createFrostCrystallinePBR(),
-      this.createSolarHaloPBR(),
-      this.createChronoClockworkPBR(),
-      this.createSpellRuneRing('fire'),
-      this.createSpellRuneRing('frost'),
-      this.createSpellRuneRing('light'),
-      this.createSpellRuneRing('chrono')
+    const generators = [
+      () => this.createStoneBrickPBR(),
+      () => this.createGothicPillarPBR(),
+      () => this.createPrisonFloorPBR(),
+      () => this.createRunicWallTexturePBR(),
+      () => this.createGothicWoodPBR(),
+      () => this.createWoodGrainPBR(),
+      () => this.createMarbleTilesPBR(),
+      () => this.createLavaBasaltPBR(),
+      () => this.createObsidianRockPBR(),
+      () => this.createRustedIronPBR(),
+      () => this.createSmeltedBrassPBR(),
+      () => this.createGildedBrassPBR(),
+      () => this.createLavaTexturePBR(),
+      () => this.createAstralMarblePBR(),
+      () => this.createCelestialGoldPBR(),
+      () => this.createStainedGlassPBR(),
+      () => this.createParchmentPBR(),
+      () => this.createFlamePlasmaPBR(),
+      () => this.createFrostCrystallinePBR(),
+      () => this.createSolarHaloPBR(),
+      () => this.createChronoClockworkPBR(),
+      () => this.createSpellRuneRing('fire'),
+      () => this.createSpellRuneRing('frost'),
+      () => this.createSpellRuneRing('light'),
+      () => this.createSpellRuneRing('chrono')
     ];
+
+    const list = [];
+    for (const gen of generators) {
+      try {
+        const pbr = gen();
+        if (pbr) list.push(pbr);
+      } catch (e) {
+        console.warn('[TextureGenerator] Texture generation warning:', e);
+      }
+    }
 
     if (renderer && typeof renderer.initTexture === 'function') {
       list.forEach(pbr => {
@@ -120,8 +161,10 @@ export class TextureGenerator {
             if (pbr.material.metalnessMap) renderer.initTexture(pbr.material.metalnessMap);
             if (pbr.material.emissiveMap) renderer.initTexture(pbr.material.emissiveMap);
           }
-          if (pbr.diffuseMap) renderer.initTexture(pbr.diffuseMap);
-          if (pbr.normalMap) renderer.initTexture(pbr.normalMap);
+          const d = pbr.diffuseMap || pbr.diffuseTex;
+          if (d) renderer.initTexture(d);
+          const n = pbr.normalMap || pbr.normalTex;
+          if (n) renderer.initTexture(n);
         } catch (e) {}
       });
     }
