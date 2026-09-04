@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "policy": "source-and-runtime",
+  "runtimeRoot": "public/models",
+  "entries": [
+    { "id": "fp_viewmodel_wand", "source": "local-generator", "generatorScript": "scripts/generate_fp_viewmodel.py", "prompt": "etched brass wand with four leyline channels", "runtime": "fp_viewmodel_wand.glb", "lod": "hero", "budgetKb": 2048 },
+    { "id": "boss_ignis", "source": "local-generator", "generatorScript": "scripts/generate_boss_ignis.py", "prompt": "molten brass colossus with carved celestial wards", "runtime": "boss_ignis.glb", "lod": "hero", "budgetKb": 4096 },
+    { "id": "boss_astraea", "source": "local-generator", "generatorScript": "scripts/generate_boss_astraea.py", "prompt": "demon angel sovereign with restrained astral brass", "runtime": "boss_astraea.glb", "lod": "hero", "budgetKb": 10240 },
+    { "id": "boss_valerius", "source": "local-generator", "generatorScript": "scripts/generate_boss_valerius.py", "prompt": "fractured chronomancer in carved slate and brass", "runtime": "boss_valerius.glb", "lod": "hero", "budgetKb": 4096 },
+    { "id": "boss_xyris", "source": "local-generator", "generatorScript": "scripts/generate_boss_xyris.py", "prompt": "void eye sentinel on a collapsing catwalk", "runtime": "boss_xyris.glb", "lod": "hero", "budgetKb": 4096 },
+    { "id": "enemy_direwolf", "source": "kaykit-or-local", "generatorScript": "scripts/generate_enemy_models.py", "prompt": "astral direwolf with ink-black fur and cyan leyline scars", "runtime": "enemy_direwolf.glb", "lod": "mid", "budgetKb": 9216 },
+    { "id": "enemy_golem", "source": "kaykit-or-local", "generatorScript": "scripts/generate_enemy_models.py", "prompt": "cathedral slate golem with aged brass joints", "runtime": "enemy_golem.glb", "lod": "mid", "budgetKb": 3072 },
+    { "id": "enemy_sentinel", "source": "kaykit-or-local", "generatorScript": "scripts/generate_enemy_models.py", "prompt": "arcane sentinel carved from slate with a cyan eye", "runtime": "enemy_sentinel.glb", "lod": "mid", "budgetKb": 3072 }
+  ],
+  "motion": {
+    "generator": "kimodo.cpp",
+    "adapter": "tools/kimodo-adapter.mjs",
+    "retarget": "blender",
+    "requiredClips": ["idle", "walk", "run", "cast", "hit", "death", "dash"]
+  },
+  "optimization": {
+    "geometry": "draco-or-meshopt",
+    "textures": "ktx2-basis",
+    "runtimeTarget": "midrange-1080p60",
+    "tool": "gltf-transform"
+  },
+  "attribution": [
+    { "id": "kaykit", "licenseFile": "public/animations/KayKit_Character_Animations_1.1/License.txt" },
+    { "id": "kimodo", "license": "See local Kimodo installation/checkpoint license" }
+  ]
+}

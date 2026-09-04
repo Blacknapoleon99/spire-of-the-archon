@@ -126,12 +126,41 @@ export class EngineScene {
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // Much faster than PCFSoft
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.15;
+    this.deviceTier = this.detectDeviceTier();
+    this.adaptiveResolution = {
+      enabled: true,
+      min: this.deviceTier === 'integrated' ? 0.65 : 0.75,
+      max: this.deviceTier === 'integrated' ? 0.9 : Math.min(window.devicePixelRatio, 1.0),
+      ratio: Math.min(window.devicePixelRatio, this.deviceTier === 'integrated' ? 0.9 : 1.0),
+      elapsed: 0,
+      frames: 0,
+      frameMs: 16.7
+    };
+    this.renderer.domElement.addEventListener('webglcontextlost', event => {
+      event.preventDefault();
+      console.warn('[EngineScene] WebGL context lost; waiting for browser restore.');
+    });
+    this.renderer.domElement.addEventListener('webglcontextrestored', () => {
+      this.warmupShaders();
+      console.info('[EngineScene] WebGL context restored.');
+    });
     this.container.appendChild(this.renderer.domElement);
 
     this.setupLighting();
     this.setupPostProcessing();
 
     window.addEventListener('resize', () => this.onWindowResize());
+  }
+
+  detectDeviceTier() {
+    const nav = typeof navigator !== 'undefined' ? navigator : {};
+    const cores = Number(nav.hardwareConcurrency || 4);
+    const memory = Number(nav.deviceMemory || 4);
+    const gl = this.renderer?.getContext?.();
+    const renderer = gl?.getParameter?.(gl.RENDERER) || '';
+    if (cores <= 4 || memory <= 4 || /Intel|Mali|Adreno/i.test(renderer)) return 'integrated';
+    if (cores >= 8 && memory >= 8) return 'discrete';
+    return 'balanced';
   }
 
   setupLighting() {
@@ -198,8 +227,9 @@ export class EngineScene {
 
   setGraphicsQuality(quality = 'balanced') {
     this.graphicsQuality = quality;
+    if (this.adaptiveResolution) this.adaptiveResolution.enabled = quality !== 'ultra';
     if (quality === 'performance') {
-      this.renderer.setPixelRatio(0.9);
+      this.setRenderPixelRatio(0.9);
       this.renderer.shadowMap.enabled = false;
       if (this.bloomPass) this.bloomPass.enabled = false;
       if (this.cinematicPass) {
@@ -208,7 +238,7 @@ export class EngineScene {
       }
       if (this.dirLight) this.dirLight.castShadow = false;
     } else if (quality === 'balanced') {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+      this.setRenderPixelRatio(Math.min(window.devicePixelRatio, 1.0));
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFShadowMap;
       if (this.bloomPass) {
@@ -221,7 +251,7 @@ export class EngineScene {
       }
       if (this.dirLight) this.dirLight.castShadow = true;
     } else if (quality === 'ultra') {
-      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+      this.setRenderPixelRatio(Math.min(window.devicePixelRatio, 1.25));
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       if (this.bloomPass) {
@@ -234,6 +264,45 @@ export class EngineScene {
       }
       if (this.dirLight) this.dirLight.castShadow = true;
     }
+    if (this.adaptiveResolution) {
+      const targetRatio = quality === 'performance'
+        ? 0.9
+        : quality === 'ultra'
+          ? Math.min(window.devicePixelRatio, 1.25)
+          : Math.min(window.devicePixelRatio, 1.0);
+      this.adaptiveResolution.ratio = Math.max(this.adaptiveResolution.min, Math.min(this.adaptiveResolution.max, targetRatio));
+      this.setRenderPixelRatio(this.adaptiveResolution.ratio);
+    }
+  }
+
+  setRenderPixelRatio(ratio) {
+    const safeRatio = Math.max(0.5, Math.min(1.5, Number(ratio) || 1));
+    this.renderer.setPixelRatio(safeRatio);
+    // EffectComposer owns separate render targets; keeping its ratio in sync
+    // prevents a blurry scene or an oversized post-process buffer after an
+    // adaptive-resolution step.
+    this.composer?.setPixelRatio?.(safeRatio);
+  }
+
+  updatePerformance(deltaTime = 0.016) {
+    const adaptive = this.adaptiveResolution;
+    if (!adaptive?.enabled || this.graphicsQuality === 'ultra') return;
+    adaptive.elapsed += deltaTime;
+    adaptive.frames += 1;
+    if (adaptive.elapsed < 1.0) return;
+    adaptive.frameMs = (adaptive.elapsed * 1000) / Math.max(1, adaptive.frames);
+    adaptive.elapsed = 0;
+    adaptive.frames = 0;
+    const desired = adaptive.frameMs > 20 ? adaptive.ratio - 0.05 : adaptive.frameMs < 14 ? adaptive.ratio + 0.025 : adaptive.ratio;
+    const next = Math.max(adaptive.min, Math.min(adaptive.max, desired));
+    if (Math.abs(next - adaptive.ratio) >= 0.01) {
+      adaptive.ratio = next;
+      this.setRenderPixelRatio(next);
+    }
+  }
+
+  getPerformanceInfo() {
+    return { quality: this.graphicsQuality, deviceTier: this.deviceTier, ...this.adaptiveResolution };
   }
 
   /**
@@ -349,7 +418,7 @@ export class EngineScene {
       this.arcaneFill.intensity = 1.8;
       if (this.bloomPass) { this.bloomPass.strength = 1.5; this.bloomPass.threshold = 0.75; }
     } else if (floorNumber === 10) {
-      // Floor 10: Boss Room - Xyris (Void Nexus)
+      // Floor 10: Boss Room - Astraea (Void Nexus)
       this.scene.background.setHex(0x020008);
       this.scene.fog.color.setHex(0x020008);
       this.scene.fog.density = 0.028;
@@ -553,5 +622,3 @@ export class EngineScene {
     }
   }
 }
-
-

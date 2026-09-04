@@ -15,7 +15,6 @@ export class ModelFactory {
       pyromancer: { hex: '#c62828', color: 0xc62828, light: 0xff5722, staff: 'dragon_flame' },
       cryomancer: { hex: '#0288d1', color: 0x0288d1, light: 0x00e5ff, staff: 'frost_lotus' },
       luminary: { hex: '#ffc107', color: 0xffc107, light: 0xffd700, staff: 'solar_halo' },
-      stormcaller: { hex: '#fbc02d', color: 0xfbc02d, light: 0xffea00, staff: 'thunder_spire' },
       chronomancer: { hex: '#8e24aa', color: 0x8e24aa, light: 0xd500f9, staff: 'time_astrolabe' }
     };
     const config = classConfigs[wizardClass] || classConfigs.pyromancer;
@@ -1464,7 +1463,7 @@ export class ModelFactory {
       dummy.position.set(0, -9999, 0);
 
       // Preload 5 Wizard player classes
-      ['pyromancer', 'cryomancer', 'luminary', 'stormcaller', 'chronomancer'].forEach(cls => {
+      ['pyromancer', 'cryomancer', 'luminary', 'chronomancer'].forEach(cls => {
         dummy.add(this.createWizardMesh(cls));
       });
 
@@ -1503,4 +1502,3 @@ export class ModelFactory {
     }
   }
 }
-

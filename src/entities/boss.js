@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ModelFactory } from '../graphics/modelFactory.js';
 import { CharacterAnimator } from '../graphics/characterAnimator.js';
+import { disposeObjectGeometries } from '../graphics/resourceUtils.js';
 
 export class BossEntity {
   constructor(scene, data) {
@@ -12,6 +13,7 @@ export class BossEntity {
     this.phase = data.phase || 1;
     this.invulnerable = data.invulnerable !== undefined ? data.invulnerable : true;
     this.isAlive = data.isAlive;
+    this.destroyed = false;
 
     this.position = new THREE.Vector3(data.x || 0, data.y || 0, data.z || -15);
     this.targetPos = this.position.clone();
@@ -46,6 +48,10 @@ export class BossEntity {
 
     this.animator.init().then(() => {
       this.animator.onReady((anim) => {
+        if (this.destroyed) {
+          anim.dispose();
+          return;
+        }
         this.hasRiggedModel = true;
         this.mesh.visible = false;
         anim.setPosition(this.position.x, this.position.y, this.position.z);
@@ -117,7 +123,7 @@ export class BossEntity {
     const fill = document.getElementById('boss-health-fill');
     const phaseBadge = document.getElementById('boss-phase');
     const shieldBadge = document.getElementById('boss-shield-badge');
-    const bossNameEl = document.getElementById('boss-name-label');
+    const bossNameEl = document.getElementById('boss-name');
 
     if (bossNameEl) bossNameEl.textContent = this.name.toUpperCase();
     const ratio = Math.max(0, Math.min(1, this.health / this.maxHealth));
@@ -158,9 +164,12 @@ export class BossEntity {
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
     if (this.animator) {
       this.animator.dispose();
     }
+    disposeObjectGeometries(this.mesh);
     this.scene.remove(this.mesh);
     const bossHud = document.getElementById('boss-hud-bar');
     if (bossHud) bossHud.classList.add('hidden');

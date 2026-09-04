@@ -1,13 +1,16 @@
 import * as THREE from 'three';
 import { ModelFactory } from '../graphics/modelFactory.js';
+import { disposeObjectGeometries, disposeSprite } from '../graphics/resourceUtils.js';
 
 export class PlayerEntity {
   constructor(scene, data, isLocal = false) {
     this.scene = scene;
     this.id = data.id;
+    this.peerId = data.peerId || null;
     this.name = data.name;
     this.wizardClass = data.wizardClass || 'pyromancer';
     this.isLocal = isLocal;
+    this.destroyed = false;
 
     this.health = data.health || 180;
     this.maxHealth = data.maxHealth || 180;
@@ -69,7 +72,6 @@ export class PlayerEntity {
       pyromancer: '#ff5722',
       cryomancer: '#00e5ff',
       luminary: '#ffd700',
-      stormcaller: '#ffea00',
       chronomancer: '#d500f9'
     };
     const classCol = classColors[this.wizardClass] || '#ffd700';
@@ -269,6 +271,13 @@ export class PlayerEntity {
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    if (this.speechBubbleTimeout) clearTimeout(this.speechBubbleTimeout);
+    disposeSprite(this.nameplate);
+    disposeSprite(this.speakingBadge);
+    disposeSprite(this.speechBubble);
+    disposeObjectGeometries(this.mesh);
     this.scene.remove(this.mesh);
   }
 }

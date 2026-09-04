@@ -1,29 +1,32 @@
 import { TextureGenerator } from '../graphics/textureGenerator.js';
+import { assetLoader } from '../graphics/assetLoader.js';
+import { getFloorBundle } from '../shared/assetManifest.js';
 
 /**
- * 100% Upfront Asset & Chunk Preloader.
- * Pre-generates all Floor 1, 2, and 3 textures, voice audio, and shaders
- * during the initial 12-second loading screen so that ZERO loading, background tasks,
- * or GPU stutters occur once the player enters the game.
+ * Demand-driven floor streamer. Core floor assets load during boot; the next
+ * floor is warmed after a checkpoint so memory stays bounded on mid-range GPUs.
  */
 export class ChunkLoader {
   constructor(renderer, scene) {
     this.renderer = renderer;
     this.scene = scene;
-    this.loadedFloors = new Set([1, 2, 3]);
-    this.isPreloaded = false;
+    assetLoader.configureRenderer(renderer);
+    this.loadedFloors = new Set();
+    this.loadingFloors = new Map();
+    this.floorErrors = new Map();
+    this.residentFloors = new Set([1]);
+    this.maxResidentFloors = 3;
     this.audioCache = new Map();
   }
 
   /**
-   * Preload all floors, textures, and voice audio upfront during the loading screen.
+   * Compatibility boot hook: warm only the pinned first-floor bundle and
+   * lightweight audio hints. Active floors are streamed on demand below.
    */
   preloadEverything(renderer) {
-    if (this.isPreloaded) return;
-    this.isPreloaded = true;
     const rndr = renderer || this.renderer;
 
-    // 1. Preload and GPU-cache all 25 procedural PBR textures
+    // 1. Preload procedural PBR textures used by the first-floor kit.
     try {
       TextureGenerator.preloadAllTextures(rndr);
     } catch (err) {
@@ -50,16 +53,68 @@ export class ChunkLoader {
       } catch (e) {}
     });
 
-    this.loadedFloors.add(1).add(2).add(3);
-    console.log('⚡ [ChunkLoader] 100% of all Floor assets, textures, and audio pre-warmed upfront! Zero runtime loading.');
+    return this.preloadFloor(1, { renderer: rndr });
+  }
+
+  preloadFloor(floorNumber, options = {}) {
+    const floor = Number(floorNumber);
+    if (!Number.isFinite(floor) || floor < 1 || floor > 15) return Promise.resolve({ floor, ready: false });
+    if (this.loadedFloors.has(floor)) return Promise.resolve({ floor, ready: true, cached: true });
+    if (this.loadingFloors.has(floor)) return this.loadingFloors.get(floor);
+    const urls = getFloorBundle(floor);
+    const promise = Promise.allSettled(urls.map(url => assetLoader.loadGLTF(url)))
+      .then(results => {
+        const rejected = results.filter(result => result.status === 'rejected');
+        if (rejected.length) this.floorErrors.set(floor, rejected.map(result => result.reason?.message || 'asset load failed'));
+        this.loadedFloors.add(floor);
+        this.residentFloors.add(floor);
+        this.evictDistantFloors(floor);
+        if (options.onComplete) options.onComplete({ floor, loaded: urls.length - rejected.length, total: urls.length });
+        return { floor, ready: true, loaded: urls.length - rejected.length, total: urls.length, errors: this.floorErrors.get(floor) || [] };
+      })
+      .catch(error => {
+        this.floorErrors.set(floor, [error.message]);
+        throw error;
+      })
+      .finally(() => this.loadingFloors.delete(floor));
+    this.loadingFloors.set(floor, promise);
+    return promise;
+  }
+
+  evictDistantFloors(activeFloor) {
+    while (this.residentFloors.size > this.maxResidentFloors) {
+      const candidate = [...this.residentFloors]
+        .filter(floor => floor !== 1 && floor !== activeFloor && !this.loadingFloors.has(floor))
+        .sort((a, b) => Math.abs(b - activeFloor) - Math.abs(a - activeFloor))[0];
+      if (candidate === undefined) break;
+      this.residentFloors.delete(candidate);
+
+      // Only release URLs no longer shared by a resident floor. Revisit loads
+      // them again instead of treating a disposed cache entry as ready.
+      const remainingUrls = new Set([...this.residentFloors].flatMap(floor => getFloorBundle(floor)));
+      for (const url of getFloorBundle(candidate)) {
+        if (!remainingUrls.has(url)) assetLoader.releaseGLTF(url);
+      }
+      this.loadedFloors.delete(candidate);
+    }
+  }
+
+  getFloorStatus(floorNumber) {
+    const floor = Number(floorNumber);
+    return {
+      floor,
+      ready: this.loadedFloors.has(floor),
+      loading: this.loadingFloors.has(floor),
+      errors: this.floorErrors.get(floor) || []
+    };
   }
 
   startBackgroundPreload() {
     // Deprecated: No background loading allowed during active gameplay.
-    // ChunkLoader now executes 100% upfront during the loading screen.
+    // The caller chooses current + next floor so loading work stays bounded.
   }
 
   isFloorReady(floorNumber) {
-    return true;
+    return this.loadedFloors.has(Number(floorNumber));
   }
 }

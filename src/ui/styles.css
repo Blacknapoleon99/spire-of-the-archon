@@ -1,19 +1,25 @@
 :root {
-  --bg-dark: #070810;
-  --panel-bg: rgba(14, 16, 26, 0.92);
-  --panel-border: rgba(147, 112, 219, 0.4);
-  --gold: #d4af37;
-  --gold-glow: rgba(212, 175, 55, 0.5);
-  --arcane-cyan: #00e5ff;
-  --arcane-purple: #9d4edd;
-  --fire-red: #ff3b30;
-  --frost-blue: #0a84ff;
-  --storm-yellow: #ffd60a;
-  --holy-gold: #ffc107;
-  --chrono-purple: #bf5af2;
-  --text-main: #f0f2f8;
-  --text-muted: #8e95ad;
-  --danger-red: #e53935;
+  /* Celestial gothic tokens: void ink, carved slate, aged brass and leyline light. */
+  --bg-dark: #070a12;
+  --panel-bg: rgba(16, 22, 34, 0.94);
+  --panel-border: rgba(184, 146, 74, 0.42);
+  --gold: #b8924a;
+  --gold-glow: rgba(184, 146, 74, 0.34);
+  --arcane-cyan: #63d8e6;
+  --arcane-purple: #7a5bc7;
+  --fire-red: #d95c3f;
+  --frost-blue: #63d8e6;
+  --storm-yellow: #d9c17a;
+  --holy-gold: #e5c878;
+  --chrono-purple: #9a7de0;
+  --text-main: #f3efe5;
+  --text-muted: #a3a7b5;
+  --danger-red: #d95c3f;
+  --void-ink: #070a12;
+  --cathedral-slate: #1b2230;
+  --aged-brass: #b8924a;
+  --leyline-cyan: #63d8e6;
+  --astral-violet: #7a5bc7;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
@@ -21,9 +27,46 @@
 body, html {
   width: 100%; height: 100%; overflow: hidden;
   background-color: var(--bg-dark);
-  font-family: 'Outfit', sans-serif;
+  font-family: 'Atkinson Hyperlegible', 'Outfit', sans-serif;
   color: var(--text-main);
 }
+
+/* A quiet, etched UI frame lets the 3D world carry the spectacle. */
+.modal-card, .lobby-card, .action-tab-box, .room-panel, .quest-tracker-card,
+.boss-health-card, .settings-card, .inventory-card, .grimoire-card {
+  border-radius: 4px;
+  border-color: rgba(184, 146, 74, 0.48);
+  background-image: linear-gradient(135deg, rgba(99, 216, 230, 0.035), transparent 45%), repeating-linear-gradient(90deg, transparent 0 22px, rgba(184, 146, 74, 0.025) 23px 24px);
+}
+
+.game-title, .spire-brand h1, .modal-card h2, .section-label {
+  font-family: 'Almendra SC', 'Cinzel', serif;
+  letter-spacing: 0.12em;
+}
+
+button, input, select { font-family: inherit; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--leyline-cyan);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+
+.account-strip { border: 1px solid rgba(99, 216, 230, 0.25); background: rgba(7, 10, 18, 0.62); padding: 10px 12px; margin: 12px 0 4px; }
+.account-strip-title { color: var(--leyline-cyan); font-family: 'IBM Plex Mono', monospace; font-size: 0.68rem; letter-spacing: 0.16em; margin-bottom: 7px; }
+.account-strip-fields { display: flex; gap: 7px; align-items: center; }
+.account-strip-fields .magic-input { min-width: 0; padding: 8px 10px; }
+.account-strip-fields .mini-btn { white-space: nowrap; padding: 8px 10px; }
+.account-status { color: var(--text-muted); font-size: 0.72rem; margin-top: 7px; }
+.account-recovery-fields { margin-top: 6px; opacity: 0.88; }
+.resume-campaign-btn { margin-top: 8px; border-color: var(--leyline-cyan); color: var(--leyline-cyan); }
+.resume-campaign-btn:hover { background: rgba(99, 216, 230, 0.12); box-shadow: 0 0 16px rgba(99, 216, 230, 0.2); }
+.danger-mini-btn { border-color: rgba(217, 92, 63, 0.55); color: var(--danger-red); }
+.danger-mini-btn:hover { background: rgba(217, 92, 63, 0.14); }
+.objective-complete { color: #63e6a2 !important; }
+@media (max-width: 760px) { .account-strip-fields { flex-wrap: wrap; } .account-strip-fields .magic-input { flex: 1 1 42%; } }
 
 #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
 
@@ -1317,6 +1360,7 @@ body, html {
 .class-icon { font-size: 1.8rem; } .class-info h3 { font-size: 0.9rem; font-weight: 700; } .class-info p { font-size: 0.7rem; color: var(--text-muted); }
 
 .lobby-action-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 20px; }
+@media (max-width: 760px) { .lobby-action-tabs { grid-template-columns: 1fr; } }
 .action-tab-box { background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 16px; }
 .action-tab-box h3 { font-family: 'Cinzel', serif; font-size: 0.95rem; margin-bottom: 4px; color: var(--gold); }
 .action-tab-box p { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 12px; }
@@ -1768,6 +1812,7 @@ body, html {
   box-shadow: 0 0 12px rgba(212, 175, 55, 0.25);
   transition: all 0.2s;
   z-index: 60;
+  pointer-events: auto;
 }
 .hud-controls-btn:hover {
   background: rgba(212, 175, 55, 0.25);
@@ -2293,6 +2338,3 @@ kbd {
   font-size: 1.1rem;
   animation: pulseRotate 0.8s infinite;
 }
-
-
-

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CharacterAnimator } from '../graphics/characterAnimator.js';
 import { ModelFactory } from '../graphics/modelFactory.js';
+import { disposeObjectGeometries } from '../graphics/resourceUtils.js';
 
 /**
  * BossAstraeaEntity
@@ -14,6 +15,7 @@ export class BossAstraeaEntity {
     this.id = data.id || 'boss_astraea';
     this.name = 'Astraea, Demon-Angel Sovereign';
     this.bossType = 'astraea';
+    this.destroyed = false;
 
     this.health = data.health || 42000;
     this.maxHealth = data.maxHealth || 42000;
@@ -33,6 +35,8 @@ export class BossAstraeaEntity {
     this.hoverHeight = 1.2;
 
     // Fallback Procedural Mesh
+    // Keep the legacy void mesh as a safe local fallback if the generated
+    // Astraea GLB is not available; the authoritative boss id remains Astraea.
     this.fallbackMesh = ModelFactory.createXyrisVoidSovereignMesh();
     this.fallbackMesh.position.copy(this.position);
     this.scene.add(this.fallbackMesh);
@@ -50,6 +54,10 @@ export class BossAstraeaEntity {
 
     this.animator.init().then(() => {
       this.animator.onReady((anim) => {
+        if (this.destroyed) {
+          anim.dispose();
+          return;
+        }
         this.hasRiggedModel = true;
         this.fallbackMesh.visible = false;
         anim.setPosition(this.position.x, this.position.y + this.hoverHeight, this.position.z);
@@ -133,6 +141,9 @@ export class BossAstraeaEntity {
     if (data.alignedBeams !== undefined) {
       this.alignedBeams = data.alignedBeams;
       this.shieldReduction = Math.max(0, 0.75 - this.alignedBeams * 0.25);
+    } else if (data.shieldReduction !== undefined) {
+      this.shieldReduction = Math.max(0, Math.min(0.75, Number(data.shieldReduction) || 0));
+      this.alignedBeams = Math.max(0, Math.min(3, Math.round((0.75 - this.shieldReduction) / 0.25)));
     }
 
     this.updateHUD();
@@ -190,7 +201,7 @@ export class BossAstraeaEntity {
     const fill = document.getElementById('boss-health-fill');
     const phaseBadge = document.getElementById('boss-phase');
     const shieldBadge = document.getElementById('boss-shield-badge');
-    const bossNameEl = document.getElementById('boss-name-label');
+    const bossNameEl = document.getElementById('boss-name');
 
     if (bossNameEl) bossNameEl.textContent = this.name.toUpperCase();
     const ratio = Math.max(0, Math.min(1, this.health / this.maxHealth));
@@ -259,10 +270,13 @@ export class BossAstraeaEntity {
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
     if (this.animator) {
       this.animator.dispose();
     }
     if (this.fallbackMesh) {
+      disposeObjectGeometries(this.fallbackMesh);
       this.scene.remove(this.fallbackMesh);
     }
     if (this.wingParticles) {

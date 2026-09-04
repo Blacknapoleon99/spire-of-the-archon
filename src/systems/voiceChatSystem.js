@@ -91,6 +91,9 @@ export class VoiceChatSystem {
       // Setup PeerJS call receiver
       if (this.network && this.network.peer) {
         this.setupPeerVoiceCalls();
+        for (const peerId of this.network.voicePeerIds || []) {
+          this.callPeer(peerId);
+        }
       }
 
       return true;
@@ -303,7 +306,7 @@ export class VoiceChatSystem {
 
     // 2. Update remote peers 3D positions
     for (const [peerId, peerData] of this.remotePeers.entries()) {
-      const playerEntity = remotePlayersMap.get(peerId);
+      const playerEntity = remotePlayersMap.get(peerId) || [...remotePlayersMap.values()].find(player => player.peerId === peerId);
       if (!playerEntity || !playerEntity.position) {
         peerData.gainNode.gain.value = 0;
         continue;

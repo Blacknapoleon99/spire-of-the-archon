@@ -4,7 +4,7 @@ import { soundEngine } from './audio.js';
  * Voiced NPC Dialogue & Quest Narration Engine.
  * Supports:
  * 1. Web Speech API synthesis (Zero dependencies, offline-ready, pitch/rate modulated per NPC character).
- * 2. ElevenLabs API Integration (Fetches studio voice audio when an API key is provided).
+ * 2. Optional server-side generated audio (never exposes a provider key in the browser).
  * 3. In-game dynamic dialogue subtitles with animated typing and speaker portraits.
  */
 
@@ -17,7 +17,6 @@ export const NPC_PROFILES = {
     color: '#00e5ff',
     pitch: 0.85,
     rate: 0.92,
-    elevenLabsVoiceId: 'pNInz6obpgDQGcFmaJgB', // Adam / Wise elder
   },
   ignatius: {
     id: 'ignatius',
@@ -27,7 +26,6 @@ export const NPC_PROFILES = {
     color: '#ff9800',
     pitch: 1.12,
     rate: 1.05,
-    elevenLabsVoiceId: 'ErXwobaYiN019PkySvjV', // Antoni / Energetic craftsman
   },
   valerius: {
     id: 'valerius',
@@ -37,7 +35,6 @@ export const NPC_PROFILES = {
     color: '#bf5af2',
     pitch: 0.65,
     rate: 0.82,
-    elevenLabsVoiceId: 'VR6AewLTigWG4xSOukaG', // Arnold / Ominous tyrant
   },
   lyra: {
     id: 'lyra',
@@ -47,7 +44,6 @@ export const NPC_PROFILES = {
     color: '#ffd700',
     pitch: 1.25,
     rate: 0.95,
-    elevenLabsVoiceId: '21m00Tcm4TlvDq8ikWAM', // Rachel / Mysterious scholar
   },
   pytheas: {
     id: 'pytheas',
@@ -57,7 +53,6 @@ export const NPC_PROFILES = {
     color: '#4caf50',
     pitch: 0.92,
     rate: 0.96,
-    elevenLabsVoiceId: 'TxGEqnHWrfWFTfGW9XjX', // Josh / Resonant teacher
   },
   malakor: {
     id: 'malakor',
@@ -67,7 +62,6 @@ export const NPC_PROFILES = {
     color: '#ff9800',
     pitch: 0.88,
     rate: 0.95,
-    elevenLabsVoiceId: 'N2lVS1w4EtoT3dr4eOWO', // Callum / Husky rogue
   }
 };
 
@@ -169,7 +163,9 @@ export const DIALOGUE_LINES = {
 
 export class VoiceNarrationEngine {
   constructor() {
-    this.apiKey = localStorage.getItem('spire_elevenlabs_key') || '';
+    // Runtime narration is bundled/local. Provider credentials belong in the
+    // offline generation CLI or server environment, never localStorage.
+    this.apiKey = '';
     this.audioCache = new Map();
     this.currentAudio = null;
     this.isSpeaking = false;
@@ -189,12 +185,7 @@ export class VoiceNarrationEngine {
   }
 
   setApiKey(key) {
-    this.apiKey = key ? key.trim() : '';
-    if (this.apiKey) {
-      localStorage.setItem('spire_elevenlabs_key', this.apiKey);
-    } else {
-      localStorage.removeItem('spire_elevenlabs_key');
-    }
+    this.apiKey = '';
   }
 
   createDialogueUI() {
@@ -255,7 +246,7 @@ export class VoiceNarrationEngine {
       } catch (e) {}
     }
 
-    // 1. Play Pre-generated ElevenLabs Studio Audio MP3 (Guaranteed Studio Voice)
+    // 1. Play bundled studio audio (generated offline and shipped with the app)
     if (dialogueKey && (entry || dialogueKey.startsWith('alistair_') || dialogueKey.startsWith('ignatius_') || dialogueKey.startsWith('valerius_') || dialogueKey.startsWith('malakor_') || dialogueKey.startsWith('lyra_') || dialogueKey.startsWith('pytheas_'))) {
       const audioUrl = `/audio/voices/${dialogueKey}.mp3`;
       try {
@@ -264,7 +255,7 @@ export class VoiceNarrationEngine {
         audio.volume = safeVol;
         this.currentAudio = audio;
         audio.play().then(() => {
-          console.log(`[VoiceEngine] 🎙️ Playing ElevenLabs studio voice: ${dialogueKey}`);
+          console.log(`[VoiceEngine] Playing bundled studio voice: ${dialogueKey}`);
         }).catch((err) => {
           console.warn(`[VoiceEngine] Audio playback note for ${audioUrl}:`, err);
         });
@@ -274,13 +265,7 @@ export class VoiceNarrationEngine {
       }
     }
 
-    // 2. Try live ElevenLabs API if custom text and key present
-    if (this.apiKey) {
-      const played = await this.playElevenLabsTTS(npc, text);
-      if (played) return;
-    }
-
-    // 3. Fallback to Web Speech API only for uncached runtime dynamic text
+    // Dynamic text still receives captions and an offline browser voice.
     this.playWebSpeechTTS(npc, text);
   }
 
@@ -417,51 +402,6 @@ export class VoiceNarrationEngine {
 
     this.playArcaneResonance(npc);
     window.speechSynthesis.speak(utterance);
-  }
-
-  /**
-   * ElevenLabs API Voice Generation & Streamer
-   */
-  async playElevenLabsTTS(npc, text) {
-    const cacheKey = `${npc.id}_${text}`;
-    if (this.audioCache.has(cacheKey)) {
-      const audioUrl = this.audioCache.get(cacheKey);
-      this.playAudioBlobUrl(audioUrl);
-      return true;
-    }
-
-    try {
-      const voiceId = npc.elevenLabsVoiceId || 'pNInz6obpgDQGcFmaJgB';
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
-        method: 'POST',
-        headers: {
-          'xi-api-key': this.apiKey,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text: text,
-          model_id: 'eleven_multilingual_v2',
-          voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.8
-          }
-        })
-      });
-
-      if (!response.ok) {
-        console.warn('[ElevenLabs] API response error:', response.status, response.statusText);
-        return false;
-      }
-
-      const blob = await response.blob();
-      const audioUrl = URL.createObjectURL(blob);
-      this.audioCache.set(cacheKey, audioUrl);
-      this.playAudioBlobUrl(audioUrl);
-      return true;
-    } catch (err) {
-      console.warn('[ElevenLabs] TTS generation failed, falling back to Web Speech:', err);
-      return false;
-    }
   }
 
   playAudioBlobUrl(url) {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ModelFactory } from '../graphics/modelFactory.js';
 import { createDissolveMaterial } from '../graphics/shaders/dissolveMaterial.js';
 import { CharacterAnimator } from '../graphics/characterAnimator.js';
+import { disposeObjectGeometries, disposeSprite } from '../graphics/resourceUtils.js';
 
 export class EnemyEntity {
   constructor(scene, data) {
@@ -13,6 +14,10 @@ export class EnemyEntity {
     this.maxHealth = data.maxHealth || data.health;
     this.isAlive = data.isAlive;
     this.state = data.state || 'idle';
+    this.destroyed = false;
+    this._deathAnimating = false;
+    this._dissolveInterval = null;
+    this._dissolveMaterial = null;
 
     this.position = new THREE.Vector3(data.x, data.y || 0, data.z);
     this.targetPos = this.position.clone();
@@ -66,6 +71,10 @@ export class EnemyEntity {
 
     this.animator.init().then(() => {
       this.animator.onReady((anim) => {
+        if (this.destroyed) {
+          anim.dispose();
+          return;
+        }
         this.hasRiggedModel = true;
         this.mesh.visible = false;
         anim.setPosition(this.position.x, this.position.y, this.position.z);
@@ -181,17 +190,19 @@ export class EnemyEntity {
   }
 
   destroyWithDissolve() {
+    if (this.destroyed || this._deathAnimating) return;
+    this._deathAnimating = true;
     if (this.hpSprite) {
       if (this.mesh) this.mesh.remove(this.hpSprite);
       if (this.animator?.group) this.animator.group.remove(this.hpSprite);
+      disposeSprite(this.hpSprite);
     }
 
     if (this.hasRiggedModel && this.animator) {
-      this.animator.play('Death', 0.2, false, () => {
-        if (this.animator) this.animator.dispose();
-      });
+      this.animator.play('Death', 0.2, false, () => this.destroy());
       setTimeout(() => {
-        if (this.animator) this.animator.dispose();
+        if (!this.destroyed) this.destroy();
+        else this.animator?.dispose();
       }, 1500);
       if (this.mesh) this.scene.remove(this.mesh);
       return;
@@ -200,10 +211,8 @@ export class EnemyEntity {
     if (!this.mesh) return;
 
     const edgeColor = this.type === 'golem' ? 0xff5722 : (this.type === 'shade' ? 0xbf5af2 : 0x00e5ff);
-    const dissolveMat = createDissolveMaterial({
-      edgeColor: edgeColor,
-      baseColor: 0x1a1a24
-    });
+    const dissolveMat = createDissolveMaterial(0x1a1a24, edgeColor);
+    this._dissolveMaterial = dissolveMat.material;
 
     this.mesh.traverse((child) => {
       if (child.isMesh && child.material) {
@@ -212,25 +221,36 @@ export class EnemyEntity {
     });
 
     let progress = 0;
-    const interval = setInterval(() => {
+    this._dissolveInterval = setInterval(() => {
       progress += 0.06;
       dissolveMat.uniforms.uProgress.value = progress;
       if (this.mesh) {
         this.mesh.position.y += 0.015;
       }
       if (progress >= 1.0) {
-        clearInterval(interval);
+        clearInterval(this._dissolveInterval);
+        this._dissolveInterval = null;
         this.scene.remove(this.mesh);
+        this.destroy();
       }
     }, 35);
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this._deathAnimating = false;
+    if (this._dissolveInterval) clearInterval(this._dissolveInterval);
+    this._dissolveInterval = null;
     if (this.animator) {
       this.animator.dispose();
     }
+    if (this.hpSprite) disposeSprite(this.hpSprite);
+    disposeObjectGeometries(this.mesh);
     if (this.mesh) {
       this.scene.remove(this.mesh);
     }
+    this._dissolveMaterial?.dispose?.();
+    this._dissolveMaterial = null;
   }
 }

@@ -42,7 +42,6 @@ export class FPViewmodel {
       pyromancer: { hex: '#d32f2f', color: 0xd32f2f, light: 0xff5722 },
       cryomancer: { hex: '#0a84ff', color: 0x0a84ff, light: 0x00e5ff },
       luminary: { hex: '#ffc107', color: 0xffc107, light: 0xffd700 },
-      stormcaller: { hex: '#ffd60a', color: 0xffd60a, light: 0xffea00 },
       chronomancer: { hex: '#bf5af2', color: 0xbf5af2, light: 0xd500f9 }
     };
     const colorConfig = classColors[this.wizardClass] || classColors.pyromancer;

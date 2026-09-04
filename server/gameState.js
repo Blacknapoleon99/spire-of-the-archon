@@ -1,3 +1,33 @@
+import { CLASS_IDS, getDifficulty, getFloorObjective, MAX_FLOORS } from '../src/shared/gameData.js';
+import { CLASS_SPELL_IDS, PLAYER_CLASS_CONFIG, SPELL_RULES, clampNumber, getSpellRule, sanitizeDirection } from '../src/shared/combatRules.js';
+import { getAllClassTalents } from '../src/systems/talents.js';
+
+// World-space puzzle anchors are shared with the client arena.  Keeping these
+// coordinates on the authority means a forged socket event cannot solve a
+// puzzle from across the room (or from a different floor).
+const LEYLINE_PEDESTAL_POSITIONS = Object.freeze({
+  pyretic: Object.freeze({ x: 0, z: 22, element: 'fire' }),
+  cryo: Object.freeze({ x: -18, z: -10, element: 'frost' }),
+  chrono: Object.freeze({ x: 18, z: -10, element: 'chrono' })
+});
+
+const PRISM_POSITIONS = Object.freeze({
+  1: Object.freeze({ 1: Object.freeze({ x: -7, z: -5 }), 2: Object.freeze({ x: 7, z: -5 }), 3: Object.freeze({ x: 0, z: -11 }) })
+});
+
+const CRUCIBLE_POSITIONS = Object.freeze({
+  2: Object.freeze([
+    Object.freeze({ x: -12, z: -4 }),
+    Object.freeze({ x: 0, z: -14 }),
+    Object.freeze({ x: 12, z: -4 })
+  ]),
+  5: Object.freeze([
+    Object.freeze({ x: -10, z: -8 }),
+    Object.freeze({ x: 10, z: -8 }),
+    Object.freeze({ x: 0, z: 12 })
+  ])
+});
+
 // Quizzes and Riddles embedded into the Spire's Lore
 export const QUIZ_DATABASE = {
   1: [ // Floor 1: Archives of the Scribes
@@ -63,14 +93,21 @@ export const QUIZ_DATABASE = {
 };
 
 export class GameState {
-  constructor(roomId, io) {
+  constructor(roomId, io, options = {}) {
     this.roomId = roomId;
     this.io = io;
     this.floor = 1;
-    this.maxFloors = 15;
+    this.maxFloors = MAX_FLOORS;
+    this.difficultyId = 'standard';
+    this.setDifficulty(options.difficulty);
     this.isGameStarted = false;
     this.isGameOver = false;
     this.isVictory = false;
+    this.ascensionTier = Number.isFinite(Number(options.ascensionTier)) ? Math.max(0, Number(options.ascensionTier)) : 0;
+    this.serverTick = 0;
+    this.startedAt = null;
+    this.objective = null;
+    this._objectiveSignature = '';
 
     // Entities
     this.players = new Map(); // socketId -> PlayerState
@@ -100,10 +137,10 @@ export class GameState {
       },
       floor3: {
         keystones: [
-          { id: 'north', active: false, x: 0, z: -16 },
-          { id: 'south', active: false, x: 0, z: 16 },
-          { id: 'east', active: false, x: 16, z: 0 },
-          { id: 'west', active: false, x: -16, z: 0 }
+          { id: 'north', active: false, x: 0, z: -17 },
+          { id: 'south', active: false, x: 0, z: 17 },
+          { id: 'east', active: false, x: 17, z: 0 },
+          { id: 'west', active: false, x: -17, z: 0 }
         ],
         bossShieldActive: false
       },
@@ -121,16 +158,10 @@ export class GameState {
       },
       // FLOOR 10 BOSS ROOM PUZZLE: Simultaneous Tri-Elemental Leylines & Meltdown Fail-Safe
       floor10: {
-        mirrors: [
-          { id: 1, angle: 0, targetAngle: 90, isAligned: false },
-          { id: 2, angle: 180, targetAngle: 270, isAligned: false },
-          { id: 3, angle: 90, targetAngle: 0, isAligned: false },
-          { id: 4, angle: 270, targetAngle: 180, isAligned: false }
-        ],
         pedestals: {
-          pyretic: { isCharged: false, isAligned: false },
-          cryo: { isCharged: false, isAligned: false },
-          chrono: { isCharged: false, isAligned: false }
+          pyretic: { ...LEYLINE_PEDESTAL_POSITIONS.pyretic, isCharged: false, isAligned: false },
+          cryo: { ...LEYLINE_PEDESTAL_POSITIONS.cryo, isCharged: false, isAligned: false },
+          chrono: { ...LEYLINE_PEDESTAL_POSITIONS.chrono, isCharged: false, isAligned: false }
         },
         alignedCount: 0,
         annihilationTimer: 14.0,
@@ -142,10 +173,10 @@ export class GameState {
       // FLOOR 15 GRAND FINALE BOSS ROOM PUZZLE: Simultaneous 4 Temporal Paradox Keystones
       floor15: {
         keystones: [
-          { id: 'north', active: false, x: 0, z: -16 },
-          { id: 'south', active: false, x: 0, z: 16 },
-          { id: 'east', active: false, x: 16, z: 0 },
-          { id: 'west', active: false, x: -16, z: 0 }
+          { id: 'north', active: false, x: 0, z: -14 },
+          { id: 'south', active: false, x: 0, z: 14 },
+          { id: 'east', active: false, x: 14, z: 0 },
+          { id: 'west', active: false, x: -14, z: 0 }
         ],
         bossShieldActive: true
       }
@@ -155,6 +186,11 @@ export class GameState {
     this.currentQuiz = null;
     this.quizVotes = new Map(); // socketId -> optionIndex
 
+    // Per-player authoritative action state. Clients may predict visuals, but
+    // the relay owns cooldowns, sequence ordering and effect outcomes.
+    this.playerCooldowns = new Map();
+    this.lastHitAt = new Map();
+
     // Story progress
     this.storyLog = [
       'You awake in the subterranean archives of the Spire of Aethelgard. Corrupted Archmage Valerius has locked the temporal seals.'
@@ -163,12 +199,156 @@ export class GameState {
     this.initFloor(1);
   }
 
+  getDifficultyProfile() {
+    return getDifficulty(this.difficultyId, this.players.size || 1);
+  }
+
+  setDifficulty(difficultyId) {
+    this.difficultyId = ['story', 'standard', 'archon'].includes(difficultyId) ? difficultyId : 'standard';
+  }
+
+  getSpawnPosition(floorNumber = this.floor) {
+    const floor = Number(floorNumber) || 1;
+    if (floor === 1) return { x: 0, y: 0, z: 31 };
+    if (floor === 2) return { x: 0, y: 0, z: 40 };
+    if (floor === 5 || floor === 6) return { x: 0, y: 0, z: 18 };
+    if (floor === 10 || floor === 15) return { x: 0, y: 0, z: 24 };
+    return { x: 0, y: 0, z: 14 };
+  }
+
+  resetObjective(floorNumber = this.floor) {
+    const definition = getFloorObjective(floorNumber);
+    this.objective = {
+      floor: Number(floorNumber),
+      id: definition.id,
+      kind: definition.kind,
+      label: definition.label,
+      required: definition.required,
+      progress: 0,
+      complete: false,
+      updatedAt: Date.now()
+    };
+    this._objectiveSignature = '';
+  }
+
+  getLivingEnemyCount() {
+    return Array.from(this.enemies.values()).filter(enemy => enemy.isAlive).length;
+  }
+
+  refreshObjective(force = false) {
+    if (!this.objective) this.resetObjective(this.floor);
+    const previous = {
+      floor: this.objective.floor,
+      id: this.objective.id,
+      kind: this.objective.kind,
+      required: this.objective.required,
+      progress: this.objective.progress,
+      complete: this.objective.complete,
+      remainingEnemies: this.objective.remainingEnemies
+    };
+    const livingEnemies = this.getLivingEnemyCount();
+    const floorPuzzle = this.puzzles[`floor${this.floor}`];
+    let progress = this.objective.progress;
+    let complete = false;
+
+    if (this.objective.kind === 'boss') {
+      const boss = Array.from(this.enemies.values()).find(enemy => enemy.type === 'boss');
+      const puzzleComplete = this.floor === 5
+        ? Boolean(this.puzzles.floor5?.unlocked)
+        : this.floor === 10
+          ? Boolean(this.puzzles.floor10?.unlocked || (this.puzzles.floor10?.alignedCount || 0) >= 3)
+          : this.floor === 15
+            ? Boolean(this.puzzles.floor15?.keystones?.every(keystone => keystone.active))
+            : true;
+      complete = (Boolean(boss && !boss.isAlive) || (!boss && this.isVictory)) && puzzleComplete;
+      progress = complete ? 1 : 0;
+    } else if (this.objective.kind === 'prism_and_clear') {
+      const puzzleComplete = Boolean(floorPuzzle?.unlocked);
+      complete = puzzleComplete && livingEnemies === 0;
+      progress = puzzleComplete ? (complete ? 1 : 0.5) : 0;
+    } else if (this.objective.kind === 'crucible_and_clear') {
+      const puzzleComplete = Boolean(floorPuzzle?.unlocked);
+      complete = puzzleComplete && livingEnemies === 0;
+      progress = puzzleComplete ? (complete ? 1 : 0.5) : 0;
+    } else if (this.objective.kind === 'keystone_and_clear') {
+      const puzzleComplete = Boolean(floorPuzzle?.keystones?.every(keystone => keystone.active));
+      complete = puzzleComplete && livingEnemies === 0;
+      progress = puzzleComplete ? (complete ? 1 : 0.5) : 0;
+    } else {
+      complete = livingEnemies === 0;
+      progress = complete ? 1 : 0;
+    }
+
+    this.objective.progress = progress;
+    this.objective.complete = complete;
+    this.objective.remainingEnemies = livingEnemies;
+    const stateChanged = previous.floor !== this.objective.floor
+      || previous.id !== this.objective.id
+      || previous.kind !== this.objective.kind
+      || previous.required !== this.objective.required
+      || previous.progress !== this.objective.progress
+      || previous.complete !== this.objective.complete
+      || previous.remainingEnemies !== this.objective.remainingEnemies;
+    if (force || stateChanged) this.objective.updatedAt = Date.now();
+
+    // Exclude the bookkeeping timestamp from the signature. Otherwise every
+    // 20 Hz simulation tick looks like a new objective and floods the room
+    // with redundant broadcasts.
+    const { updatedAt: _updatedAt, ...objectiveSignature } = this.objective;
+    const signature = JSON.stringify(objectiveSignature);
+    if (force || this._objectiveSignature !== signature) {
+      this._objectiveSignature = signature;
+      this.io.to(this.roomId).emit('objective_update', this.objective);
+    }
+    return this.objective;
+  }
+
+  getSnapshot() {
+    return {
+      players: Array.from(this.players.values()),
+      // Defeated enemies stay in the authoritative map long enough for
+      // objective bookkeeping, but are not part of the live replication set.
+      // Omitting them lets clients retire meshes immediately and prevents a
+      // reconnect from resurrecting already-cleared encounter actors.
+      enemies: Array.from(this.enemies.values()).filter(enemy => enemy.isAlive),
+      floor: this.floor,
+      difficulty: this.difficultyId,
+      serverTick: this.serverTick,
+      objective: this.objective,
+      puzzles: this.puzzles
+    };
+  }
+
   initFloor(floorNumber) {
-    this.floor = floorNumber;
+    this.floor = Math.max(1, Math.min(this.maxFloors, Number(floorNumber) || 1));
+    // Use the bounded value for every spawn/puzzle branch below. This keeps
+    // malformed resume requests from producing an empty, unwinnable floor.
+    floorNumber = this.floor;
+    this.resetObjective(this.floor);
     this.enemies.clear();
     this.projectiles = [];
     this.currentQuiz = null;
     this.quizVotes.clear();
+    this.lastHitAt.clear();
+
+    // Reinitialize reusable puzzle state on every attempt so retries are
+    // deterministic and a previous run cannot unlock a later ascent.
+    if (this.puzzles.floor1) {
+      this.puzzles.floor1.prisms.forEach((prism, index) => {
+        prism.angle = [0, 180, 90][index] ?? 0;
+        prism.isAligned = false;
+      });
+      this.puzzles.floor1.unlocked = false;
+    }
+    if (this.puzzles.floor2) {
+      this.puzzles.floor2.currentStep = 0;
+      this.puzzles.floor2.unlocked = false;
+      this.puzzles.floor2.crucibles.forEach(crucible => { crucible.charged = false; });
+    }
+    if (this.puzzles.floor3) {
+      this.puzzles.floor3.bossShieldActive = false;
+      this.puzzles.floor3.keystones.forEach(keystone => { keystone.active = false; });
+    }
 
     // =========================================================================
     // TIER 1: THE FORBIDDEN ARCHIVES & ANCIENT CATACOMBS (Floors 1 - 5)
@@ -230,11 +410,11 @@ export class GameState {
       this.spawnEnemy('golem', 0, 0, -26, 310, 30, 'Crystalline Colossus');
       this.broadcastStory('Floor 8: The Crystalline Caverns. Resonating amethyst geodes channel unfiltered raw arcana!');
     } else if (floorNumber === 9) {
-      // Floor 9: The Void-Touched Catwalks
-      this.spawnEnemy('shade', -18, 0, -12, 220, 26, 'Void Horror');
-      this.spawnEnemy('shade', 18, 0, -12, 220, 26, 'Void Horror');
-      this.spawnEnemy('sentry', 0, 0, -24, 220, 26, 'Abyssal Eye');
-      this.broadcastStory('Floor 9: The Void-Touched Catwalks. The fabric of reality thins as the Void Nexus approaches!');
+      // Floor 9: the first hero encounter before Astraea's core.
+      this.spawnBossXyris(0, 0, -16);
+      this.spawnEnemy('shade', -16, 0, -10, 220, 26, 'Void Horror');
+      this.spawnEnemy('sentry', 16, 0, -10, 220, 26, 'Abyssal Eye');
+      this.broadcastStory('Floor 9: The Void-Touched Catwalks. Xyris, the Eye of the Abyss, guards the approach to Astraea!');
     } else if (floorNumber === 10) {
       // Floor 10: BOSS LEVEL & BOSS ROOM - Astraea the Demon-Angel Sovereign
       this.spawnBossAstraea(0, 0, -14);
@@ -243,11 +423,10 @@ export class GameState {
       this.puzzles.floor10.meltdownActive = false;
       this.puzzles.floor10.meltdownTimer = 15.0;
       if (this.puzzles.floor10.pedestals) {
-        this.puzzles.floor10.pedestals.pyretic = { isCharged: false, isAligned: false };
-        this.puzzles.floor10.pedestals.cryo = { isCharged: false, isAligned: false };
-        this.puzzles.floor10.pedestals.chrono = { isCharged: false, isAligned: false };
+        for (const [key, anchor] of Object.entries(LEYLINE_PEDESTAL_POSITIONS)) {
+          this.puzzles.floor10.pedestals[key] = { ...anchor, isCharged: false, isAligned: false };
+        }
       }
-      this.puzzles.floor10.mirrors.forEach(m => m.isAligned = false);
       this.broadcastStory('FLOOR 10 [BOSS ROOM]: The Astral-Brimstone Sanctum! Astraea the Demon-Angel Sovereign descends! Align the 3 Elemental Leylines during combat to pierce her Prismatic Shield — beware the 15-second core meltdown if she falls before containment!');
     }
 
@@ -288,15 +467,18 @@ export class GameState {
 
     // Reset player floor positions to entrance
     for (const [socketId, player] of this.players) {
+      const spawn = this.getSpawnPosition(floorNumber);
       player.x = (Math.random() - 0.5) * 2;
-      player.y = 0;
-      player.z = (floorNumber === 5 || floorNumber === 6) ? 38 : ((floorNumber === 10 || floorNumber === 15) ? 24 : 31);
+      player.y = spawn.y;
+      player.z = spawn.z;
       player.rotY = 0;
       player.health = player.maxHealth;
       player.mana = player.maxMana;
       player.isAlive = true;
     }
 
+    this.rescaleEncounter();
+    this.refreshObjective(true);
     this.broadcastState();
   }
 
@@ -315,7 +497,9 @@ export class GameState {
       z,
       health,
       maxHealth: health,
+      baseHealth,
       damage,
+      baseDamage,
       speed: type === 'golem' ? 2.2 : type === 'shade' ? 4.0 : 3.0,
       state: 'patrol',
       patrolCenter: { x, z },
@@ -340,7 +524,9 @@ export class GameState {
       x, y, z,
       health,
       maxHealth: health,
+      baseHealth: 1400,
       damage,
+      baseDamage: 38,
       speed: 2.8,
       state: 'combat',
       targetId: null,
@@ -367,12 +553,14 @@ export class GameState {
       x, y, z,
       health,
       maxHealth: health,
+      baseHealth: 2200,
       damage,
+      baseDamage: 48,
       speed: 3.5,
       state: 'combat',
       targetId: null,
       phase: 1,
-      invulnerable: true, // Protected by Void Ward until mirrors align
+      invulnerable: false,
       cooldown: 0,
       specialTimer: 8.0,
       channelingAnnihilation: false,
@@ -396,13 +584,16 @@ export class GameState {
       x, y, z,
       health,
       maxHealth: health,
+      baseHealth: 42000,
       damage,
+      baseDamage: 52,
       speed: 4.0,
       state: 'combat',
       targetId: null,
       phase: 1,
       invulnerable: false,
       shieldReduction: 0.75, // 75% damage reduction until leylines align
+      alignedBeams: 0,
       cooldown: 0,
       specialTimer: 5.5,
       channelTimer: 0,
@@ -425,7 +616,9 @@ export class GameState {
       x, y, z,
       health,
       maxHealth: health,
+      baseHealth: 3500,
       damage,
+      baseDamage: 58,
       speed: 3.4,
       state: 'combat',
       targetId: null,
@@ -438,7 +631,11 @@ export class GameState {
     });
   }
 
-  ascendNewGamePlus() {
+  ascendNewGamePlus(requesterId = null) {
+    if (!this.isVictory) {
+      if (requesterId) this.io.to(requesterId).emit('action_rejected', { action: 'ascend_ng_plus', reason: 'victory_required' });
+      return false;
+    }
     this.ascensionTier = (this.ascensionTier || 0) + 1;
     this.isVictory = false;
     this.isGameOver = false;
@@ -448,27 +645,24 @@ export class GameState {
       healthMultiplier: 1 + this.ascensionTier * 0.45
     });
     this.broadcastStory(`[ASCENSION TIER ${this.ascensionTier}] The temporal loop resets with intensified chronomantic corruption!`);
+    return true;
   }
 
   addPlayer(socketId, name, wizardClass) {
-    const classConfigs = {
-      pyromancer: { maxHealth: 180, maxMana: 140, speed: 6.5, color: 0xff3b30 },
-      cryomancer: { maxHealth: 240, maxMana: 120, speed: 6.0, color: 0x0a84ff },
-      luminary: { maxHealth: 200, maxMana: 180, speed: 6.4, color: 0xffc107 },
-      stormcaller: { maxHealth: 170, maxMana: 160, speed: 7.2, color: 0xffd60a },
-      chronomancer: { maxHealth: 190, maxMana: 150, speed: 6.5, color: 0xbf5af2 }
-    };
-
-    const config = classConfigs[wizardClass] || classConfigs.pyromancer;
+    const safeClass = CLASS_IDS.includes(wizardClass) ? wizardClass : 'pyromancer';
+    const config = PLAYER_CLASS_CONFIG[safeClass] || PLAYER_CLASS_CONFIG.pyromancer;
+    const spawn = this.getSpawnPosition(this.floor);
 
     const player = {
       id: socketId,
-      name: name || 'Apprentice',
-      wizardClass,
+      name: String(name || 'Apprentice').replace(/[<>]/g, '').trim().slice(0, 24) || 'Apprentice',
+      wizardClass: safeClass,
       color: config.color,
+      speed: config.speed,
+      damageMitigation: 0,
       x: (this.players.size * 2) - 2,
       y: 0,
-      z: this.floor === 1 ? 31 : (this.floor === 2 ? 40 : 14),
+      z: spawn.z,
       rotY: 0,
       health: config.maxHealth,
       maxHealth: config.maxHealth,
@@ -485,60 +679,301 @@ export class GameState {
       score: 0,
       isReady: false,
       isAlive: true,
-      lastInputSeq: 0
+      connected: true,
+      lastInputSeq: 0,
+      lastInputAt: Date.now(),
+      velocity: { x: 0, y: 0, z: 0 },
+      statusEffects: {},
+      shield: 0,
+      disconnectedAt: null
     };
 
     this.players.set(socketId, player);
+    this.playerCooldowns.set(socketId, new Map());
+    this.rescaleEncounter();
     return player;
+  }
+
+  rescaleEncounter() {
+    const scale = this.getDifficultyProfile();
+    for (const enemy of this.enemies.values()) {
+      const healthRatio = enemy.maxHealth > 0 ? Math.max(0, Math.min(1, enemy.health / enemy.maxHealth)) : 1;
+      if (enemy.baseHealth === undefined) enemy.baseHealth = enemy.maxHealth;
+      if (enemy.baseDamage === undefined) enemy.baseDamage = enemy.damage;
+      const asc = this.ascensionTier || 0;
+      enemy.maxHealth = Math.round(enemy.baseHealth * scale.enemyHealth * (1 + asc * 0.4));
+      enemy.health = enemy.isAlive === false ? 0 : Math.round(enemy.maxHealth * healthRatio);
+      enemy.damage = Math.round(enemy.baseDamage * scale.enemyDamage * (1 + asc * 0.25));
+    }
+  }
+
+  applyPlayerProfile(socketId, profile = {}) {
+    const player = this.players.get(socketId);
+    if (!player) return false;
+    const level = clampNumber(profile.level, 1, 15, player.level || 1);
+    const xp = clampNumber(profile.xp, 0, 9999999, player.xp || 0);
+    const attributes = profile.attributes && typeof profile.attributes === 'object' ? profile.attributes : {};
+    const bounded = {
+      vitality: clampNumber(attributes.vitality, 0, 999, 15),
+      arcana: clampNumber(attributes.arcana, 0, 999, 20),
+      focus: clampNumber(attributes.focus, 0, 999, 18),
+      haste: clampNumber(attributes.haste, 0, 999, 10),
+      mastery: clampNumber(attributes.mastery, 0, 999, 10)
+    };
+    player.level = level;
+    player.xp = xp;
+    player.attributes = bounded;
+    player.speed = (PLAYER_CLASS_CONFIG[player.wizardClass]?.speed || player.speed || 6.5) + bounded.haste * 0.035;
+    player.maxHealth = Math.round(150 + bounded.vitality * 8);
+    player.maxMana = Math.round(100 + bounded.focus * 5);
+    player.damageMitigation = Math.min(0.55, bounded.vitality * 0.0035);
+    player.spellPowerMultiplier = 1 + bounded.arcana * 0.015;
+    player.healingMultiplier = 1 + bounded.focus * 0.012 + bounded.mastery * 0.008;
+    player.cooldownMultiplier = Math.max(0.55, 1 - bounded.haste * 0.003 - bounded.mastery * 0.001);
+    const currentHealth = Number.isFinite(Number(player.health)) ? Number(player.health) : player.maxHealth;
+    const currentMana = Number.isFinite(Number(player.mana)) ? Number(player.mana) : player.maxMana;
+    player.health = Math.min(player.maxHealth, Math.max(0, currentHealth));
+    player.mana = Math.min(player.maxMana, Math.max(0, currentMana));
+    if (profile.talents && typeof profile.talents === 'object') {
+      const requested = profile.talents;
+      const unlocked = {};
+      const maxUnlocks = Math.min(24, Math.max(1, Math.floor(level) + 3));
+      for (const talent of getAllClassTalents(player.wizardClass)) {
+        if (Object.keys(unlocked).length >= maxUnlocks || !requested[talent.key]) continue;
+        if (talent.requires && !unlocked[talent.requires]) continue;
+        unlocked[talent.key] = true;
+        this.applyTalentPassive(player, talent.key);
+      }
+      player.talents = unlocked;
+      const requestedPoints = clampNumber(profile.talentPoints, 0, 32, Math.max(0, player.talentPoints || 0));
+      player.talentPoints = Math.min(requestedPoints, Math.max(0, level + 8 - Object.keys(unlocked).length));
+    }
+    this.io.to(socketId).emit('profile_applied', {
+      level: player.level,
+      xp: player.xp,
+      maxHealth: player.maxHealth,
+      maxMana: player.maxMana,
+      speed: player.speed,
+      attributes: player.attributes,
+      talents: player.talents,
+      talentPoints: player.talentPoints
+    });
+    return true;
   }
 
   removePlayer(socketId) {
     this.players.delete(socketId);
     this.quizVotes.delete(socketId);
+    this.playerCooldowns.delete(socketId);
+    for (const key of this.lastHitAt.keys()) {
+      if (key.startsWith(`${socketId}:`)) this.lastHitAt.delete(key);
+    }
+    this.rescaleEncounter();
   }
 
-  handlePlayerInput(socketId, data) {
+  handlePlayerInput(socketId, data = {}) {
     const player = this.players.get(socketId);
-    if (!player || !player.isAlive) return;
+    if (!player || !player.isAlive || player.connected === false) return;
 
-    if (data.x !== undefined) player.x = data.x;
-    if (data.y !== undefined) player.y = data.y;
-    if (data.z !== undefined) player.z = data.z;
-    if (data.rotY !== undefined) player.rotY = data.rotY;
+    const now = Date.now();
+    const elapsed = Math.max(0.01, Math.min(0.25, (now - (player.lastInputAt || now)) / 1000));
+    const incomingSeq = Number.isFinite(Number(data.seq)) ? Math.floor(Number(data.seq)) : player.lastInputSeq + 1;
+    if (incomingSeq <= player.lastInputSeq) return;
+
+    const x = clampNumber(data.x, -80, 80, player.x);
+    const y = clampNumber(data.y, -2, 12, player.y);
+    const z = clampNumber(data.z, -120, 80, player.z);
+    const rotY = clampNumber(data.rotY, -Math.PI * 4, Math.PI * 4, player.rotY);
+    const distance = Math.hypot(x - player.x, y - player.y, z - player.z);
+    const speed = Number(player.speed) || PLAYER_CLASS_CONFIG[player.wizardClass]?.speed || 6.5;
+    const allowedDistance = speed * elapsed * 2.4 + 1.0;
+    if (distance > allowedDistance) {
+      this.io.to(socketId).emit('input_rejected', {
+        seq: incomingSeq,
+        reason: 'movement_limit',
+        position: { x: player.x, y: player.y, z: player.z },
+        ackInputSeq: player.lastInputSeq
+      });
+      player.lastInputAt = now;
+      return;
+    }
+
+    player.x = x;
+    player.y = y;
+    player.z = z;
+    player.rotY = rotY;
     if (data.action) player.action = data.action;
-    player.lastInputSeq = data.seq || 0;
+    player.lastInputSeq = incomingSeq;
+    player.lastInputAt = now;
   }
 
   handleSpellCast(socketId, spellData) {
     const player = this.players.get(socketId);
-    if (!player || !player.isAlive) return;
+    if (!player || !player.isAlive || player.connected === false) return;
 
-    if (player.mana < (spellData.manaCost || 10)) {
+    const spell = spellData && typeof spellData.spellId === 'string' ? spellData.spellId : '';
+    const rule = getSpellRule(spell, player.wizardClass);
+    if (!rule || !CLASS_SPELL_IDS[player.wizardClass]?.includes(spell)) return;
+
+    const now = Date.now();
+    const cooldowns = this.playerCooldowns.get(socketId) || new Map();
+    const readyAt = Number(cooldowns.get(spell) || 0);
+    if (readyAt > now) {
+      this.io.to(socketId).emit('action_rejected', {
+        action: 'cast_spell',
+        spellId: spell,
+        spellType: typeof spellData?.spellType === 'string' ? spellData.spellType : null,
+        reason: 'cooldown',
+        retryIn: (readyAt - now) / 1000
+      });
+      return;
+    }
+
+    const manaCost = Math.max(0, rule.mana - (rule.element === 'fire' ? clampNumber(player.fireCostReduction, 0, 24, 0) : 0));
+    if (player.mana < manaCost) {
+      this.io.to(socketId).emit('action_rejected', { action: 'cast_spell', spellId: spell, reason: 'mana' });
       return; // Not enough mana
     }
 
-    player.mana -= (spellData.manaCost || 10);
+    player.mana -= manaCost;
+    const cooldownSeconds = rule.cooldown
+      * (Number(player.cooldownMultiplier) || 1)
+      * Math.max(0.45, 1 - clampNumber(player.cdr, 0, 0.4, 0));
+    cooldowns.set(spell, now + Math.max(150, cooldownSeconds * 1000));
+    this.playerCooldowns.set(socketId, cooldowns);
+
+    const requestedOrigin = spellData?.origin && typeof spellData.origin === 'object'
+      ? { x: clampNumber(spellData.origin.x, -80, 80, player.x), y: clampNumber(spellData.origin.y, -2, 12, player.y + 1.7), z: clampNumber(spellData.origin.z, -120, 80, player.z) }
+      : { x: player.x, y: player.y + 1.7, z: player.z };
+    // A client can render a predicted muzzle flash, but it cannot move the
+    // authoritative cast origin to another location in the room.
+    const origin = Math.hypot(requestedOrigin.x - player.x, requestedOrigin.y - (player.y + 1.7), requestedOrigin.z - player.z) <= 2.5
+      ? requestedOrigin
+      : { x: player.x, y: player.y + 1.7, z: player.z };
+    const direction = sanitizeDirection(spellData?.direction);
+    const serverDamage = Math.round(rule.damage
+      * clampNumber(player.spellPowerMultiplier, 0.5, 4, 1)
+      * (1 + clampNumber(player.spellPowerBonus, 0, 1, 0)));
+    player.lastSpell = {
+      id: spell,
+      damage: serverDamage,
+      element: rule.element,
+      origin,
+      direction,
+      at: now,
+      token: `${socketId}:${now}:${Math.random().toString(36).slice(2, 8)}`
+    };
 
     // Broadcast spell effect to all players in room
     this.io.to(this.roomId).emit('spell_cast', {
       casterId: socketId,
       spellId: spellData.spellId,
-      spellType: spellData.spellType,
-      origin: spellData.origin,
-      direction: spellData.direction,
-      damage: spellData.damage,
-      element: spellData.element
+      spellType: typeof spellData.spellType === 'string' ? spellData.spellType : 'basic',
+      origin,
+      direction,
+      damage: serverDamage,
+      element: rule.element,
+      mana: player.mana,
+      cooldown: cooldownSeconds,
+      token: player.lastSpell.token
     });
+
+    // Resolve non-projectile support effects on the authority immediately.
+    if (rule.heal) this.applyPlayerHeal(player, rule.heal * (Number(player.healingMultiplier) || 1) * (1 + clampNumber(player.healingPowerBonus, 0, 1, 0)), 'self', rule.element);
+    if (rule.aoeHeal || rule.regenAura) this.applyPartyEffect(player, rule);
+    if (rule.shield) {
+      player.shield = Math.max(Number(player.shield) || 0, rule.shield);
+      player.statusEffects.shield = { amount: player.shield, expiresAt: now + (rule.duration || 5) * 1000 };
+      this.io.to(this.roomId).emit('player_effect', { playerId: player.id, effect: 'shield', amount: player.shield, duration: rule.duration || 5 });
+    }
 
     // Check interaction with Floor 2 crucibles
     if (this.floor === 2 && spellData.targetType === 'crucible') {
-      this.handleCrucibleInteraction(spellData.crucibleIndex, spellData.element);
+      this.handleCrucibleInteraction(spellData.crucibleIndex, rule.element, socketId);
     }
+  }
+
+  applyPlayerHeal(player, amount, source = 'spell', element = 'light') {
+    if (!player || !player.isAlive || player.connected === false) return 0;
+    const before = player.health;
+    player.health = Math.min(player.maxHealth, player.health + Math.max(0, Number(amount) || 0));
+    const healed = player.health - before;
+    if (healed > 0) {
+      this.io.to(this.roomId).emit('player_effect', { playerId: player.id, effect: 'heal', amount: healed, source, element });
+      this.io.to(this.roomId).emit('floating_text', { x: player.x, y: player.y + 2, z: player.z, text: `+${Math.round(healed)}`, color: '#63e6a2' });
+    }
+    return healed;
+  }
+
+  applyPartyEffect(sourcePlayer, rule) {
+    const radius = rule.aoeRadius || 8;
+    const healingScale = (Number(sourcePlayer.healingMultiplier) || 1) * (1 + clampNumber(sourcePlayer.healingPowerBonus, 0, 1, 0));
+    for (const player of this.players.values()) {
+      if (!player.isAlive || player.connected === false) continue;
+      const distance = Math.hypot(player.x - sourcePlayer.x, player.z - sourcePlayer.z);
+      if (distance <= radius || player.id === sourcePlayer.id) {
+        if (rule.aoeHeal) this.applyPlayerHeal(player, rule.aoeHeal * healingScale, 'party', rule.element);
+        if (rule.regenAura) player.statusEffects.regen = { expiresAt: Date.now() + (rule.duration || 6) * 1000, amount: 8 * healingScale };
+      }
+    }
+    this.io.to(this.roomId).emit('party_effect', { sourceId: sourcePlayer.id, element: rule.element, radius, duration: rule.duration || 0 });
+  }
+
+  damagePlayer(player, amount, source = 'enemy') {
+    if (!player || !player.isAlive || player.connected === false) return 0;
+    let incoming = Math.max(0, Number(amount) || 0);
+    const shield = Math.max(0, Number(player.shield) || 0);
+    const absorbed = Math.min(shield, incoming);
+    if (absorbed > 0) {
+      player.shield -= absorbed;
+      incoming -= absorbed;
+      if (player.shield <= 0) delete player.statusEffects.shield;
+    }
+    const mitigation = clampNumber(Math.max(Number(player.damageMitigation) || 0, Number(player.damageReduction) || 0), 0, 0.7, 0);
+    const actual = incoming * (1 - mitigation);
+    player.health = Math.max(0, player.health - actual);
+    this.io.to(this.roomId).emit('player_effect', { playerId: player.id, effect: 'damage', amount: actual, absorbed, source });
+    if (player.health <= 0) {
+      player.health = 0;
+      player.isAlive = false;
+      player.respawnTimer = 0;
+      this.io.to(this.roomId).emit('player_died', { playerId: player.id, source });
+    }
+    return actual;
   }
 
   handleDamageToEnemy(enemyId, damage, element, attackerId) {
     const enemy = this.enemies.get(enemyId);
     if (!enemy || !enemy.isAlive) return;
+    const attacker = this.players.get(attackerId);
+    if (!attacker || !attacker.isAlive || attacker.connected === false) return;
+    const distance = Math.hypot(attacker.x - enemy.x, attacker.z - enemy.z);
+    if (distance > 42) return;
+    // Client reports a hit, but the server owns the damage ceiling and target.
+    const now = Date.now();
+    const recentSpell = attacker.lastSpell && now - attacker.lastSpell.at < 3000 ? attacker.lastSpell : null;
+    if (!recentSpell) return;
+    const hitKey = `${attackerId}:${enemyId}:${recentSpell.token}`;
+    const lastHit = Number(this.lastHitAt.get(hitKey) || 0);
+    if (now - lastHit < 120) return;
+    this.lastHitAt.set(hitKey, now);
+    const rule = SPELL_RULES[recentSpell.id];
+    if (!rule || rule.damage <= 0) return;
+
+    if (recentSpell.origin && recentSpell.direction && rule?.range) {
+      const toTarget = { x: enemy.x - recentSpell.origin.x, y: enemy.y - recentSpell.origin.y, z: enemy.z - recentSpell.origin.z };
+      const along = toTarget.x * recentSpell.direction.x + toTarget.y * recentSpell.direction.y + toTarget.z * recentSpell.direction.z;
+      const nearest = {
+        x: recentSpell.origin.x + recentSpell.direction.x * Math.max(0, along),
+        y: recentSpell.origin.y + recentSpell.direction.y * Math.max(0, along),
+        z: recentSpell.origin.z + recentSpell.direction.z * Math.max(0, along)
+      };
+      const rayDistance = Math.hypot(enemy.x - nearest.x, enemy.y - nearest.y, enemy.z - nearest.z);
+      if (along < -1 || along > rule.range + 3 || rayDistance > 5.5) return;
+    }
+    damage = Math.max(1, Math.min(300, Number(damage) || 1));
+    damage = Math.min(damage, Math.max(1, recentSpell.damage));
+    element = recentSpell.element;
 
     // Check boss shields during simultaneous combat puzzles
     if (enemy.type === 'boss') {
@@ -607,6 +1042,32 @@ export class GameState {
 
     enemy.health -= actualDamage;
 
+    if (attacker.cdRefundOnHit) {
+      const cooldowns = this.playerCooldowns.get(attackerId);
+      if (cooldowns?.has(recentSpell.id)) {
+        const readyAt = Number(cooldowns.get(recentSpell.id)) || now;
+        cooldowns.set(recentSpell.id, Math.max(now, readyAt - clampNumber(attacker.cdRefundOnHit, 0, 5, 0) * 1000));
+      }
+    }
+
+    if (element === 'frost' && rule.slow) {
+      enemy.statusEffect = 'slowed';
+      enemy.statusExpiresAt = now + 2500;
+    } else if (element === 'frost' && rule.freeze) {
+      enemy.statusEffect = 'frozen';
+      enemy.statusExpiresAt = now + ((rule.freeze + clampNumber(attacker.freezeBonus, 0, 5, 0)) * 1000);
+    } else if (element === 'chrono' && rule.stasis) {
+      enemy.statusEffect = 'stasis';
+      enemy.statusExpiresAt = now + ((rule.stasis + clampNumber(attacker.stasisDurationBonus, 0, 8, 0)) * 1000);
+    }
+    if (enemy.statusEffect) {
+      this.io.to(this.roomId).emit('enemy_effect', {
+        enemyId: enemy.id,
+        effect: enemy.statusEffect,
+        duration: Math.max(0, ((enemy.statusExpiresAt || now) - now) / 1000)
+      });
+    }
+
     // Floating combat text
     this.io.to(this.roomId).emit('floating_text', {
       x: enemy.x,
@@ -653,6 +1114,12 @@ export class GameState {
             nextFloor: 6,
             message: 'Tier 1 Conquered! The Alchemical Under-Spire Awaits.'
           });
+        } else if (this.floor === 9 && enemy.bossType === 'xyris') {
+          this.broadcastStory('XYRIS HAS FALLEN! The void catwalks stabilize and the way to Astraea\'s Leyline Core opens.');
+          this.io.to(this.roomId).emit('boss_defeated_advancement', {
+            nextFloor: 10,
+            message: 'Void Sovereign defeated. Astraea\'s Leyline Core awaits.'
+          });
         } else if (this.floor === 10) {
           const puzzle = this.puzzles.floor10;
           const isPuzzleSolved = puzzle && (puzzle.unlocked || (puzzle.alignedCount !== undefined && puzzle.alignedCount >= 3));
@@ -674,63 +1141,183 @@ export class GameState {
           }
         }
       }
+      this.refreshObjective(true);
     }
   }
 
   // Tri-Elemental Leylines (Floor 10 Boss Astraea)
-  chargeLeylinePedestal(pedestalKey) {
-    if (this.floor !== 10) return;
+  ensureFloor10Pedestals() {
     const puzzle = this.puzzles.floor10;
-    if (!puzzle.pedestals) {
-      puzzle.pedestals = {
-        pyretic: { isCharged: false, isAligned: false },
-        cryo: { isCharged: false, isAligned: false },
-        chrono: { isCharged: false, isAligned: false }
+    if (!puzzle) return null;
+    if (!puzzle.pedestals || typeof puzzle.pedestals !== 'object') puzzle.pedestals = {};
+    for (const [key, anchor] of Object.entries(LEYLINE_PEDESTAL_POSITIONS)) {
+      const current = puzzle.pedestals[key] || {};
+      puzzle.pedestals[key] = {
+        ...anchor,
+        isCharged: Boolean(current.isCharged),
+        isAligned: Boolean(current.isAligned)
       };
     }
-    const ped = puzzle.pedestals[pedestalKey];
-    if (ped && !ped.isCharged) {
-      ped.isCharged = true;
-      this.io.to(this.roomId).emit('leyline_charged', { pedestalKey });
-    }
+    return puzzle;
   }
 
-  alignLeylinePedestal(pedestalKey) {
-    if (this.floor !== 10) return;
-    const puzzle = this.puzzles.floor10;
-    if (!puzzle.pedestals) {
-      puzzle.pedestals = {
-        pyretic: { isCharged: false, isAligned: false },
-        cryo: { isCharged: false, isAligned: false },
-        chrono: { isCharged: false, isAligned: false }
-      };
+  getFloor10PuzzleSnapshot() {
+    const puzzle = this.ensureFloor10Pedestals();
+    if (!puzzle) return null;
+    return {
+      pedestals: Object.fromEntries(Object.entries(puzzle.pedestals).map(([key, ped]) => [key, {
+        x: ped.x,
+        z: ped.z,
+        element: ped.element,
+        isCharged: Boolean(ped.isCharged),
+        isAligned: Boolean(ped.isAligned)
+      }])),
+      alignedCount: Math.max(0, Math.min(3, Number(puzzle.alignedCount) || 0)),
+      totalBeams: 3,
+      unlocked: Boolean(puzzle.unlocked),
+      bossShieldActive: Boolean(puzzle.bossShieldActive),
+      meltdownActive: Boolean(puzzle.meltdownActive),
+      meltdownTimer: Math.max(0, Number(puzzle.meltdownTimer) || 0)
+    };
+  }
+
+  rejectPuzzleAction(requesterId, action, reason, extra = {}) {
+    if (!requesterId) return;
+    this.io.to(requesterId).emit('action_rejected', {
+      action,
+      reason,
+      ...extra,
+      ...(this.floor === 10 ? { puzzle: this.getFloor10PuzzleSnapshot() } : {})
+    });
+  }
+
+  getPuzzlePlayer(requesterId, action, target, radius = 5.5) {
+    if (!requesterId) return null;
+    if (!this.isGameStarted) {
+      this.rejectPuzzleAction(requesterId, action, 'game_not_started');
+      return null;
     }
-    const ped = puzzle.pedestals[pedestalKey];
-    if (ped && !ped.isAligned) {
-      ped.isCharged = true;
-      ped.isAligned = true;
-      puzzle.alignedCount = (puzzle.alignedCount || 0) + 1;
+    const player = this.players.get(requesterId);
+    if (!player || !player.isAlive || player.connected === false) {
+      this.rejectPuzzleAction(requesterId, action, 'player_unavailable');
+      return null;
+    }
+    const distance = Math.hypot(player.x - target.x, player.z - target.z);
+    if (distance > radius) {
+      this.rejectPuzzleAction(requesterId, action, 'out_of_range', { distance: Math.round(distance * 100) / 100, radius });
+      return null;
+    }
+    return player;
+  }
+
+  isRecentSpellTarget(player, target, acceptedElements, tolerance = 4.5) {
+    if (!player) return false;
+    const now = Date.now();
+    const recentSpell = player.lastSpell && now - player.lastSpell.at < 3000 ? player.lastSpell : null;
+    const spellRule = recentSpell ? SPELL_RULES[recentSpell.id] : null;
+    if (!recentSpell || !spellRule || spellRule.damage <= 0 || !acceptedElements.includes(recentSpell.element)) return false;
+    const origin = recentSpell.origin || { x: player.x, y: player.y + 1.7, z: player.z };
+    const direction = recentSpell.direction || { x: 0, y: 0, z: -1 };
+    const toTarget = { x: target.x - origin.x, y: (target.y ?? 1.0) - origin.y, z: target.z - origin.z };
+    const along = toTarget.x * direction.x + toTarget.y * direction.y + toTarget.z * direction.z;
+    const nearestDistance = Math.hypot(
+      target.x - (origin.x + direction.x * Math.max(0, along)),
+      (target.y ?? 1.0) - (origin.y + direction.y * Math.max(0, along)),
+      target.z - (origin.z + direction.z * Math.max(0, along))
+    );
+    const maxRange = Number(spellRule.range) || 42;
+    return along >= -2 && along <= maxRange + 3 && nearestDistance <= tolerance;
+  }
+
+  chargeLeylinePedestal(pedestalKey, requesterId = null) {
+    if (this.floor !== 10) {
+      this.rejectPuzzleAction(requesterId, 'leyline_charge', 'floor_required');
+      return false;
+    }
+    const key = String(pedestalKey || '');
+    const anchor = LEYLINE_PEDESTAL_POSITIONS[key];
+    const puzzle = this.ensureFloor10Pedestals();
+    const ped = puzzle?.pedestals?.[key];
+    if (!anchor || !ped) {
+      this.rejectPuzzleAction(requesterId, 'leyline_charge', 'invalid_target');
+      return false;
+    }
+    if (ped.isCharged) return false;
+
+    if (requesterId) {
+      const player = this.getPuzzlePlayer(requesterId, 'leyline_charge', anchor, 34);
+      if (!player) return false;
+      const acceptedElements = anchor.element === 'chrono' ? ['chrono', 'arcane', 'light'] : [anchor.element];
+      if (!this.isRecentSpellTarget(player, { x: anchor.x, y: 2.4, z: anchor.z }, acceptedElements, 4.5)) {
+        const recentSpell = player.lastSpell && Date.now() - player.lastSpell.at < 3000 ? player.lastSpell : null;
+        const accepted = recentSpell && acceptedElements.includes(recentSpell.element);
+        this.rejectPuzzleAction(requesterId, 'leyline_charge', accepted ? 'invalid_projectile' : 'matching_spell_required', { pedestalKey: key });
+        return false;
+      }
+    }
+
+    ped.isCharged = true;
+    this.io.to(this.roomId).emit('leyline_charged', {
+      pedestalKey: key,
+      isCharged: true,
+      isAligned: Boolean(ped.isAligned),
+      puzzle: this.getFloor10PuzzleSnapshot()
+    });
+    return true;
+  }
+
+  alignLeylinePedestal(pedestalKey, requesterId = null) {
+    if (this.floor !== 10) {
+      this.rejectPuzzleAction(requesterId, 'leyline_align', 'floor_required');
+      return false;
+    }
+    const key = String(pedestalKey || '');
+    const anchor = LEYLINE_PEDESTAL_POSITIONS[key];
+    const puzzle = this.ensureFloor10Pedestals();
+    const ped = puzzle?.pedestals?.[key];
+    if (!anchor || !ped) {
+      this.rejectPuzzleAction(requesterId, 'leyline_align', 'invalid_target');
+      return false;
+    }
+    if (requesterId && !this.getPuzzlePlayer(requesterId, 'leyline_align', anchor, 5.5)) return false;
+    if (!ped.isCharged) {
+      this.rejectPuzzleAction(requesterId, 'leyline_align', 'not_charged', { pedestalKey: key });
+      return false;
+    }
+    if (ped.isAligned) return false;
+
+    ped.isCharged = true;
+    ped.isAligned = true;
+    puzzle.alignedCount = Math.min(3, (Number(puzzle.alignedCount) || 0) + 1);
 
       const boss = this.enemies.get('boss_astraea');
-      if (boss && boss.isAlive) {
-        boss.shieldReduction = Math.max(0, (boss.shieldReduction !== undefined ? boss.shieldReduction : 0.75) - 0.25);
-        if (puzzle.alignedCount >= 3) {
+    if (boss && boss.isAlive) {
+      boss.alignedBeams = puzzle.alignedCount;
+      boss.shieldReduction = Math.max(0, (boss.shieldReduction !== undefined ? boss.shieldReduction : 0.75) - 0.25);
+      if (puzzle.alignedCount >= 3) {
           boss.shieldReduction = 0;
           boss.stunnedTimer = 6.0;
           this.broadcastStory('✨ TRIPLE LEYLINE CONVERGENCE! Astraea\'s Prismatic Shield shattered! SHE IS STUNNED FOR 6s (+150% DMG)!');
-        }
       }
+    }
 
-      this.io.to(this.roomId).emit('leyline_aligned', {
-        pedestalKey,
-        alignedCount: puzzle.alignedCount,
-        totalBeams: 3,
-        shieldReduction: boss ? boss.shieldReduction : 0
-      });
+    const puzzleSolved = puzzle.alignedCount >= 3;
+    if (puzzleSolved) {
+      puzzle.unlocked = true;
+      puzzle.bossShieldActive = false;
+    }
 
-      if (puzzle.alignedCount >= 3) {
-        puzzle.unlocked = true;
-        puzzle.bossShieldActive = false;
+    this.io.to(this.roomId).emit('leyline_aligned', {
+      pedestalKey: key,
+      isCharged: true,
+      isAligned: true,
+      alignedCount: puzzle.alignedCount,
+      totalBeams: 3,
+      shieldReduction: boss ? boss.shieldReduction : 0,
+      puzzle: this.getFloor10PuzzleSnapshot()
+    });
+
+    if (puzzleSolved) {
         if (puzzle.meltdownActive) {
           puzzle.meltdownActive = false;
           this.broadcastStory('✨ CORE STABILIZED! Meltdown averted with seconds to spare! The star-gate to Tier 3 (Floor 11) is revealed!');
@@ -743,46 +1330,28 @@ export class GameState {
           });
         }
       }
-    }
+    this.refreshObjective(true);
+    return true;
   }
 
-  // Interactive Prism / Mirror Rotation (Floor 1 & Boss Floor 10)
-  rotatePrism(prismId) {
+  // Interactive Prism Rotation (Floor 1). Floor 10 uses the Astraea leyline
+  // contract; the old Xyris mirror branch is intentionally retired.
+  rotatePrism(prismId, requesterId = null) {
     if (this.floor === 10) {
-      // Floor 10 Boss Xyris 4-Mirror Puzzle
-      const puzzle = this.puzzles.floor10;
-      const mirror = puzzle.mirrors.find(m => m.id === prismId);
-      if (!mirror) return;
-
-      mirror.angle = (mirror.angle + 90) % 360;
-      mirror.isAligned = (mirror.angle === mirror.targetAngle);
-      const allAligned = puzzle.mirrors.every(m => m.isAligned);
-      puzzle.unlocked = allAligned;
-
-      this.io.to(this.roomId).emit('puzzle_update', {
-        floor: 10,
-        type: 'mirror_rotated',
-        prismId,
-        angle: mirror.angle,
-        allAligned
-      });
-
-      if (allAligned) {
-        puzzle.bossShieldActive = false;
-        const boss = this.enemies.get('boss_xyris');
-        if (boss) {
-          boss.invulnerable = false;
-          boss.stunnedTimer = 8.0;
-          this.broadcastStory('PRISMATIC CONVERGENCE! The redirected Aether Beam pierces Xyris\'s Void Eye! Void Annihilation interrupted! HE IS STUNNED!');
-        }
-        this.io.to(this.roomId).emit('boss_shield_broken', { bossId: 'boss_xyris', duration: 8.0 });
-      }
-      return;
+      this.rejectPuzzleAction(requesterId, 'rotate_prism', 'leyline_required');
+      return false;
     }
+    if (this.floor !== 1) return false;
 
     const puzzle = this.puzzles.floor1;
-    const prism = puzzle.prisms.find(p => p.id === prismId);
-    if (!prism) return;
+    const id = Math.floor(Number(prismId));
+    const prism = puzzle.prisms.find(p => p.id === id);
+    const anchor = PRISM_POSITIONS[1]?.[id];
+    if (!prism || !anchor) {
+      this.rejectPuzzleAction(requesterId, 'rotate_prism', 'invalid_target', { prismId: id });
+      return false;
+    }
+    if (requesterId && !this.getPuzzlePlayer(requesterId, 'rotate_prism', anchor, 5.5)) return false;
 
     prism.angle = (prism.angle + 90) % 360;
     prism.isAligned = (prism.angle === prism.targetAngle);
@@ -802,23 +1371,62 @@ export class GameState {
     if (allAligned) {
       this.broadcastStory('The light prisms connect! The celestial rune barrier on the door dissolves into stardust.');
     }
+    this.refreshObjective(true);
+    return true;
   }
 
   // Interactive Crucible Imbue (Floor 2 & Boss Floor 5)
-  handleCrucibleInteraction(index, element) {
+  handleCrucibleInteraction(index, element, requesterId = null) {
+    if (this.floor !== 2 && this.floor !== 5) {
+      this.rejectPuzzleAction(requesterId, 'crucible_interact', 'floor_required');
+      return false;
+    }
     const puzzle = (this.floor === 5) ? this.puzzles.floor5 : this.puzzles.floor2;
-    if (!puzzle) return;
+    if (!puzzle) return false;
+    const crucibleIndex = Math.floor(Number(index));
+    const normalizedElement = String(element || '').toLowerCase();
+    const anchor = CRUCIBLE_POSITIONS[this.floor]?.[crucibleIndex];
+    if (!Number.isInteger(crucibleIndex) || !puzzle.crucibles[crucibleIndex] || !anchor) {
+      this.rejectPuzzleAction(requesterId, 'crucible_interact', 'invalid_target', { index: crucibleIndex });
+      return false;
+    }
+    if (!['fire', 'frost', 'storm'].includes(normalizedElement)) {
+      this.rejectPuzzleAction(requesterId, 'crucible_interact', 'invalid_element', { index: crucibleIndex });
+      return false;
+    }
+    if (puzzle.crucibles[crucibleIndex].element !== normalizedElement) {
+      this.rejectPuzzleAction(requesterId, 'crucible_interact', 'element_mismatch', { index: crucibleIndex });
+      return false;
+    }
+    if (requesterId) {
+      if (!this.isGameStarted) {
+        this.rejectPuzzleAction(requesterId, 'crucible_interact', 'game_not_started');
+        return false;
+      }
+      const player = this.players.get(requesterId);
+      if (!player || !player.isAlive || player.connected === false) {
+        this.rejectPuzzleAction(requesterId, 'crucible_interact', 'player_unavailable');
+        return false;
+      }
+      const nearby = Math.hypot(player.x - anchor.x, player.z - anchor.z) <= 5.5;
+      const validSpell = this.isRecentSpellTarget(player, { x: anchor.x, y: 1.0, z: anchor.z }, [normalizedElement], 4.5);
+      if (!nearby && !validSpell) {
+        this.rejectPuzzleAction(requesterId, 'crucible_interact', 'out_of_range', { index: crucibleIndex });
+        return false;
+      }
+    }
+    if (puzzle.crucibles[crucibleIndex].charged) return false;
     const expected = puzzle.order[puzzle.currentStep];
 
-    if (element === expected) {
-      puzzle.crucibles[index].charged = true;
+    if (normalizedElement === expected) {
+      puzzle.crucibles[crucibleIndex].charged = true;
       puzzle.currentStep++;
 
       this.io.to(this.roomId).emit('puzzle_update', {
         floor: this.floor,
         type: 'crucible_charge',
-        index,
-        element,
+        index: crucibleIndex,
+        element: normalizedElement,
         step: puzzle.currentStep,
         success: true
       });
@@ -839,6 +1447,7 @@ export class GameState {
           this.broadcastStory('The Crucible harmonizes! The molten elevator gate lowers, granting access to the upper levels.');
         }
       }
+      this.refreshObjective(true);
     } else {
       // Mistake! Reset and warn players
       puzzle.currentStep = 0;
@@ -848,15 +1457,27 @@ export class GameState {
         type: 'crucible_reset',
         message: 'The elements clash! The crucible resets.'
       });
+      this.refreshObjective(true);
     }
+    return true;
   }
 
   // Interactive Keystone Activate (Floor 3 & Boss Floor 15)
-  activateKeystone(keystoneId) {
+  activateKeystone(keystoneId, requesterId = null) {
+    if (this.floor !== 3 && this.floor !== 15) {
+      this.rejectPuzzleAction(requesterId, 'keystone_activate', 'floor_required');
+      return false;
+    }
     const puzzle = (this.floor === 15) ? this.puzzles.floor15 : this.puzzles.floor3;
-    if (!puzzle) return;
-    const keystone = puzzle.keystones.find(k => k.id === keystoneId);
-    if (!keystone || keystone.active) return;
+    if (!puzzle) return false;
+    const id = String(keystoneId || '').slice(0, 24);
+    const keystone = puzzle.keystones.find(k => k.id === id);
+    if (!keystone) {
+      this.rejectPuzzleAction(requesterId, 'keystone_activate', 'invalid_target', { keystoneId: id });
+      return false;
+    }
+    if (requesterId && !this.getPuzzlePlayer(requesterId, 'keystone_activate', keystone, 5.5)) return false;
+    if (keystone.active) return false;
 
     keystone.active = true;
 
@@ -875,16 +1496,29 @@ export class GameState {
     this.io.to(this.roomId).emit('puzzle_update', {
       floor: this.floor,
       type: 'keystone_activated',
-      keystoneId,
+      keystoneId: id,
       allActive
     });
+    this.refreshObjective(true);
+    return true;
   }
 
   // Quiz Chamber
-  startQuiz(quizId) {
+  startQuiz(quizId, requesterId = null) {
+    if (requesterId) {
+      const player = this.players.get(requesterId);
+      if (!this.isGameStarted || !player || player.connected === false || !player.isAlive) {
+        this.io.to(requesterId).emit('action_rejected', { action: 'trigger_quiz', reason: 'player_unavailable' });
+        return false;
+      }
+    }
+    if (this.currentQuiz) {
+      this.rejectPuzzleAction(requesterId, 'trigger_quiz', 'quiz_in_progress');
+      return false;
+    }
     const floorQuizzes = QUIZ_DATABASE[this.floor] || [];
     const quiz = floorQuizzes.find(q => q.id === quizId) || floorQuizzes[0];
-    if (!quiz) return;
+    if (!quiz) return false;
 
     this.currentQuiz = quiz;
     this.quizVotes.clear();
@@ -899,11 +1533,19 @@ export class GameState {
       },
       timeLimit: 25 // 25 seconds for co-op discussion
     });
+    return true;
   }
 
   voteQuiz(socketId, optionIndex) {
     if (!this.currentQuiz) return;
-    this.quizVotes.set(socketId, optionIndex);
+    const voter = this.players.get(socketId);
+    if (!voter || voter.connected === false || !voter.isAlive) return;
+    const option = Math.floor(Number(optionIndex));
+    if (!Number.isInteger(option) || option < 0 || option >= this.currentQuiz.options.length) {
+      this.io.to(socketId).emit('action_rejected', { action: 'vote_quiz', reason: 'invalid_option' });
+      return false;
+    }
+    this.quizVotes.set(socketId, option);
 
     // Broadcast current votes
     const votesSummary = Array.from(this.quizVotes.entries()).map(([sid, opt]) => ({
@@ -914,9 +1556,11 @@ export class GameState {
     this.io.to(this.roomId).emit('quiz_votes_update', { votes: votesSummary });
 
     // If all living players have voted, evaluate
-    if (this.quizVotes.size >= this.players.size) {
+    const connectedPlayers = Array.from(this.players.values()).filter(player => player.connected !== false && player.isAlive);
+    if (this.quizVotes.size >= connectedPlayers.length) {
       this.evaluateQuiz();
     }
+    return true;
   }
 
   evaluateQuiz() {
@@ -943,6 +1587,7 @@ export class GameState {
     if (isCorrect) {
       // Reward all players with talent point and score
       for (const p of this.players.values()) {
+        if (p.connected === false) continue;
         p.talentPoints += this.currentQuiz.reward.talentPoints || 1;
         p.score += this.currentQuiz.reward.exp || 50;
       }
@@ -963,46 +1608,62 @@ export class GameState {
     this.quizVotes.clear();
   }
 
+  applyTalentPassive(player, talentKey) {
+    if (!player) return;
+    // Pyromancer
+    if (talentKey === 'pyro_ignite') { player.maxHealth += 35; player.health += 35; player.igniteBurn = true; }
+    else if (talentKey === 'pyro_combustion') { player.maxMana += 45; player.mana += 45; player.deathExplosion = true; }
+    else if (talentKey === 'pyro_inferno') { player.spellPowerBonus = (player.spellPowerBonus || 0) + 0.30; player.speed += 1.2; }
+    else if (talentKey === 'pyro_aether') { player.maxMana += 50; player.mana += 50; player.fireCostReduction = 12; }
+    else if (talentKey === 'pyro_molten') { player.maxHealth += 45; player.health += 45; player.extraCinders = 2; }
+    else if (talentKey === 'pyro_supernova') { player.vortexRadiusBonus = 4.0; player.vortexDamageMultiplier = 1.4; }
+    // Cryomancer
+    else if (talentKey === 'cryo_plating') { player.maxHealth += 80; player.health += 80; player.damageReduction = 0.18; }
+    else if (talentKey === 'cryo_barrier') { player.maxMana += 40; player.mana += 40; player.shieldAmount = 60; }
+    else if (talentKey === 'cryo_juggernaut') { player.stunImmune = true; player.slowAura = 0.35; }
+    else if (talentKey === 'cryo_pierce') { player.maxMana += 45; player.mana += 45; player.pierceEnemies = true; }
+    else if (talentKey === 'cryo_siphon') { player.maxHealth += 40; player.health += 40; player.iceLifeLeech = 20; }
+    else if (talentKey === 'cryo_zero') { player.freezeBonus = 0.45; player.shatterAoe = 40; }
+    // Luminary
+    else if (talentKey === 'lumi_focus') { player.maxMana += 50; player.mana += 50; player.healingPowerBonus = 0.30; }
+    else if (talentKey === 'lumi_salvation') { player.maxHealth += 45; player.health += 45; player.partyRegenAura = 6; }
+    else if (talentKey === 'lumi_intervention') { player.maxHealth += 50; player.health += 50; player.cheatDeath = true; }
+    else if (talentKey === 'lumi_wrath') { player.maxMana += 40; player.mana += 40; player.healSmiteDamage = 36; }
+    else if (talentKey === 'lumi_dawn') { player.maxHealth += 40; player.health += 40; player.enemyWeaken = 0.25; }
+    else if (talentKey === 'lumi_sanctuary') { player.holyShieldBonus = 50; player.sanctuaryDamageBuff = 0.30; }
+    // Chronomancer
+    else if (talentKey === 'chrono_anchor') { player.maxHealth += 35; player.health += 35; player.cdr = 0.20; player.speed += 1.4; }
+    else if (talentKey === 'chrono_paradox') { player.maxMana += 50; player.mana += 50; player.blinkDecoy = true; }
+    else if (talentKey === 'chrono_rift') { player.spellPowerBonus = (player.spellPowerBonus || 0) + 0.25; player.cdRefundOnHit = 1.5; }
+    else if (talentKey === 'chrono_entropy') { player.maxMana += 75; player.mana += 75; player.rewindBonus = 45; }
+    else if (talentKey === 'chrono_dilation') { player.maxHealth += 40; player.health += 40; player.attackSpeedDebuff = 0.40; }
+    else if (talentKey === 'chrono_singularity') { player.stasisDurationBonus = 2.5; player.bossStun = true; }
+  }
+
   upgradeTalent(socketId, talentKey) {
     const player = this.players.get(socketId);
-    if (!player || player.talentPoints <= 0) return;
+    if (!player || player.connected === false || !player.isAlive) return false;
+    if (player.talentPoints <= 0) {
+      this.io.to(socketId).emit('action_rejected', { action: 'upgrade_talent', reason: 'no_talent_points' });
+      return false;
+    }
 
-    if (!player.talents[talentKey]) {
-      player.talents[talentKey] = true;
+    const key = String(talentKey || '').slice(0, 48);
+    const talent = getAllClassTalents(player.wizardClass).find(item => item.key === key);
+    if (!talent) {
+      this.io.to(socketId).emit('action_rejected', { action: 'upgrade_talent', reason: 'invalid_talent' });
+      return false;
+    }
+    if (talent.requires && !player.talents[talent.requires]) {
+      this.io.to(socketId).emit('action_rejected', { action: 'upgrade_talent', reason: 'prerequisite_required', talentKey: key });
+      return false;
+    }
+
+    if (!player.talents[key]) {
+      player.talents[key] = true;
       player.talentPoints--;
 
-      // Apply class-specific distinct multi-branch talent passives
-      // Pyromancer
-      if (talentKey === 'pyro_ignite') { player.maxHealth += 35; player.health += 35; player.igniteBurn = true; }
-      else if (talentKey === 'pyro_combustion') { player.maxMana += 45; player.mana += 45; player.deathExplosion = true; }
-      else if (talentKey === 'pyro_inferno') { player.spellPowerBonus = (player.spellPowerBonus || 0) + 0.30; player.speed += 1.2; }
-      else if (talentKey === 'pyro_aether') { player.maxMana += 50; player.mana += 50; player.fireCostReduction = 12; }
-      else if (talentKey === 'pyro_molten') { player.maxHealth += 45; player.health += 45; player.extraCinders = 2; }
-      else if (talentKey === 'pyro_supernova') { player.vortexRadiusBonus = 4.0; player.vortexDamageMultiplier = 1.4; }
-
-      // Cryomancer
-      else if (talentKey === 'cryo_plating') { player.maxHealth += 80; player.health += 80; player.damageReduction = 0.18; }
-      else if (talentKey === 'cryo_barrier') { player.maxMana += 40; player.mana += 40; player.shieldAmount = 60; }
-      else if (talentKey === 'cryo_juggernaut') { player.stunImmune = true; player.slowAura = 0.35; }
-      else if (talentKey === 'cryo_pierce') { player.maxMana += 45; player.mana += 45; player.pierceEnemies = true; }
-      else if (talentKey === 'cryo_siphon') { player.maxHealth += 40; player.health += 40; player.iceLifeLeech = 20; }
-      else if (talentKey === 'cryo_zero') { player.freezeBonus = 0.45; player.shatterAoe = 40; }
-
-      // Luminary
-      else if (talentKey === 'lumi_focus') { player.maxMana += 50; player.mana += 50; player.healingPowerBonus = 0.30; }
-      else if (talentKey === 'lumi_salvation') { player.maxHealth += 45; player.health += 45; player.partyRegenAura = 6; }
-      else if (talentKey === 'lumi_intervention') { player.maxHealth += 50; player.health += 50; player.cheatDeath = true; }
-      else if (talentKey === 'lumi_wrath') { player.maxMana += 40; player.mana += 40; player.healSmiteDamage = 36; }
-      else if (talentKey === 'lumi_dawn') { player.maxHealth += 40; player.health += 40; player.enemyWeaken = 0.25; }
-      else if (talentKey === 'lumi_sanctuary') { player.holyShieldBonus = 50; player.sanctuaryDamageBuff = 0.30; }
-
-      // Chronomancer
-      else if (talentKey === 'chrono_anchor') { player.maxHealth += 35; player.health += 35; player.cdr = 0.20; player.speed += 1.4; }
-      else if (talentKey === 'chrono_paradox') { player.maxMana += 50; player.mana += 50; player.blinkDecoy = true; }
-      else if (talentKey === 'chrono_rift') { player.spellPowerBonus = (player.spellPowerBonus || 0) + 0.25; player.cdRefundOnHit = 1.5; }
-      else if (talentKey === 'chrono_entropy') { player.maxMana += 75; player.mana += 75; player.rewindBonus = 45; }
-      else if (talentKey === 'chrono_dilation') { player.maxHealth += 40; player.health += 40; player.attackSpeedDebuff = 0.40; }
-      else if (talentKey === 'chrono_singularity') { player.stasisDurationBonus = 2.5; player.bossStun = true; }
+      this.applyTalentPassive(player, key);
 
       this.io.to(socketId).emit('talent_updated', {
         talents: player.talents,
@@ -1010,16 +1671,39 @@ export class GameState {
         maxHealth: player.maxHealth,
         maxMana: player.maxMana
       });
+      return true;
     }
+    return false;
   }
 
-  advanceFloor() {
-    if (this.floor < this.maxFloors) {
-      this.initFloor(this.floor + 1);
-      this.io.to(this.roomId).emit('floor_changed', {
-        floor: this.floor
+  advanceFloor(requesterId = null) {
+    if (this.floor >= this.maxFloors) return false;
+    this.refreshObjective();
+    if (!this.objective?.complete) {
+      if (requesterId) this.io.to(requesterId).emit('action_rejected', {
+        action: 'advance_floor',
+        reason: 'objective_incomplete',
+        objective: this.objective
       });
+      return false;
     }
+    this.initFloor(this.floor + 1);
+    this.io.to(this.roomId).emit('floor_changed', {
+      floor: this.floor,
+      objective: this.objective,
+      puzzles: this.puzzles
+    });
+    return true;
+  }
+
+  retryFloor(requesterId = null) {
+    if (!this.isGameStarted) return false;
+    this.isGameOver = false;
+    this.isVictory = false;
+    this.initFloor(this.floor);
+    this.io.to(this.roomId).emit('floor_retry', { floor: this.floor, objective: this.objective, puzzles: this.puzzles });
+    if (requesterId) this.io.to(requesterId).emit('action_accepted', { action: 'retry_floor', floor: this.floor });
+    return true;
   }
 
   broadcastStory(text) {
@@ -1032,9 +1716,32 @@ export class GameState {
 
   // Game tick for AI & state updates (ran at 20 ticks/sec)
   tick(deltaTime) {
+    this.serverTick += 1;
+    const now = Date.now();
+
+    // Expire temporary authority-owned effects and apply regeneration.
+    for (const player of this.players.values()) {
+      for (const [key, effect] of Object.entries(player.statusEffects || {})) {
+        if (effect?.expiresAt && effect.expiresAt <= now) {
+          delete player.statusEffects[key];
+          if (key === 'shield') player.shield = 0;
+        }
+      }
+      if (player.isAlive && player.connected !== false && player.statusEffects?.regen?.expiresAt > now) {
+        this.applyPlayerHeal(player, (player.statusEffects.regen.amount || 8) * deltaTime, 'regeneration', 'light');
+      }
+      if (player.statusEffects?.shield) player.shield = Math.max(0, Number(player.statusEffects.shield.amount) || 0);
+    }
+    for (const enemy of this.enemies.values()) {
+      if (enemy.statusExpiresAt && enemy.statusExpiresAt <= now) {
+        enemy.statusEffect = null;
+        enemy.statusExpiresAt = 0;
+      }
+    }
+
     // Regenerate mana slowly
     for (const player of this.players.values()) {
-      if (player.isAlive && player.mana < player.maxMana) {
+      if (player.isAlive && player.connected !== false && player.mana < player.maxMana) {
         player.mana = Math.min(player.maxMana, player.mana + 4 * deltaTime);
       }
     }
@@ -1044,13 +1751,18 @@ export class GameState {
       if (!enemy.isAlive) continue;
 
       if (enemy.cooldown > 0) enemy.cooldown -= deltaTime;
+      if (enemy.statusEffect === 'frozen' || enemy.statusEffect === 'stasis') {
+        enemy.state = enemy.statusEffect;
+        continue;
+      }
+      const aiDeltaTime = enemy.statusEffect === 'slowed' ? deltaTime * 0.45 : deltaTime;
 
       // Find closest living player
       let closestPlayer = null;
       let closestDist = 999;
 
       for (const player of this.players.values()) {
-        if (!player.isAlive) continue;
+        if (!player.isAlive || player.connected === false) continue;
         const dx = player.x - enemy.x;
         const dz = player.z - enemy.z;
         const dist = Math.sqrt(dx * dx + dz * dz);
@@ -1064,9 +1776,9 @@ export class GameState {
 
       // Enemy AI Behavior
       if (enemy.type === 'boss') {
-        this.updateBossAI(enemy, closestPlayer, closestDist, deltaTime);
+        this.updateBossAI(enemy, closestPlayer, closestDist, aiDeltaTime);
       } else {
-        this.updateStandardEnemyAI(enemy, closestPlayer, closestDist, deltaTime);
+        this.updateStandardEnemyAI(enemy, closestPlayer, closestDist, aiDeltaTime);
       }
     }
 
@@ -1078,7 +1790,7 @@ export class GameState {
         puzzle.meltdownActive = false;
         this.broadcastStory('💥 CATASTROPHIC CORE DETONATION! The chamber collapsed! (15s Fail-Safe Expired)');
         for (const p of this.players.values()) {
-          if (p.isAlive) {
+          if (p.isAlive && p.connected !== false) {
             p.health = 0;
             p.isAlive = false;
             this.io.to(this.roomId).emit('player_died', { playerId: p.id });
@@ -1096,6 +1808,7 @@ export class GameState {
 
     // Handle player respawns (10-second temporal resurrection loop)
     for (const player of this.players.values()) {
+      if (player.connected === false) continue;
       if (!player.isAlive) {
         player.respawnTimer = (player.respawnTimer || 0) + deltaTime;
         if (player.respawnTimer >= 10.0) {
@@ -1103,9 +1816,10 @@ export class GameState {
           player.isAlive = true;
           player.health = player.maxHealth;
           player.mana = player.maxMana;
-          player.x = 0;
-          player.y = 0;
-          player.z = this.floor === 1 ? 31 : (this.floor === 2 ? 40 : 14);
+          const spawn = this.getSpawnPosition(this.floor);
+          player.x = spawn.x;
+          player.y = spawn.y;
+          player.z = spawn.z;
           player.rotY = 0;
 
           this.io.to(this.roomId).emit('player_respawned', {
@@ -1189,12 +1903,7 @@ export class GameState {
             targetPos: { x: target.x, y: 1.2, z: target.z },
             damage: 20
           });
-          target.health -= 20;
-          if (target.health <= 0) {
-            target.health = 0;
-            target.isAlive = false;
-            this.io.to(this.roomId).emit('player_died', { playerId: target.id });
-          }
+          this.damagePlayer(target, 20, 'sentry_laser');
         }
       } else if (enemy.type === 'golem') {
         // === Forge Golem: Heavy Tank & Seismic Slam ===
@@ -1219,12 +1928,7 @@ export class GameState {
             // Damage all nearby players
             for (const p of this.players.values()) {
               if (p.isAlive && Math.hypot(p.x - enemy.x, p.z - enemy.z) <= 5.5) {
-                p.health -= 28;
-                if (p.health <= 0) {
-                  p.health = 0;
-                  p.isAlive = false;
-                  this.io.to(this.roomId).emit('player_died', { playerId: p.id });
-                }
+                this.damagePlayer(p, 28, 'golem_slam');
               }
             }
           }
@@ -1248,12 +1952,7 @@ export class GameState {
             targetPos: { x: target.x, y: 1.2, z: target.z },
             damage: 18
           });
-          target.health -= 18;
-          if (target.health <= 0) {
-            target.health = 0;
-            target.isAlive = false;
-            this.io.to(this.roomId).emit('player_died', { playerId: target.id });
-          }
+          this.damagePlayer(target, 18, 'void_missile');
         } else if (dist <= 3.0 && enemy.cooldown <= 0) {
           enemy.cooldown = 1.6;
           enemy.state = 'attack';
@@ -1262,12 +1961,7 @@ export class GameState {
             targetId: target.id,
             damage: enemy.damage
           });
-          target.health -= enemy.damage;
-          if (target.health <= 0) {
-            target.health = 0;
-            target.isAlive = false;
-            this.io.to(this.roomId).emit('player_died', { playerId: target.id });
-          }
+          this.damagePlayer(target, enemy.damage, 'shade_melee');
         }
       } else {
         // Default standard melee
@@ -1279,17 +1973,12 @@ export class GameState {
           enemy.state = 'attack';
           if (enemy.cooldown <= 0) {
             enemy.cooldown = 2.0;
-            target.health -= enemy.damage;
+            this.damagePlayer(target, enemy.damage, 'enemy_melee');
             this.io.to(this.roomId).emit('enemy_attack', {
               enemyId: enemy.id,
               targetId: target.id,
               damage: enemy.damage
             });
-            if (target.health <= 0) {
-              target.health = 0;
-              target.isAlive = false;
-              this.io.to(this.roomId).emit('player_died', { playerId: target.id });
-            }
           }
         }
       }
@@ -1351,32 +2040,26 @@ export class GameState {
     }
 
     // -------------------------------------------------------------------------
-    // BOSS 2: XYRIS THE VOID SOVEREIGN (Floor 10)
+    // HERO BOSS: XYRIS THE VOID SOVEREIGN (Floor 9)
     // -------------------------------------------------------------------------
     else if (boss.bossType === 'xyris') {
       // Void Annihilation channel loop
-      if (this.puzzles.floor10.bossShieldActive) {
-        boss.annihilationTimer = (boss.annihilationTimer || 14.0) - deltaTime;
-        if (boss.annihilationTimer <= 0) {
-          // Annihilation detonates!
-          boss.annihilationTimer = 14.0;
-          this.broadcastStory('VOID ANNIHILATION DETONATES! The mirrors were not aligned in time!');
-          for (const p of this.players.values()) {
-            if (p.isAlive) {
-              p.health -= 45;
-              if (p.health <= 0) {
-                p.health = 0;
-                p.isAlive = false;
-                this.io.to(this.roomId).emit('player_died', { playerId: p.id });
-              }
-            }
+      boss.annihilationTimer = (boss.annihilationTimer || 14.0) - deltaTime;
+      if (boss.annihilationTimer <= 0) {
+        // Annihilation detonates; the encounter is self-contained on Floor 9
+        // and no longer depends on Astraea's later leyline puzzle state.
+        boss.annihilationTimer = 14.0;
+        this.broadcastStory('VOID ANNIHILATION DETONATES! Break Xyris\'s gaze and keep moving!');
+        for (const p of this.players.values()) {
+          if (p.isAlive && p.connected !== false) {
+            this.damagePlayer(p, 45, 'void_annihilation');
           }
-          this.io.to(this.roomId).emit('boss_special', {
-            bossId: boss.id,
-            ability: 'void_cataclysm',
-            duration: 2.0
-          });
         }
+        this.io.to(this.roomId).emit('boss_special', {
+          bossId: boss.id,
+          ability: 'void_cataclysm',
+          duration: 2.0
+        });
       }
 
       if (boss.specialTimer <= 0) {
@@ -1495,38 +2178,23 @@ export class GameState {
     // Basic boss attack
     if (boss.cooldown <= 0) {
       boss.cooldown = 2.0;
-      target.health -= boss.damage;
+      this.damagePlayer(target, boss.damage, `${boss.bossType}_melee`);
       this.io.to(this.roomId).emit('enemy_attack', {
         enemyId: boss.id,
         targetId: target.id,
         damage: boss.damage
       });
 
-      if (target.health <= 0) {
-        target.health = 0;
-        target.isAlive = false;
-        this.io.to(this.roomId).emit('player_died', { playerId: target.id });
-      }
     }
   }
 
   handleHazardDamage(playerId, damage) {
     const player = this.players.get(playerId);
-    if (!player || !player.isAlive) return;
-    player.health = Math.max(0, player.health - damage);
-    if (player.health <= 0) {
-      player.health = 0;
-      player.isAlive = false;
-      this.io.to(this.roomId).emit('player_died', { playerId });
-    }
+    if (!player || !player.isAlive || player.connected === false) return;
+    this.damagePlayer(player, clampNumber(damage, 0, 250, 0), 'hazard');
   }
 
   broadcastState() {
-    this.io.to(this.roomId).emit('state_snapshot', {
-      players: Array.from(this.players.values()),
-      enemies: Array.from(this.enemies.values()),
-      floor: this.floor,
-      puzzles: this.puzzles
-    });
+    this.io.to(this.roomId).emit('state_snapshot', this.getSnapshot());
   }
 }

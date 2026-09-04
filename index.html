@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/src/ui/styles.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=MedievalSharp&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Almendra+SC&family=Atkinson+Hyperlegible:wght@400;700&family=Cinzel:wght@500;700;900&family=IBM+Plex+Mono:wght@400;600&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 <body>
   <!-- CINEMATIC ANIMATED LOADING SCREEN -->
@@ -165,7 +165,7 @@
 
     <!-- ===== CENTER: Interaction Prompt ===== -->
     <div id="interaction-prompt" class="interaction-prompt hidden">
-      <span class="interact-key">[E]</span>
+      <span class="interact-key">[F]</span>
       <span id="interact-label" class="interact-label">Interact</span>
     </div>
 
@@ -313,6 +313,33 @@
       <div class="lobby-section">
         <label class="section-label">NAME YOUR ARCHMAGE</label>
         <input type="text" id="player-name-input" class="magic-input" value="Archmage Ignis" maxlength="16" />
+      </div>
+
+      <div class="account-strip" aria-label="Campaign account">
+        <div class="account-strip-title">CLOUD CAMPAIGN</div>
+        <div class="account-strip-fields">
+          <input type="text" id="account-username" class="magic-input" placeholder="Username" autocomplete="username" maxlength="24" />
+          <input type="password" id="account-password" class="magic-input" placeholder="Password (8+ chars)" autocomplete="current-password" maxlength="80" />
+          <button id="btn-account-login" class="mini-btn">SIGN IN</button>
+          <button id="btn-account-register" class="mini-btn">CREATE</button>
+        </div>
+        <div class="account-strip-fields account-recovery-fields">
+          <input type="text" id="account-recovery-code" class="magic-input" placeholder="Recovery code" autocomplete="one-time-code" maxlength="16" />
+          <button id="btn-account-recovery" class="mini-btn">RESET PASSWORD</button>
+          <button id="btn-account-logout" class="mini-btn hidden">SIGN OUT</button>
+          <button id="btn-account-delete" class="mini-btn danger-mini-btn hidden">DELETE ACCOUNT</button>
+        </div>
+        <div id="account-status" class="account-status" role="status">Sign in to carry level, gear and checkpoints between sessions.</div>
+        <button id="btn-resume-campaign" class="mini-btn resume-campaign-btn hidden" type="button">RESUME CAMPAIGN</button>
+      </div>
+
+      <div class="lobby-section difficulty-section">
+        <label class="section-label" for="difficulty-select">ASCENSION TUNING</label>
+        <select id="difficulty-select" class="magic-input" aria-label="Difficulty">
+          <option value="story">Story — gentler combat, full narrative</option>
+          <option value="standard" selected>Standard — intended covenant challenge</option>
+          <option value="archon">Archon — ruthless enemies, better relics</option>
+        </select>
       </div>
 
       <div class="lobby-section">
@@ -484,17 +511,6 @@
             <input type="checkbox" id="setting-show-dmg-numbers" checked />
             <span class="toggle-slider"></span>
           </label>
-        </div>
-        <div class="setting-row" style="flex-direction: column; align-items: flex-start; gap: 6px;">
-          <label style="display: flex; justify-content: space-between; width: 100%;">
-            <span>ElevenLabs API Key (Optional Studio Voice)</span>
-            <small style="color: var(--arcane-cyan);">AI Voice</small>
-          </label>
-          <div style="display: flex; gap: 8px; width: 100%;">
-            <input type="password" id="setting-elevenlabs-key" placeholder="Enter key (e.g. xi-...)" style="flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 6px 10px; color: #fff; font-size: 0.8rem;" />
-            <button id="btn-save-voice-key" class="mini-btn" style="background: var(--gold); color: #12101e; font-weight: 700;">Save</button>
-          </div>
-          <small style="font-size: 0.65rem; color: var(--text-muted);">When key is empty, game automatically uses built-in browser speech synthesis.</small>
         </div>
       </div>
     </div>
@@ -724,6 +740,7 @@
         <div class="control-row"><span class="key-badge">K</span><span class="control-action">Spell Grimoire & Skill Points</span></div>
         <div class="control-row"><span class="key-badge">T</span><span class="control-action">Talent Specialization Tree</span></div>
         <div class="control-row"><span class="key-badge">ENTER</span><span class="control-action">Covenant In-Game Chat</span></div>
+        <div class="control-row"><span class="key-badge">GAMEPAD</span><span class="control-action">Left stick move · right stick aim · A attack · B/Q · X/E · Y/R · LB dash · RB interact</span></div>
         <div class="control-row"><span class="key-badge">H / F1</span><span class="control-action">Toggle Controls Guide</span></div>
         <div class="control-row"><span class="key-badge">ESC</span><span class="control-action">Menu / Settings / Close Any Modal</span></div>
       </div>

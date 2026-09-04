@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ITEMS, RARITY_CONFIG } from './itemDatabase.js';
 import { ModelFactory } from '../graphics/modelFactory.js';
+import { ATTRIBUTES } from '../shared/gameData.js';
 
 /**
  * Inventory, Equipment Paperdoll, and 7-Attribute RPG Progression System
@@ -10,13 +11,12 @@ export class InventorySystem {
     this.scene = scene;
 
     // Base attributes before equipment
+    // Streamlined five-stat RPG sheet. Legacy item keys are migrated below.
     this.baseAttributes = {
-      vigor: 15,
+      vitality: 15,
       arcana: 20,
-      intellect: 18,
-      wisdom: 15,
+      focus: 18,
       haste: 10,
-      resilience: 10,
       mastery: 10
     };
 
@@ -32,8 +32,9 @@ export class InventorySystem {
       ring: ITEMS.copper_band
     };
 
-    // 16 Bag Slots
-    this.bag = new Array(16).fill(null);
+    // 24 bag slots gives co-op players room to keep build options without
+    // turning inventory management into a second game.
+    this.bag = new Array(24).fill(null);
     this.bag[0] = ITEMS.healing_potion;
     this.bag[1] = ITEMS.healing_potion;
     this.bag[2] = ITEMS.mana_potion;
@@ -52,7 +53,8 @@ export class InventorySystem {
       const item = this.equipment[slot];
       if (item && item.stats) {
         for (const [attr, val] of Object.entries(item.stats)) {
-          total[attr] = (total[attr] || 0) + val;
+          const migrated = ({ vigor: 'vitality', intellect: 'focus', wisdom: 'focus', resilience: 'vitality' })[attr] || attr;
+          if (ATTRIBUTES.includes(migrated)) total[migrated] = (total[migrated] || 0) + val;
         }
       }
     }
@@ -66,14 +68,14 @@ export class InventorySystem {
   getDerivedStats() {
     const attrs = this.getAttributes();
 
-    const maxHealth = 150 + (attrs.vigor * 6);
-    const maxMana = 100 + (attrs.intellect * 5);
+    const maxHealth = 150 + (attrs.vitality * 8);
+    const maxMana = 100 + (attrs.focus * 5);
     const spellPowerMultiplier = 1.0 + (attrs.arcana * 0.015);
-    const healingMultiplier = 1.0 + (attrs.wisdom * 0.02);
+    const healingMultiplier = 1.0 + (attrs.focus * 0.012) + (attrs.mastery * 0.008);
     const cdr = Math.min(0.40, attrs.haste * 0.005);
     const moveSpeed = 6.0 + (attrs.haste * 0.035);
-    const damageMitigation = Math.min(0.55, attrs.resilience * 0.0055);
-    const critChance = Math.min(0.50, 0.05 + attrs.intellect * 0.004);
+    const damageMitigation = Math.min(0.55, attrs.vitality * 0.0035);
+    const critChance = Math.min(0.50, 0.05 + attrs.mastery * 0.004);
 
     return {
       attributes: attrs,
@@ -139,6 +141,11 @@ export class InventorySystem {
     return false; // Bag full
   }
 
+  // Compatibility alias used by story rewards and older UI integrations.
+  addItem(item) {
+    return this.addItemToBag(item);
+  }
+
   /**
    * Spawns an in-world 3D dropped loot item with rarity light beam and orbiting relic astrolabe
    */
@@ -187,10 +194,12 @@ export class InventorySystem {
 
     const drop = {
       group,
-      mesh,
-      ring1,
-      ring2,
+      mesh: lootMesh,
+      ring1: null,
+      ring2: null,
       decal,
+      beam,
+      light,
       item,
       pos: group.position,
       radius: 2.2
@@ -208,6 +217,7 @@ export class InventorySystem {
       drop.mesh.rotation.y += deltaTime * 2.5;
       drop.mesh.rotation.x += deltaTime * 1.2;
       drop.mesh.position.y = Math.sin(performance.now() * 0.005) * 0.15;
+      if (drop.beam) drop.beam.material.opacity = 0.34 + Math.sin(performance.now() * 0.004) * 0.1;
 
       if (drop.ring1) {
         drop.ring1.rotation.z += deltaTime * 3.2;

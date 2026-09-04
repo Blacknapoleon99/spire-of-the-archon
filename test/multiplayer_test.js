@@ -2,12 +2,27 @@ import { io } from 'socket.io-client';
 
 console.log('Testing updated multiplayer RPG simulation (Luminary Healer + Pyromancer DPS)...');
 
-const serverUrl = 'http://localhost:3000';
+const serverUrl = process.env.SPIRE_SERVER_URL || 'http://localhost:3000';
 
 const hostSocket = io(serverUrl);
 const client2Socket = io(serverUrl);
 
 let roomCode = null;
+let clientReady = false;
+
+function joinWhenReady() {
+  if (!roomCode || !clientReady) return;
+  client2Socket.emit('join_room', {
+    playerName: 'Pyromancer Ignis',
+    wizardClass: 'pyromancer',
+    roomCode
+  });
+}
+
+client2Socket.on('connect', () => {
+  clientReady = true;
+  joinWhenReady();
+});
 
 hostSocket.on('connect', () => {
   console.log('✓ Host connected to server with ID:', hostSocket.id);
@@ -22,11 +37,7 @@ hostSocket.on('room_created', (data) => {
   roomCode = data.roomId;
   console.log(`✓ Room created successfully: ${roomCode} with class: ${data.player.wizardClass}`);
 
-  client2Socket.emit('join_room', {
-    playerName: 'Pyromancer Ignis',
-    wizardClass: 'pyromancer', // Holy Trinity DPS!
-    roomCode: roomCode
-  });
+  joinWhenReady();
 });
 
 client2Socket.on('room_joined', (data) => {

@@ -24,12 +24,14 @@ export class CharacterAnimator {
     this.actions = {};
     this.currentAction = null;
     this.loaded = false;
+    this.disposed = false;
     this._readyCallbacks = [];
   }
 
   async init() {
     try {
       const gltf = await assetLoader.loadGLTFRaw(this.glbUrl);
+      if (this.disposed) return this;
       const model = SkeletonUtils.clone(gltf.scene);
 
       // Setup model
@@ -81,6 +83,7 @@ export class CharacterAnimator {
   }
 
   onReady(callback) {
+    if (this.disposed) return;
     if (this.loaded) callback(this);
     else this._readyCallbacks.push(callback);
   }
@@ -273,19 +276,15 @@ export class CharacterAnimator {
   }
 
   dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
     if (this.mixer) {
       this.mixer.stopAllAction();
     }
-    this.group.traverse((child) => {
-      if (child.isMesh) {
-        child.geometry?.dispose();
-        if (Array.isArray(child.material)) {
-          child.material.forEach(m => m.dispose());
-        } else {
-          child.material?.dispose();
-        }
-      }
-    });
+    this._readyCallbacks.length = 0;
+    // SkeletonUtils.clone shares GLTF geometry/materials with the loader
+    // cache. Disposing them here would invalidate every other actor using the
+    // same model. AssetLoader.releaseGLTF owns cache-level disposal instead.
     this.scene.remove(this.group);
   }
 }

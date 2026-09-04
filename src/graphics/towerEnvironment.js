@@ -93,7 +93,7 @@ export class TowerEnvironment {
       else if (f === 7) this.buildFloor7GolemLab();
       else if (f === 8) this.buildFloor8Crystals();
       else if (f === 9) this.buildFloor9Catwalks();
-      else if (f === 10) this.buildFloor10BossXyris();
+      else if (f === 10) this.buildFloor10BossAstraea();
       else if (f === 11) this.buildFloor11StarGallery();
       else if (f === 12) this.buildFloor12Chronometer();
       else if (f === 13) this.buildFloor13Promenade();
@@ -177,7 +177,7 @@ export class TowerEnvironment {
     else if (floorNumber === 7) this.buildFloor7GolemLab();
     else if (floorNumber === 8) this.buildFloor8Crystals();
     else if (floorNumber === 9) this.buildFloor9Catwalks();
-    else if (floorNumber === 10) this.buildFloor10BossXyris();
+    else if (floorNumber === 10) this.buildFloor10BossAstraea();
     else if (floorNumber === 11) this.buildFloor11StarGallery();
     else if (floorNumber === 12) this.buildFloor12Chronometer();
     else if (floorNumber === 13) this.buildFloor13Promenade();
@@ -2710,11 +2710,11 @@ export class TowerEnvironment {
       { x: 10, z: -8, element: 'frost', color: 0x00aaff },
       { x: 0, z: 12, element: 'storm', color: 0xffee00 },
     ];
-    cruciblePositions.forEach(({ x, z, element, color }) => {
+    cruciblePositions.forEach(({ x, z, element, color }, index) => {
       const cruc = ModelFactory.createCrucibleMesh(element, color);
       cruc.position.set(x, 0, z);
       this.roomGroup.add(cruc);
-      this.interactables.push({ id: `crucible_${element}`, type: 'crucible', element, x, z, radius: 2.5 });
+      this.interactables.push({ id: `crucible_${element}`, type: 'crucible', element, index, mesh: cruc, x, z, radius: 2.5 });
     });
 
     // Ambient magma lighting
@@ -2996,9 +2996,9 @@ export class TowerEnvironment {
   }
 
   // =========================================================================
-  // FLOOR 10: BOSS ROOM - XYRIS THE VOID SOVEREIGN (Prismatic Mirror Puzzle)
+  // FLOOR 10: BOSS ROOM - ASTRAEA THE DEMON-ANGEL SOVEREIGN (Leyline Matrix)
   // =========================================================================
-  buildFloor10BossXyris() {
+  buildFloor10BossAstraea() {
     const floorMat = new THREE.MeshStandardMaterial({ color: 0x040010, roughness: 0.6, metalness: 0.5 });
 
     const floorGeo = new THREE.CylinderGeometry(26, 26, 1, 40);
@@ -3026,7 +3026,8 @@ export class TowerEnvironment {
       this.roomGroup.add(wall);
     }
 
-    // 4 Prismatic Light Mirrors (rotatable - key mechanic)
+    // Decorative prismatic panels. Interactive leyline pedestals are owned by
+    // PuzzleBossArena so the client and server share one Floor 10 mechanic.
     const mirrorAngles = [0, Math.PI / 2, Math.PI, Math.PI * 3 / 2];
     mirrorAngles.forEach((baseAngle, idx) => {
       const mirrorMesh = ModelFactory.createPrismPedestalMesh(idx + 1);
@@ -3034,14 +3035,6 @@ export class TowerEnvironment {
       const mz = Math.sin(baseAngle) * 14;
       mirrorMesh.position.set(mx, 0, mz);
       this.roomGroup.add(mirrorMesh);
-      this.interactables.push({
-        id: `prism_${idx + 1}`,
-        type: 'prism',
-        mirrorIndex: idx,
-        x: mx,
-        z: mz,
-        radius: 2.8
-      });
     });
 
     // Aether Beam source emitter (north wall) - visual only
@@ -3406,7 +3399,7 @@ export class TowerEnvironment {
       const keystone = ModelFactory.createKeystoneMesh(dir);
       keystone.position.set(x, 0, z);
       this.roomGroup.add(keystone);
-      this.interactables.push({ id: `keystone_${dir}`, type: 'keystone', direction: dir, x, z, radius: 2.8 });
+      this.interactables.push({ id: dir, type: 'keystone', direction: dir, mesh: keystone, x, z, radius: 2.8 });
     });
 
     // Astral Nova effect - floating time shards

@@ -10,10 +10,18 @@
     "preview": "vite preview",
     "server": "node server/server.js",
     "start": "node server/server.js",
-    "host": "node server/server.js"
+    "host": "node server/server.js",
+    "test": "node --test test/game_rules.test.js",
+    "assets:validate": "node tools/asset-pipeline.mjs validate",
+    "assets:report": "node tools/asset-pipeline.mjs report",
+    "assets:optimize": "node tools/asset-pipeline.mjs optimize",
+    "assets:generate": "node tools/asset-pipeline.mjs generate",
+    "assets:motion": "node tools/asset-pipeline.mjs motion",
+    "assets:blender": "node tools/asset-pipeline.mjs blender"
   },
   "dependencies": {
     "express": "^4.21.2",
+    "oracledb": "^6.10.0",
     "peerjs": "^1.5.5",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",

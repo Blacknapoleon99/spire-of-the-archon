@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FLOOR_DEFINITIONS } from '../shared/gameData.js';
 
 /**
  * Streamlined Story Questline and Waypoint Navigation System
@@ -104,11 +105,26 @@ export const QUEST_ACTS = [
   }
 ];
 
+// One readable objective per floor keeps the 15-floor run coherent while the
+// legacy three-act quest data remains available for lore/journal pages.
+export const FLOOR_QUESTS = FLOOR_DEFINITIONS.map(floor => ({
+  floor: floor.number,
+  act: floor.act,
+  actTitle: `Act ${['I', 'II', 'III'][floor.act - 1]}: ${floor.act === 1 ? 'The Archives' : floor.act === 2 ? 'The Alchemical Forge' : 'The Astral Pinnacle'}`,
+  title: floor.boss ? `Confront ${floor.boss[0].toUpperCase()}${floor.boss.slice(1)}` : `Ascend through ${floor.name}`,
+  desc: floor.boss ? `Complete the floor mechanic, then defeat ${floor.boss} to unlock the next ascent.` : `Explore ${floor.name}, solve its ward, and find the ascent gate.`,
+  target: { x: 0, z: floor.boss ? -12 : -10 },
+  type: floor.boss ? 'boss' : 'explore'
+}));
+
 export class QuestManager {
   constructor(scene) {
     this.scene = scene;
     this.currentActIndex = 0;
     this.currentStepIndex = 0;
+    this.currentFloor = 1;
+    this.serverObjective = null;
+    this.waypointPosition = new THREE.Vector3();
 
     // 3D In-world Waypoint Beacon
     this.waypointMesh = this.createWaypointBeacon();
@@ -156,6 +172,20 @@ export class QuestManager {
   }
 
   getCurrentQuest() {
+    const floorQuest = FLOOR_QUESTS.find(q => q.floor === this.currentFloor);
+    if (floorQuest) {
+      const objective = this.serverObjective && this.serverObjective.floor === this.currentFloor ? this.serverObjective : null;
+      return {
+        actTitle: floorQuest.actTitle,
+        actNumber: floorQuest.act,
+        stepTitle: objective?.label || floorQuest.title,
+        stepDesc: objective?.complete ? 'The ward is complete. Find the ascent gate.' : floorQuest.desc,
+        target: floorQuest.target,
+        type: objective?.kind || floorQuest.type,
+        stepNumber: objective?.complete ? 1 : 0,
+        totalSteps: 1
+      };
+    }
     const act = QUEST_ACTS[this.currentActIndex];
     if (!act) return null;
     const step = act.steps[this.currentStepIndex];
@@ -188,6 +218,29 @@ export class QuestManager {
     this.currentStepIndex = 0;
   }
 
+  setFloor(floorNumber) {
+    const floor = Math.max(1, Math.min(FLOOR_DEFINITIONS.length, Number(floorNumber) || 1));
+    this.currentFloor = floor;
+    if (this.serverObjective?.floor !== floor) this.serverObjective = null;
+    this.setAct(FLOOR_DEFINITIONS[floor - 1].act);
+  }
+
+  setServerObjective(objective) {
+    if (!objective || Number(objective.floor) !== this.currentFloor) return;
+    this.serverObjective = {
+      floor: this.currentFloor,
+      id: String(objective.id || `floor_${this.currentFloor}`),
+      label: String(objective.label || 'Complete the floor objective'),
+      progress: Math.max(0, Math.min(1, Number(objective.progress) || 0)),
+      complete: Boolean(objective.complete),
+      remainingEnemies: Math.max(0, Number(objective.remainingEnemies) || 0)
+    };
+  }
+
+  getServerObjective() {
+    return this.serverObjective;
+  }
+
   update(playerPos, deltaTime) {
     const quest = this.getCurrentQuest();
     if (!quest) {
@@ -197,6 +250,7 @@ export class QuestManager {
 
     this.waypointMesh.visible = true;
     this.waypointMesh.position.set(quest.target.x, 0, quest.target.z);
+    this.waypointPosition.set(quest.target.x, 0, quest.target.z);
 
     // Animate beacon
     const { diamond, ring } = this.waypointMesh.userData;

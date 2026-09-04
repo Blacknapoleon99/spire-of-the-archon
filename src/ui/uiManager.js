@@ -3,6 +3,7 @@ import { TALENT_TREES } from '../systems/talents.js';
 import { soundEngine } from '../engine/audio.js';
 import { voiceEngine } from '../engine/voiceNarration.js';
 import { CUSTOM_ICONS, getCustomIcon } from './customIcons.js';
+import { accountClient } from '../state/accountClient.js';
 
 /**
  * UI Manager — Central controller for all HUD panels, modals, and settings.
@@ -14,6 +15,7 @@ export class UIManager {
   constructor(network) {
     this.network = network;
     this.selectedClass = 'pyromancer';
+    this.selectedDifficulty = 'standard';
     this.localPlayer = null;
     this.quizTimerInterval = null;
     this.killFeedTimeout = null;
@@ -88,6 +90,18 @@ export class UIManager {
     this.playerNameInput = document.getElementById('player-name-input');
     this.hostCodeInput = document.getElementById('host-code-input');
     this.joinCodeInput = document.getElementById('join-code-input');
+    this.difficultySelect = document.getElementById('difficulty-select');
+    this.accountUsername = document.getElementById('account-username');
+    this.accountPassword = document.getElementById('account-password');
+    this.accountRecoveryCode = document.getElementById('account-recovery-code');
+    this.accountStatus = document.getElementById('account-status');
+    this.btnAccountLogin = document.getElementById('btn-account-login');
+    this.btnAccountRegister = document.getElementById('btn-account-register');
+    this.btnAccountRecovery = document.getElementById('btn-account-recovery');
+    this.btnAccountLogout = document.getElementById('btn-account-logout');
+    this.btnAccountDelete = document.getElementById('btn-account-delete');
+    this.btnResumeCampaign = document.getElementById('btn-resume-campaign');
+    this.resumeFloor = 1;
     this.btnHostGame = document.getElementById('btn-host-game');
     this.btnJoinGame = document.getElementById('btn-join-game');
     this.btnStartGame = document.getElementById('btn-start-game');
@@ -151,6 +165,7 @@ export class UIManager {
 
     // Talents modal
     this.talentModal = document.getElementById('talent-modal');
+    this.talentClassTitle = document.getElementById('talent-class-title');
     this.btnToggleTalents = document.getElementById('btn-toggle-talents');
     this.btnCloseTalents = document.getElementById('btn-close-talents');
     this.talentPointsBadge = document.getElementById('talent-points-badge');
@@ -223,6 +238,76 @@ export class UIManager {
   }
 
   setupEventListeners() {
+    this.difficultySelect?.addEventListener('change', () => {
+      this.selectedDifficulty = this.difficultySelect.value || 'standard';
+    });
+    const refreshCampaign = async () => {
+      if (!accountClient.session?.user) {
+        this.btnResumeCampaign?.classList.add('hidden');
+      this.btnAccountLogout?.classList.add('hidden');
+      this.btnAccountDelete?.classList.add('hidden');
+      return null;
+      }
+      this.btnAccountLogout?.classList.remove('hidden');
+      this.btnAccountDelete?.classList.remove('hidden');
+      try {
+        const save = await accountClient.getSave();
+        const floor = Math.max(1, Math.min(15, Number(save?.payload?.floor) || 1));
+        this.resumeFloor = floor;
+        if (floor > 1 && this.btnResumeCampaign) {
+          this.btnResumeCampaign.textContent = `RESUME CAMPAIGN · FLOOR ${floor}`;
+          this.btnResumeCampaign.classList.remove('hidden');
+        } else {
+          this.btnResumeCampaign?.classList.add('hidden');
+        }
+        return save;
+      } catch {
+        this.btnResumeCampaign?.classList.add('hidden');
+        return null;
+      }
+    };
+    const accountAction = async (action) => {
+      const username = this.accountUsername?.value.trim();
+      const password = this.accountPassword?.value || '';
+      if (!username || !password) return this.setAccountStatus('Enter a username and password to continue.');
+      this.setAccountStatus('Binding your campaign to the covenant relay…');
+      try {
+        const result = await accountClient[action](username, password);
+        const recovery = result.recoveryCodes ? ` Recovery codes: ${result.recoveryCodes.join(', ')}` : '';
+        this.setAccountStatus(`Signed in as ${result.user.username}.${recovery}`);
+        await refreshCampaign();
+      } catch (error) { this.setAccountStatus(error.message, true); }
+    };
+    const recoveryAction = async () => {
+      const username = this.accountUsername?.value.trim();
+      const code = this.accountRecoveryCode?.value.trim();
+      const password = this.accountPassword?.value || '';
+      if (!username || !code || !password) return this.setAccountStatus('Enter username, recovery code and a new password.');
+      try {
+        const result = await accountClient.recovery(username, code, password);
+        this.setAccountStatus(`Password reset. Signed in as ${result.user.username}.`);
+        await refreshCampaign();
+      } catch (error) { this.setAccountStatus(error.message, true); }
+    };
+    this.btnAccountLogin?.addEventListener('click', () => accountAction('login'));
+    this.btnAccountRegister?.addEventListener('click', () => accountAction('register'));
+    this.btnAccountRecovery?.addEventListener('click', recoveryAction);
+    this.btnAccountLogout?.addEventListener('click', async () => {
+      await accountClient.logout().catch(() => {});
+      this.resumeFloor = 1;
+      this.setAccountStatus('Signed out. Local progress remains available for this session.');
+      await refreshCampaign();
+    });
+    this.btnAccountDelete?.addEventListener('click', async () => {
+      if (!accountClient.session?.user || !window.confirm('Delete this cloud campaign permanently?')) return;
+      const password = this.accountPassword?.value || '';
+      if (!password) return this.setAccountStatus('Enter your password to confirm account deletion.', true);
+      try {
+        await accountClient.deleteAccount(password);
+        this.setAccountStatus('Cloud campaign deleted.');
+        await refreshCampaign();
+      } catch (error) { this.setAccountStatus(error.message, true); }
+    });
     // Class picker
     const classCards = document.querySelectorAll('.class-card');
     classCards.forEach(card => {
@@ -237,7 +322,7 @@ export class UIManager {
     this.btnHostGame?.addEventListener('click', () => {
       const name = this.playerNameInput?.value.trim() || 'Archmage Host';
       const code = this.hostCodeInput?.value.trim();
-      this.network.createRoom(name, this.selectedClass, code);
+      this.network.createRoom(name, this.selectedClass, code, this.selectedDifficulty);
       soundEngine.playWandCast();
     });
 
@@ -249,32 +334,45 @@ export class UIManager {
       soundEngine.playWandCast();
     });
 
-    const handleAscendStart = () => {
+    const handleAscendStart = async () => {
       soundEngine.playFireball();
       if (this.btnStartGame) this.btnStartGame.textContent = 'ASCENDING... 🔮';
       if (this.btnQuickAscend) this.btnQuickAscend.textContent = 'ASCENDING... 🔮';
 
+      const save = accountClient.session?.user ? await accountClient.getSave().catch(() => null) : null;
+      const resumeFloor = Math.max(1, Math.min(15, Number(this.resumeFloor > 1 ? this.resumeFloor : save?.payload?.floor) || 1));
+
       // If already connected in a created/joined room, begin ascent immediately
       if (this.network.roomId) {
-        this.network.startGame();
+        this.network.startGame({ resumeFloor });
       } else {
         // Auto-host room instantly so player can enter immediately
         const name = this.playerNameInput?.value.trim() || 'Archmage Ignis';
         const code = this.hostCodeInput?.value.trim() || ('SPIRE-' + Math.floor(Math.random() * 8999 + 1000));
-        this.network.createRoom(name, this.selectedClass, code);
-
-        const onRoomStarted = () => {
-          this.network.startGame();
+        let startRequested = false;
+        const startWhenRoomReady = () => {
+          if (startRequested) return;
+          startRequested = true;
+          this.network.startGame({ resumeFloor });
         };
-        this.network.on('room_created', onRoomStarted);
+        this.network.createRoom(name, this.selectedClass, code, this.selectedDifficulty);
+
+        this.network.on('room_created', startWhenRoomReady);
         setTimeout(() => {
-          this.network.startGame();
+          if (this.network.roomId) startWhenRoomReady();
         }, 300);
       }
     };
 
+    this.btnResumeCampaign?.addEventListener('click', handleAscendStart);
+
     this.btnStartGame?.addEventListener('click', handleAscendStart);
     this.btnQuickAscend?.addEventListener('click', handleAscendStart);
+
+    accountClient.me().then(async result => {
+      if (result?.user) this.setAccountStatus(`Signed in as ${result.user.username}.`);
+      await refreshCampaign();
+    });
 
     this.btnCopyCode?.addEventListener('click', () => {
       const code = this.displayRoomCode?.textContent;
@@ -392,6 +490,12 @@ export class UIManager {
 
     // Victory
     this.btnPlayAgain?.addEventListener('click', () => window.location.reload());
+  }
+
+  setAccountStatus(message, isError = false) {
+    if (!this.accountStatus) return;
+    this.accountStatus.textContent = message;
+    this.accountStatus.style.color = isError ? 'var(--danger-red)' : 'var(--text-muted)';
   }
 
   toggleChatChannel() {
@@ -519,18 +623,7 @@ export class UIManager {
       });
     }
 
-    // ElevenLabs API Key
-    const keyInput = document.getElementById('setting-elevenlabs-key');
-    const saveKeyBtn = document.getElementById('btn-save-voice-key');
-    if (keyInput && saveKeyBtn) {
-      keyInput.value = voiceEngine.apiKey || '';
-      saveKeyBtn.addEventListener('click', () => {
-        voiceEngine.setApiKey(keyInput.value);
-        saveKeyBtn.textContent = 'Saved!';
-        soundEngine.playLootPickup();
-        setTimeout(() => { saveKeyBtn.textContent = 'Save'; }, 1500);
-      });
-    }
+    // Narration is bundled/local. Provider credentials stay out of the client.
   }
 
   /** Register an external toggle callback (e.g., for QuestJournalUI) */
@@ -803,15 +896,12 @@ export class UIManager {
       item.className = 'lobby-player-item';
       const avatar = CLASS_SPELLS[p.wizardClass]?.avatar || '🪄';
       const role = CLASS_SPELLS[p.wizardClass]?.role || 'DPS';
-      item.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;">
-          <span style="font-size:1.4rem;">${avatar}</span>
-          <strong>${p.name}</strong>
-        </div>
-        <span style="color:var(--arcane-cyan);text-transform:uppercase;font-size:0.8rem;font-weight:700;">
-          ${p.wizardClass} (${role})
-        </span>
-      `;
+      const identity = document.createElement('div'); identity.style.cssText = 'display:flex;align-items:center;gap:10px;';
+      const avatarEl = document.createElement('span'); avatarEl.style.fontSize = '1.4rem'; avatarEl.textContent = avatar;
+      const nameEl = document.createElement('strong'); nameEl.textContent = p.name || 'Apprentice';
+      identity.append(avatarEl, nameEl);
+      const roleEl = document.createElement('span'); roleEl.style.cssText = 'color:var(--arcane-cyan);text-transform:uppercase;font-size:0.8rem;font-weight:700;'; roleEl.textContent = `${p.wizardClass} (${role})`;
+      item.append(identity, roleEl);
       this.lobbyPlayerList.appendChild(item);
     });
   }
@@ -1012,8 +1102,9 @@ export class UIManager {
     this.questActTitle.textContent = questInfo.actTitle;
     this.questStepTitle.textContent = questInfo.stepTitle;
     this.questStepDesc.textContent = questInfo.stepDesc;
-    this.questStepProgress.textContent = `Step ${questInfo.stepNumber} of ${questInfo.totalSteps}`;
+    this.questStepProgress.textContent = questInfo.stepNumber > 0 ? 'OBJECTIVE COMPLETE' : 'OBJECTIVE IN PROGRESS';
     this.questDistanceTag.textContent = `Waypoint: ${distance}m`;
+    this.questStepProgress.classList.toggle('objective-complete', questInfo.stepNumber > 0);
   }
 
   // ─────────── Party HUD ───────────
@@ -1030,15 +1121,12 @@ export class UIManager {
       const role = CLASS_SPELLS[p.wizardClass]?.role || 'DPS';
       const hpRatio = Math.max(0, Math.min(1, p.health / p.maxHealth));
 
-      card.innerHTML = `
-        <div class="party-avatar">${avatar}</div>
-        <div class="party-info">
-          <div class="party-name">${p.name} <small style="color:var(--arcane-cyan);">[${role}]</small></div>
-          <div class="party-hp-track">
-            <div class="party-hp-fill" style="width:${hpRatio * 100}%;"></div>
-          </div>
-        </div>
-      `;
+      const avatarEl = document.createElement('div'); avatarEl.className = 'party-avatar'; avatarEl.textContent = avatar;
+      const info = document.createElement('div'); info.className = 'party-info';
+      const nameEl = document.createElement('div'); nameEl.className = 'party-name'; nameEl.textContent = `${p.name || 'Apprentice'} [${role}]`;
+      const track = document.createElement('div'); track.className = 'party-hp-track';
+      const fill = document.createElement('div'); fill.className = 'party-hp-fill'; fill.style.width = `${hpRatio * 100}%`;
+      track.appendChild(fill); info.append(nameEl, track); card.append(avatarEl, info);
       this.partyHudList.appendChild(card);
     });
   }
@@ -1106,11 +1194,10 @@ export class UIManager {
     const p = document.createElement('div');
     p.className = 'chat-msg';
     const color = msgClass === 'pyromancer' ? '#ff3b30' : msgClass === 'cryomancer' ? '#00e5ff' : msgClass === 'luminary' ? '#ffc107' : '#bf5af2';
-    const channelTag = channel === 'proximity'
-      ? `<span class="chat-channel" style="color:#ba68c8;font-size:0.75rem;margin-right:4px;">[Prox${distText}]</span>`
-      : `<span class="chat-channel" style="color:#ffd700;font-size:0.75rem;margin-right:4px;">[Party]</span>`;
-
-    p.innerHTML = `${channelTag}<span class="chat-sender" style="color:${color};font-weight:700;">[${sender}]:</span> <span class="chat-body" style="color:#ffffff;">${message}</span>`;
+    const tag = document.createElement('span'); tag.className = 'chat-channel'; tag.textContent = channel === 'proximity' ? `[Prox${distText}]` : '[Party]'; tag.style.cssText = `color:${channel === 'proximity' ? '#ba68c8' : '#ffd700'};font-size:0.75rem;margin-right:4px;`;
+    const senderEl = document.createElement('span'); senderEl.className = 'chat-sender'; senderEl.style.cssText = `color:${color};font-weight:700;`; senderEl.textContent = `[${sender || 'Apprentice'}]:`;
+    const bodyEl = document.createElement('span'); bodyEl.className = 'chat-body'; bodyEl.style.color = '#ffffff'; bodyEl.textContent = String(message || '').slice(0, 150);
+    p.append(tag, senderEl, document.createTextNode(' '), bodyEl);
     this.chatMessages.appendChild(p);
     this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
   }

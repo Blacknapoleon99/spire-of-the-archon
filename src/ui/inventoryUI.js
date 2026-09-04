@@ -105,28 +105,20 @@ export class InventoryUI {
 
     this.statsListContainer.innerHTML = `
       <div class="stat-row">
-        <span>${iconSpan('stat_vigor')}Vigor</span>
-        <strong>${a.vigor} <small>(+${a.vigor * 6} HP)</small></strong>
+        <span>${iconSpan('stat_vigor')}Vitality</span>
+        <strong>${a.vitality} <small>(+${a.vitality * 8} HP)</small></strong>
       </div>
       <div class="stat-row">
         <span>${iconSpan('stat_arcana')}Arcana</span>
         <strong>${a.arcana} <small>(+${Math.round((derived.spellPowerMultiplier - 1) * 100)}% Dmg)</small></strong>
       </div>
       <div class="stat-row">
-        <span>${iconSpan('stat_intellect')}Intellect</span>
-        <strong>${a.intellect} <small>(+${a.intellect * 5} MP, ${Math.round(derived.critChance * 100)}% Crit)</small></strong>
-      </div>
-      <div class="stat-row">
-        <span>${iconSpan('stat_wisdom')}Wisdom</span>
-        <strong>${a.wisdom} <small>(+${Math.round((derived.healingMultiplier - 1) * 100)}% Heal)</small></strong>
+        <span>${iconSpan('stat_intellect')}Focus</span>
+        <strong>${a.focus} <small>(+${a.focus * 5} MP, ${Math.round(derived.healingMultiplier * 100 - 100)}% Heal)</small></strong>
       </div>
       <div class="stat-row">
         <span>${iconSpan('stat_haste')}Haste</span>
         <strong>${a.haste} <small>(+${Math.round(derived.cdr * 100)}% CDR, ${derived.moveSpeed.toFixed(1)} Spd)</small></strong>
-      </div>
-      <div class="stat-row">
-        <span>${iconSpan('stat_resilience')}Resilience</span>
-        <strong>${a.resilience} <small>(${Math.round(derived.damageMitigation * 100)}% Armor)</small></strong>
       </div>
       <div class="stat-row">
         <span>${iconSpan('stat_mastery')}Mastery</span>
@@ -138,7 +130,7 @@ export class InventoryUI {
   renderBag() {
     this.bagGridContainer.innerHTML = '';
 
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < this.inventory.bag.length; i++) {
       const item = this.inventory.bag[i];
       const slotEl = document.createElement('div');
       slotEl.className = 'bag-slot';

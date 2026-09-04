@@ -35,6 +35,7 @@ import { ModelFactory } from './graphics/modelFactory.js';
 import { VoiceChatSystem } from './systems/voiceChatSystem.js';
 import { GroundSpellManager } from './graphics/groundSpells.js';
 import { animationPackManager } from './graphics/animationPack.js';
+import { accountClient } from './state/accountClient.js';
 
 /** Loading screen lore tips */
 const LOADING_TIPS = [
@@ -71,7 +72,7 @@ class GameApp {
     this.voiceChat.setNoiseGateThreshold(this.ui.settings.micThreshold || 14);
 
     this.voiceChat.onPeerSpeakingChange = (peerId, isSpeaking) => {
-      const player = this.players.get(peerId);
+      const player = this.players.get(peerId) || Array.from(this.players.values()).find(candidate => candidate.peerId === peerId);
       if (player) player.setSpeaking(isSpeaking);
     };
 
@@ -160,29 +161,29 @@ class GameApp {
     this.currentFps = 60;
     this.targetFps = 0; // 0 = unlimited, or 60, 120, 144, 240
     this.lastRenderTime = performance.now();
+    this.saveRevision = 0;
+    this.saveQueue = Promise.resolve();
+    this.lastSavedFloor = 0;
 
     this.initNetworkListeners();
     this.initCombatInputs();
     this.setupUIButtons();
 
-    // 12-Second Cinematic Loading Sequence with 100% Guaranteed Upfront Preloading
-    const TOTAL_LOAD_TIME = 12000; // 12.0 seconds minimum cinematic display
+    // Fast core boot: only the active floor and first-person kit block entry.
+    // Later floors stream through the chunk loader so mid-range machines do not
+    // pay for every GLB, shader and floor while sitting at the title screen.
+    const TOTAL_LOAD_TIME = 1800;
     const loadStartTime = performance.now();
 
-    // Staged progression milestones across the 12 seconds
+    // Staged progression milestones across the short core boot
     const STAGES = [
       { atPct: 0, text: 'Awakening Ancient Leylines & Vault Geometry...', tip: 'The Archon once held domain over past, present, and eternity...' },
-      { atPct: 18, text: 'Preloading 3D Rigged Wand, Player Classes & Bosses...', tip: 'Wizards who enter the Spire must master all elements to survive.' },
-      { atPct: 38, text: 'Forging All 25 Procedural PBR Textures in GPU VRAM...', tip: 'Every stone, lava fissure, and astral floor is pre-baked for 0ms lag.' },
-      { atPct: 58, text: 'Pre-building Floors 1, 2, and 3 for Instant Ascent...', tip: 'Floor transitions are pre-cached in memory for seamless exploration.' },
-      { atPct: 75, text: 'Pre-heating Infernal Tornado & Blizzard Vortex Shaders...', tip: 'Your Ultimate abilities unleash catastrophic elemental devastation.' },
-      { atPct: 90, text: 'Binding 3D Spatial Proximity Voice Matrix & Network...', tip: 'Toggle your microphone with [V] or switch to Open Mic in Settings [ESC].' },
+      { atPct: 30, text: 'Binding the first-floor geometry & spell kit...', tip: 'The next floor streams while you play.' },
+      { atPct: 65, text: 'Warming the leyline shader core...', tip: 'Choose Performance in Settings for integrated graphics.' },
+      { atPct: 90, text: 'Opening the covenant relay...', tip: 'Voice chat starts only after you grant microphone access.' },
       { atPct: 98, text: 'Harmonizing Astral Frequencies... The Spire Awaits.', tip: 'Ascension is imminent. Prepare your Grimoire.' }
     ];
 
-    let hasPreloadedTextures = false;
-    let hasPreloadedFloors = false;
-    let hasWarmedShaders = false;
     let isPreloadFinished = false;
     let isLoadComplete = false;
 
@@ -192,7 +193,7 @@ class GameApp {
         isPreloadFinished = true;
         console.log('[Loading] Preload safety timeout reached; proceeding.');
       }
-    }, 13500);
+    }, 8000);
 
     // Initialize WebRTC STUN network in background
     onlineNetwork.init((peerId) => {
@@ -204,19 +205,17 @@ class GameApp {
     this.ambientParticles.setFloor(1);
     this.engineScene.setFloorLighting(1);
 
-    // Kick off 100% upfront preloading across all modules
+    // Core-only preloading. Floor 2 and later are requested on demand.
     Promise.allSettled([
-      assetLoader.preloadAll(),
+      assetLoader.preloadFloor1(),
+      assetLoader.loadGLTFRaw('/models/fp_viewmodel_wand.glb').catch(() => {}),
       animationPackManager.loadPack(),
-      Promise.resolve().then(() => this.chunkLoader.preloadEverything(this.engineScene.renderer)),
-      Promise.resolve().then(() => ModelFactory.preloadAllEntities(this.engineScene.scene, this.engineScene.camera, this.engineScene.renderer)),
-      Promise.resolve().then(() => this.tower.preloadAllFloors(this.engineScene.renderer, this.engineScene.camera)),
       Promise.resolve().then(() => this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera)),
-      this.voiceChat.init().catch(() => {})
+      Promise.resolve()
     ]).then(() => {
       isPreloadFinished = true;
       try { this.engineScene.warmupShaders(); } catch (e) {}
-      console.log('⚡ [SpireGame] 100% of all models, textures, floors, entities, audio & shaders completely pre-warmed!');
+      console.log('[SpireGame] Core assets ready; remaining floors stream on demand.');
     }).catch(err => {
       console.warn('[Preload] Non-critical warning:', err);
       isPreloadFinished = true;
@@ -229,38 +228,19 @@ class GameApp {
       // Cap at 99% until all asynchronous preloading tasks are 100% resolved
       const progress = isPreloadFinished ? Math.min(100, timeProgress) : Math.min(99, timeProgress);
 
-      // Pre-generate and upload all 25 PBR textures across all 3 floors to GPU VRAM at 25%
-      if (progress >= 25 && !hasPreloadedTextures) {
-        hasPreloadedTextures = true;
-        this.chunkLoader.preloadEverything(this.engineScene.renderer);
-      }
-
-      // Pre-build Floors 1, 2, and 3 in memory at 45%
-      if (progress >= 45 && !hasPreloadedFloors) {
-        hasPreloadedFloors = true;
-        this.tower.preloadAllFloors(this.engineScene.renderer, this.engineScene.camera);
-      }
-
-      // Trigger WebGL shader & Ultimate vortex pre-warm at 65%
-      if (progress >= 65 && !hasWarmedShaders) {
-        hasWarmedShaders = true;
-        this.engineScene.warmupShaders();
-        this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera);
-      }
-
       // Find active stage text
       let currentStage = STAGES[0];
       for (const s of STAGES) {
         if (progress >= s.atPct) currentStage = s;
       }
 
-      const statusText = (!isPreloadFinished && progress >= 99) 
-        ? 'Finalizing 100% GPU VRAM Pre-warming & Shader Compilation...' 
+      const statusText = (!isPreloadFinished && progress >= 99)
+        ? 'Finalizing the core spell and shader kit...'
         : currentStage.text;
 
       this.ui.updateLoadingProgress(progress, statusText, currentStage.tip);
 
-      // Only present ENTER THE SPIRE when BOTH the 12s timer AND all tasks are 100% finished
+      // Present entry as soon as the core is ready; no arbitrary wait for every floor.
       if (progress >= 100 && isPreloadFinished) {
         isLoadComplete = true;
         this.ui.updateLoadingProgress(100, 'ASCENSION READY. THE SPIRE AWAITS.', 'Click or Press Space to enter the Vault.');
@@ -283,6 +263,90 @@ class GameApp {
 
     // Start 60fps render loop
     requestAnimationFrame((t) => this.loop(t));
+  }
+
+  clearEncounterEntities() {
+    for (const entity of this.enemies.values()) entity.destroy?.();
+    this.enemies.clear();
+    if (this.boss) {
+      this.boss.destroy?.();
+      this.boss = null;
+    }
+  }
+
+  applyPuzzleSnapshot(puzzles = {}) {
+    const prismState = puzzles?.floor1?.prisms;
+    if (Array.isArray(prismState)) {
+      for (const prism of prismState) {
+        const item = this.tower.interactables.find(interactable => interactable.type === 'prism' && Number(interactable.id) === Number(prism.id));
+        const headGroup = item?.mesh?.userData?.headGroup;
+        if (!headGroup) continue;
+        headGroup.rotation.y = THREE.MathUtils.degToRad(Number(prism.angle) || 0);
+        item.isAligned = Boolean(prism.isAligned);
+      }
+    }
+
+    const floorPuzzle = puzzles?.[`floor${this.currentFloor}`];
+    if (Array.isArray(floorPuzzle?.crucibles)) {
+      for (const [index, crucible] of floorPuzzle.crucibles.entries()) {
+        const item = this.tower.interactables.find(interactable => interactable.type === 'crucible' && Number(interactable.index) === index);
+        const fluid = item?.mesh?.userData?.fluid;
+        const light = item?.mesh?.userData?.light;
+        if (fluid?.material) fluid.material.emissiveIntensity = crucible.charged ? 3.8 : 0.9;
+        if (light) light.intensity = crucible.charged ? 4.5 : 2.2;
+        if (item) item.isCharged = Boolean(crucible.charged);
+      }
+    }
+
+    if (Array.isArray(floorPuzzle?.keystones)) {
+      for (const keystone of floorPuzzle.keystones) {
+        const item = this.tower.interactables.find(interactable => interactable.type === 'keystone' && (interactable.id === keystone.id || interactable.direction === keystone.id));
+        const beam = item?.mesh?.userData?.beam;
+        if (beam?.material) beam.material.opacity = keystone.active ? 0.95 : 0.35;
+        if (item) item.isActive = Boolean(keystone.active);
+      }
+    }
+
+    // Reconnects can arrive after a non-boss puzzle was solved. Reflect the
+    // server gate state immediately so the prompt and portal visuals agree
+    // before the next movement snapshot arrives.
+    if (this.tower.exitPortal && [1, 2, 3].includes(this.currentFloor) && floorPuzzle) {
+      this.tower.exitPortal.isUnlocked = Boolean(floorPuzzle.unlocked || floorPuzzle.keystones?.every(keystone => keystone.active));
+    }
+
+    if (this.currentFloor === 10 && this.puzzleArena && puzzles?.floor10) {
+      this.puzzleArena.syncServerState(puzzles.floor10);
+    }
+  }
+
+  async saveCampaignCheckpoint() {
+    if (!accountClient.session?.user || !this.localPlayer) return;
+    const payload = {
+      floor: this.currentFloor,
+      level: this.progression.level,
+      xp: this.progression.xp,
+      attributes: this.inventory.baseAttributes,
+      equipment: this.inventory.equipment,
+      bag: this.inventory.bag,
+      settings: this.ui.settings,
+      clearedCheckpoints: [Math.max(0, this.currentFloor - 1)],
+      wizardClass: this.localPlayer.wizardClass,
+      talents: this.localPlayer.talents,
+      talentPoints: this.localPlayer.talentPoints,
+      objective: this.questManager.getServerObjective?.() || null,
+      ascensionTier: onlineNetwork.ascensionTier || 0
+    };
+    this.saveQueue = this.saveQueue.catch(() => {}).then(async () => {
+      try {
+        const saved = await accountClient.saveCampaign(payload, this.saveRevision);
+        this.saveRevision = saved.revision;
+        this.lastSavedFloor = this.currentFloor;
+        this.ui.setAccountStatus(`Campaign checkpoint saved at Floor ${this.currentFloor}.`);
+      } catch (error) {
+        this.ui.setAccountStatus(`Checkpoint pending: ${error.message}`, true);
+      }
+    });
+    return this.saveQueue;
   }
 
   setupUIButtons() {
@@ -328,6 +392,20 @@ class GameApp {
   }
 
   initNetworkListeners() {
+    onlineNetwork.on('network_status', (data) => {
+      if (data?.state === 'reconnecting') {
+        this.ui.setAccountStatus('Covenant relay reconnecting; your wizard is held for 30 seconds.', true);
+      } else if (data?.state === 'connected' && !accountClient.session?.user) {
+        this.ui.setAccountStatus('Covenant relay connected.');
+      }
+    });
+    onlineNetwork.on('network_error', (data) => {
+      this.ui.setAccountStatus(data?.message || 'The covenant relay is unavailable.', true);
+    });
+    onlineNetwork.on('error_message', (data) => {
+      this.ui.showStoryMessage(data?.message || 'The relay rejected that action.');
+    });
+
     onlineNetwork.on('peer_connected', (peerId) => {
       this.voiceChat.callPeer(peerId);
     });
@@ -368,13 +446,138 @@ class GameApp {
       }
     });
 
+    onlineNetwork.on('player_disconnected', (data) => {
+      const entity = this.players.get(data.socketId);
+      if (entity) {
+        entity.isAlive = false;
+        entity.mesh.visible = false;
+        this.ui.addKillFeedEntry(`${entity.name} lost the leyline connection; holding their place.`);
+      }
+    });
+
+    onlineNetwork.on('player_reconnected', (data) => {
+      const oldEntity = this.players.get(data.oldSocketId);
+      if (oldEntity) {
+        oldEntity.destroy();
+        this.players.delete(data.oldSocketId);
+      }
+      if (data.player && data.player.id !== onlineNetwork.localPlayerId) {
+        this.players.set(data.player.id, new PlayerEntity(this.engineScene.scene, data.player, false));
+      }
+      this.ui.addKillFeedEntry(`${data.player?.name || 'A wizard'} reconnected to the covenant.`);
+    });
+
+    onlineNetwork.on('room_resumed', (data) => {
+      if (data?.gameStarted) this.ui.setAccountStatus('Covenant restored. Rejoining the active ascent.');
+    });
+
+    onlineNetwork.on('promoted_to_host', (data = {}) => {
+      if (!this.isGameActive && onlineNetwork.roomId) {
+        const players = Array.isArray(data.players) && data.players.length
+          ? data.players
+          : Array.from(this.players.values()).map(player => ({
+            id: player.id,
+            name: player.name,
+            wizardClass: player.wizardClass
+          }));
+        this.ui.showRoomWaiting(onlineNetwork.roomId, true, players);
+      }
+      this.ui.setAccountStatus('The covenant host disconnected. You are now leading the ascent.');
+    });
+    onlineNetwork.on('host_migrated', (data = {}) => {
+      if (data.hostPeerId && data.hostPeerId !== onlineNetwork.peerId) {
+        onlineNetwork.connectVoicePeer(data.hostPeerId);
+      }
+    });
+
+    onlineNetwork.on('objective_update', (data) => {
+      if (data?.floor) this.questManager.setServerObjective(data);
+      if (data?.complete) this.ui.showStoryMessage(`Objective complete: ${data.label}`);
+    });
+
+    onlineNetwork.on('action_rejected', (data) => {
+      if (data?.reason === 'objective_incomplete' && data.objective) {
+        this.questManager.setServerObjective(data.objective);
+        this.ui.showStoryMessage(`Not ready: ${data.objective.label}.`);
+      } else if (data?.reason === 'cooldown') {
+        if (data.spellType && Number.isFinite(Number(data.retryIn))) {
+          this.cooldowns.trigger(data.spellType, Number(data.retryIn), 0);
+        }
+        this.ui.showStoryMessage('That spell is still cooling down.');
+      } else if (data?.action === 'leyline_charge' || data?.action === 'leyline_align') {
+        if (this.puzzleArena && data.puzzle) this.puzzleArena.syncServerState(data.puzzle);
+        const messages = {
+          out_of_range: 'Move closer to the leyline pedestal.',
+          matching_spell_required: 'Use the matching elemental spell on that pedestal.',
+          invalid_projectile: 'That spell did not strike the pedestal.',
+          not_charged: 'Charge the pedestal before rotating its mirror.',
+          player_unavailable: 'You cannot interact while disconnected or defeated.'
+        };
+        this.ui.showStoryMessage(messages[data.reason] || 'The leyline rejects that action.');
+      } else if (data?.action === 'upgrade_talent') {
+        const messages = {
+          no_talent_points: 'You have no Talent Points available.',
+          invalid_talent: 'That talent is not part of your class specialization.',
+          prerequisite_required: 'Unlock the prerequisite talent first.'
+        };
+        this.ui.showStoryMessage(messages[data.reason] || 'The talent cannot be unlocked yet.');
+      } else if (data?.action === 'crucible_interact' || data?.action === 'rotate_prism' || data?.action === 'keystone_activate') {
+        this.ui.showStoryMessage(data.reason === 'out_of_range' ? 'Move closer to interact with the puzzle.' : 'The puzzle rejects that action.');
+      }
+    });
+
+    onlineNetwork.on('input_rejected', (data) => {
+      if (!this.localPlayer || !data?.position) return;
+      this.localPlayer.position.set(data.position.x, data.position.y || 0, data.position.z);
+      this.localPlayer.targetPos.copy(this.localPlayer.position);
+    });
+
+    onlineNetwork.on('player_effect', (data) => {
+      if (!data || !this.ui.shouldShowDmgNumbers()) return;
+      const player = this.players.get(data.playerId);
+      if (!player) return;
+      const color = data.effect === 'heal' || data.effect === 'regeneration' ? '#63e6a2' : '#ff6b6b';
+      const prefix = data.effect === 'heal' || data.effect === 'regeneration' ? '+' : '-';
+      if (Number(data.amount) > 0) this.particles.spawnFloatingText(player.position, `${prefix}${Math.round(data.amount)}`, color);
+    });
+
+    onlineNetwork.on('profile_applied', (data) => {
+      if (!this.localPlayer || !data) return;
+      this.localPlayer.maxHealth = data.maxHealth || this.localPlayer.maxHealth;
+      this.localPlayer.maxMana = data.maxMana || this.localPlayer.maxMana;
+      if (data.talents) this.localPlayer.talents = data.talents;
+      if (Number.isFinite(Number(data.talentPoints))) this.localPlayer.talentPoints = data.talentPoints;
+      this.ui.updatePlayerHUD(this.localPlayer);
+    });
+
     onlineNetwork.on('game_started', (data) => {
       console.log('[Client] Spire ascent initiated! Floor:', data.floor, 'Players:', data.players);
+      this.clearEncounterEntities();
+      for (const entity of this.players.values()) entity.destroy?.();
+      this.players.clear();
+      this.localPlayer = null;
       this.isGameActive = true;
       this.currentFloor = data.floor || 1;
       this.tower.buildFloor(this.currentFloor);
+      this.chunkLoader.preloadFloor(this.currentFloor).catch(error => console.warn('[Streaming] Current floor asset note:', error));
+      this.chunkLoader.preloadFloor(this.currentFloor + 1, {
+        onComplete: result => console.log(`[Streaming] Floor ${result.floor} ready (${result.loaded}/${result.total} assets).`)
+      }).catch(error => console.warn('[Streaming] Next floor asset note:', error));
       this.ambientParticles.setFloor(this.currentFloor);
-      this.questManager.setAct(this.currentFloor);
+      this.questManager.setFloor(this.currentFloor);
+      if (data.objective) this.questManager.setServerObjective(data.objective);
+      if (this.puzzleArena) {
+        this.puzzleArena.destroy();
+        this.puzzleArena = null;
+      }
+      if (this.currentFloor === 10) {
+        this.puzzleArena = new PuzzleBossArena(this.engineScene.scene, this.particles, this.engineScene);
+        this.puzzleArena.onBeamAligned = (aligned, total) => {
+          this.ui.showStoryMessage(`Leyline Aligned (${aligned}/${total})! Astraea's shield destabilizes!`);
+          if (this.boss && this.boss.setAlignedBeams) this.boss.setAlignedBeams(aligned);
+        };
+      }
+      this.applyPuzzleSnapshot(data.puzzles);
 
       const playersList = data.players || [];
       let localPData = playersList.find(p =>
@@ -415,6 +618,59 @@ class GameApp {
       // Show initial tutorial & achievements
       this.tutorial.tryShowTip('movement');
       achievementSystem.unlock('first_step');
+      // Microphone access is intentionally requested only after entering a
+      // session, keeping the title screen permission-free.
+      this.voiceChat.init().then(ok => {
+        if (ok) this.ui.updateVoiceStatus(this.voiceChat.isHardwareMuted, this.voiceChat.voiceMode, this.voiceChat.isLocalSpeaking);
+      }).catch(() => {});
+      onlineNetwork.syncProfile({
+        level: this.progression.level,
+        xp: this.progression.xp,
+        attributes: this.inventory.baseAttributes,
+        talents: this.localPlayer?.talents,
+        talentPoints: this.localPlayer?.talentPoints
+      });
+      accountClient.me().then(async (session) => {
+        if (!session?.user) return;
+        try {
+          const save = await accountClient.getSave();
+          if (save?.payload) {
+            this.saveRevision = save.revision || 0;
+            this.progression.level = Math.max(1, Math.min(15, Number(save.payload.level) || 1));
+            this.progression.xp = Math.max(0, Number(save.payload.xp) || 0);
+            if (save.payload.attributes && typeof save.payload.attributes === 'object') {
+              for (const key of Object.keys(this.inventory.baseAttributes)) {
+                const value = Number(save.payload.attributes[key]);
+                if (Number.isFinite(value)) this.inventory.baseAttributes[key] = Math.max(0, Math.min(999, value));
+              }
+            }
+            if (save.payload.equipment && typeof save.payload.equipment === 'object') {
+              for (const key of Object.keys(this.inventory.equipment)) {
+                if (save.payload.equipment[key]) this.inventory.equipment[key] = save.payload.equipment[key];
+              }
+            }
+            if (Array.isArray(save.payload.bag)) this.inventory.bag = save.payload.bag.slice(0, 24).concat(new Array(Math.max(0, 24 - save.payload.bag.length)).fill(null));
+            if (this.localPlayer && save.payload.talents && typeof save.payload.talents === 'object') {
+              this.localPlayer.talents = Object.fromEntries(Object.entries(save.payload.talents).slice(0, 24).map(([key, value]) => [String(key).slice(0, 48), Boolean(value)]));
+              this.localPlayer.talentPoints = Math.max(0, Math.min(32, Number(save.payload.talentPoints) || 0));
+            }
+            if (save.payload.settings && typeof save.payload.settings === 'object') {
+              this.ui.settings = { ...this.ui.settings, ...save.payload.settings };
+              this.ui.saveSettings();
+              this.ui.applySettings();
+            }
+            this.ui.updateXPBar(this.progression.xp, this.progression.getXPToNextLevel(), this.progression.level);
+            this.ui.setAccountStatus(`Campaign loaded from Floor ${save.payload.floor || 1}.`);
+            onlineNetwork.syncProfile({
+              level: this.progression.level,
+              xp: this.progression.xp,
+              attributes: this.inventory.baseAttributes,
+              talents: this.localPlayer?.talents,
+              talentPoints: this.localPlayer?.talentPoints
+            });
+          }
+        } catch (error) { this.ui.setAccountStatus(`Campaign load pending: ${error.message}`, true); }
+      });
 
       // Grand Scribe Alistair voiced introduction
       setTimeout(() => {
@@ -424,11 +680,18 @@ class GameApp {
 
     onlineNetwork.on('state_snapshot', (data) => {
       if (!this.isGameActive) return;
+      // initFloor broadcasts the new snapshot before the matching floor event.
+      // Wait for that event to tear down the old scene instead of treating the
+      // previous floor's actors as defeated loot.
+      if (data?.floor && data.floor !== this.currentFloor) return;
+      if (data.objective) this.questManager.setServerObjective(data.objective);
+      this.applyPuzzleSnapshot(data.puzzles);
 
       data.players.forEach(pData => {
         const isLocal = (pData.id === onlineNetwork.localPlayerId || (this.localPlayer && this.localPlayer.id === pData.id));
         const existing = this.players.get(pData.id);
         if (existing) {
+          existing.peerId = pData.peerId || existing.peerId || null;
           if (isLocal && existing.health > pData.health) {
             const dmgTaken = existing.health - pData.health;
             this.engineScene.addScreenShake(Math.min(0.45, 0.15 + (dmgTaken / 80) * 0.25), 0.3);
@@ -437,6 +700,15 @@ class GameApp {
           if (!existing.isLocal && !isLocal) {
             existing.targetPos.set(pData.x, pData.y || 0, pData.z);
             existing.rotationY = pData.rotY || 0;
+          } else if (isLocal && pData.lastInputSeq !== undefined) {
+            // Reconcile only material divergence; normal latency is hidden by
+            // prediction while the server remains authoritative.
+            const error = Math.hypot(existing.position.x - pData.x, existing.position.y - (pData.y || 0), existing.position.z - pData.z);
+            if (error > 2.5) {
+              existing.position.set(pData.x, pData.y || 0, pData.z);
+              existing.targetPos.copy(existing.position);
+            }
+            existing.lastServerInputSeq = pData.lastInputSeq;
           }
           existing.health = pData.health;
           existing.mana = pData.mana;
@@ -444,6 +716,7 @@ class GameApp {
           existing.talents = pData.talents;
           existing.isAlive = pData.isAlive;
           existing.score = pData.score;
+          if (!existing.isLocal) existing.mesh.visible = pData.connected !== false && pData.isAlive !== false;
           if (existing.syncHealth) {
             existing.syncHealth(pData.health, pData.maxHealth);
           }
@@ -461,6 +734,7 @@ class GameApp {
         } else {
           const newPlayer = new PlayerEntity(this.engineScene.scene, pData, isLocal);
           this.players.set(pData.id, newPlayer);
+          if (!isLocal && (pData.connected === false || pData.isAlive === false)) newPlayer.mesh.visible = false;
           if (isLocal) {
             this.localPlayer = newPlayer;
             newPlayer.mesh.visible = false;
@@ -594,6 +868,15 @@ class GameApp {
     onlineNetwork.on('spell_cast', (data) => {
       // Avoid duplicate effects if predicted locally
       if (data.casterId === onlineNetwork.localPlayerId || (this.localPlayer && data.casterId === this.localPlayer.id)) {
+        // The relay is authoritative for adjusted mana costs and cooldowns
+        // (equipment, talents and difficulty can change both). Reconcile the
+        // local prediction as soon as the accepted cast comes back.
+        if (this.localPlayer && Number.isFinite(Number(data.mana))) {
+          this.localPlayer.mana = Math.max(0, Math.min(this.localPlayer.maxMana, Number(data.mana)));
+        }
+        if (data.spellType && Number.isFinite(Number(data.cooldown))) {
+          this.cooldowns.trigger(data.spellType, Number(data.cooldown), 0);
+        }
         return;
       }
       const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
@@ -775,10 +1058,7 @@ class GameApp {
     onlineNetwork.on('floor_changed', (data) => {
       this.currentFloor = data.floor;
       if (this.groundSpells) this.groundSpells.clear();
-      if (this.boss) {
-        this.boss.destroy();
-        this.boss = null;
-      }
+      this.clearEncounterEntities();
       if (this.puzzleArena) {
         this.puzzleArena.destroy();
         this.puzzleArena = null;
@@ -786,15 +1066,29 @@ class GameApp {
       }
 
       this.tower.buildFloor(this.currentFloor);
+      this.chunkLoader.preloadFloor(this.currentFloor).catch(error => console.warn('[Streaming] Current floor asset note:', error));
+      this.chunkLoader.preloadFloor(this.currentFloor + 1, {
+        onComplete: result => console.log(`[Streaming] Floor ${result.floor} ready (${result.loaded}/${result.total} assets).`)
+      }).catch(error => console.warn('[Streaming] Next floor asset note:', error));
       this.ambientParticles.setFloor(this.currentFloor);
       this.engineScene.setFloorLighting(this.currentFloor);
-      this.questManager.setAct(this.currentFloor);
+      this.questManager.setFloor(this.currentFloor);
+      if (data.objective) this.questManager.setServerObjective(data.objective);
+      if (this.currentFloor === 10) {
+        this.puzzleArena = new PuzzleBossArena(this.engineScene.scene, this.particles, this.engineScene);
+        this.puzzleArena.onBeamAligned = (aligned, total) => {
+          this.ui.showStoryMessage(`âš¡ Leyline Aligned (${aligned}/${total})! Astraea's shield destabilizes!`);
+          if (this.boss && this.boss.setAlignedBeams) this.boss.setAlignedBeams(aligned);
+        };
+      }
+      this.applyPuzzleSnapshot(data.puzzles);
 
       // Floor cleared XP
       const lvlResult = this.progression.addXP(XP_SOURCES.FLOOR_CLEARED);
       this.ui.updateXPBar(this.progression.xp, this.progression.getXPToNextLevel(), this.progression.level);
       if (lvlResult.leveledUp) this.ui.showLevelUp(lvlResult.newLevel);
       this.ui.addKillFeedEntry(`Floor ${data.floor - 1} cleared! Ascending to Floor ${data.floor}...`);
+      this.saveCampaignCheckpoint();
 
       if (this.currentFloor === 2) {
         achievementSystem.unlock('crucible_breaker');
@@ -806,13 +1100,9 @@ class GameApp {
       } else if (this.currentFloor === 10) {
         soundEngine.startMusic('boss');
         this.ui.showStoryMessage('⚔️ CLIMACTIC BOSS ENCOUNTER: ASTRAEA, THE DEMON-ANGEL SOVEREIGN! Align the 3 Elemental Leylines to shatter her Prismatic Shield!');
-        this.puzzleArena = new PuzzleBossArena(this.engineScene.scene, this.particles, this.engineScene);
-        this.puzzleArena.onBeamAligned = (aligned, total) => {
-          this.ui.showStoryMessage(`⚡ Leyline Aligned (${aligned}/${total})! Astraea's shield destabilizes!`);
-          if (this.boss && this.boss.setAlignedBeams) {
-            this.boss.setAlignedBeams(aligned);
-          }
-        };
+      } else if (this.currentFloor === 9) {
+        soundEngine.startMusic('boss');
+        this.ui.showStoryMessage('HERO ENCOUNTER: XYRIS, EYE OF THE ABYSS! Survive the void catwalks and break his gaze.');
       } else if (this.currentFloor === 15) {
         soundEngine.startMusic('boss');
         this.ui.showStoryMessage('⚔️ FINAL CONFRONTATION: ARCHON VALERIUS ASCENDANT! Disrupt 4 Temporal Keystones!');
@@ -820,6 +1110,40 @@ class GameApp {
         soundEngine.startMusic('boss');
         setTimeout(() => voiceEngine.speak('valerius_encounter'), 800);
       }
+    });
+
+    onlineNetwork.on('floor_retry', (data) => {
+      this.currentFloor = data.floor || this.currentFloor;
+      if (this.groundSpells) this.groundSpells.clear();
+      this.clearEncounterEntities();
+      if (this.puzzleArena) {
+        this.puzzleArena.destroy();
+        this.puzzleArena = null;
+        this.ui.hideMeltdownBanner();
+      }
+      this.tower.buildFloor(this.currentFloor);
+      this.ambientParticles.setFloor(this.currentFloor);
+      this.engineScene.setFloorLighting(this.currentFloor);
+      this.questManager.setFloor(this.currentFloor);
+      if (data.objective) this.questManager.setServerObjective(data.objective);
+      if (this.currentFloor === 10) {
+        this.puzzleArena = new PuzzleBossArena(this.engineScene.scene, this.particles, this.engineScene);
+        this.puzzleArena.onBeamAligned = (aligned, total) => {
+          this.ui.showStoryMessage(`Leyline Aligned (${aligned}/${total})! Astraea's shield destabilizes!`);
+          if (this.boss && this.boss.setAlignedBeams) this.boss.setAlignedBeams(aligned);
+        };
+      }
+      this.applyPuzzleSnapshot(data.puzzles);
+      this.ui.hideDeathScreen?.();
+      this.ui.hideWipeScreen?.();
+      this.ui.showStoryMessage(`Floor ${this.currentFloor} reset. The covenant has another chance.`);
+    });
+
+    onlineNetwork.on('boss_defeated_advancement', (data) => {
+      if (this.tower.exitPortal) this.tower.exitPortal.isUnlocked = true;
+      this.ui.showStoryMessage(data.message || 'The ascent gate is unlocked. Step through it to continue.');
+      this.ui.addKillFeedEntry(`Gate unlocked: Floor ${data.nextFloor || this.currentFloor + 1}`);
+      this.saveCampaignCheckpoint();
     });
 
     onlineNetwork.on('boss_phase_change', (data) => {
@@ -949,25 +1273,28 @@ class GameApp {
     });
 
     onlineNetwork.on('encounter_wipe', (data) => {
+      this.clearEncounterEntities();
       this.engineScene.addScreenShake(0.8, 1.5);
       this.ui.showStoryMessage(data.message || 'Encounter Wipe! Floor resetting.');
     });
 
     onlineNetwork.on('leyline_aligned', (data) => {
       if (this.puzzleArena) {
-        const ped = this.puzzleArena.pedestals[data.pedestalKey];
-        if (ped && !ped.isAligned) {
-          ped.isCharged = true;
-          ped.isAligned = true;
-          ped.angle = ped.targetAngle;
-          if (ped.mirrorGroup) ped.mirrorGroup.rotation.y = ped.targetAngle;
-          this.puzzleArena.createBeam(ped, data.pedestalKey);
-          this.puzzleArena.alignedCount = data.alignedCount;
-        }
+        this.puzzleArena.syncServerState(data.puzzle || {
+          pedestals: { [data.pedestalKey]: { isCharged: true, isAligned: true } },
+          alignedCount: data.alignedCount
+        });
       }
       if (this.boss && this.boss.setAlignedBeams) {
         this.boss.setAlignedBeams(data.alignedCount);
       }
+    });
+
+    onlineNetwork.on('leyline_charged', (data) => {
+      if (!this.puzzleArena || !data?.pedestalKey) return;
+      this.puzzleArena.syncServerState(data.puzzle || {
+        pedestals: { [data.pedestalKey]: { isCharged: true, isAligned: Boolean(data.isAligned) } }
+      });
     });
 
     onlineNetwork.on('story_message', (data) => {
@@ -1018,7 +1345,7 @@ class GameApp {
       // Roll Archon's Mythic Spoils
       const bossDrop = rollLoot('boss');
       if (bossDrop) {
-        this.inventorySystem.addItem(bossDrop);
+        this.inventory.addItem(bossDrop);
         const lootNotice = document.getElementById('victory-loot-drop');
         if (lootNotice) {
           lootNotice.innerHTML = `🌟 <strong>Mythic Vault Relic:</strong> ${bossDrop.icon} ${bossDrop.name} (${bossDrop.rarity.toUpperCase()})`;
@@ -1030,6 +1357,7 @@ class GameApp {
         this.localPlayer.talentPoints = (this.localPlayer.talentPoints || 0) + 3;
         this.ui.updatePlayerHUD(this.localPlayer);
       }
+      this.saveCampaignCheckpoint();
 
       // Allow Valerius's final defeat speech to finish cleanly before popping the victory fanfare modal
       setTimeout(() => {
@@ -1045,7 +1373,7 @@ class GameApp {
       this.tower.buildFloor(1);
       this.ambientParticles.setFloor(1);
       this.engineScene.setFloorLighting(1);
-      this.questManager.setAct(1);
+      this.questManager.setFloor(1);
       soundEngine.startMusic('archives');
       soundEngine.playLevelUp();
       this.ui.showStoryMessage(`[🌀 ASCENSION TIER ${data.tier}] The temporal loop resets! All enemies empowered (+${Math.round((data.healthMultiplier - 1) * 100)}% HP)!`);
@@ -1073,14 +1401,7 @@ class GameApp {
       if (e.code === 'KeyQ') {
         this.tryCastSpell('skill1', spells.skill1);
       } else if (e.code === 'KeyE') {
-        // Contextual interaction: interact if near object/NPC/portal, else cast Skill 2
-        const interactable = this.physics.getNearbyInteractable(this.localPlayer.position, this.tower.interactables);
-        const nearPortal = this.tower.exitPortal && Math.hypot(this.localPlayer.position.x - this.tower.exitPortal.x, this.localPlayer.position.z - this.tower.exitPortal.z) <= this.tower.exitPortal.radius;
-        if (interactable || nearPortal) {
-          this.tryInteract();
-        } else {
-          this.tryCastSpell('skill2', spells.skill2);
-        }
+        this.tryCastSpell('skill2', spells.skill2);
       } else if (e.code === 'KeyR') {
         this.tryCastSpell('ult', spells.ult);
       } else if (e.code === 'Space') {
@@ -1367,7 +1688,7 @@ class GameApp {
     } else if (interactable.type === 'keystone') {
       onlineNetwork.activateKeystone(interactable.id);
     } else if (interactable.type === 'crucible') {
-      onlineNetwork.interactCrucible(interactable.index, 'fire');
+      onlineNetwork.interactCrucible(interactable.index, interactable.element || 'fire');
       if (storyLoreManager.questState.accepted && !storyLoreManager.questState.completed) {
         const progress = storyLoreManager.addCrucibleCore();
         if (progress) {
@@ -1381,8 +1702,15 @@ class GameApp {
   /**
    * Reconstitutes the player at the safe Awakening Vault with full HP/MP
    */
-  resurrectLocalPlayer(x = 0, y = 0, z = 31) {
+  resurrectLocalPlayer(x = 0, y = 0, z = null) {
     if (!this.localPlayer) return;
+    if (z === null) {
+      z = this.currentFloor === 1 ? 31
+        : this.currentFloor === 2 ? 40
+          : (this.currentFloor === 5 || this.currentFloor === 6) ? 18
+            : (this.currentFloor === 10 || this.currentFloor === 15) ? 24
+              : 14;
+    }
     this.isDead = false;
     this.respawnTimer = 0;
     this.ui.hideDeathScreen();
@@ -1432,6 +1760,7 @@ class GameApp {
 
     const deltaTime = Math.min(0.1, (currentTime - this.lastTime) / 1000);
     this.lastTime = currentTime;
+    this.engineScene.updatePerformance(deltaTime);
 
     // FPS calculation & Dynamic Adaptive Performance
     this.fpsFrameCount++;
@@ -1498,7 +1827,7 @@ class GameApp {
         }
 
         // Apply settings sensitivity
-        this.physics.sensitivity = this.ui.getSensitivity();
+        this.physics.mouseSensitivity = 0.0022 * this.ui.getSensitivity();
 
         // First-Person WASD Movement
         const moveVec = this.physics.getMovementVector();
@@ -1541,6 +1870,15 @@ class GameApp {
 
         this.localPlayer.rotationY = this.physics.yaw;
         this.physics.update(deltaTime);
+        // Standard gamepad mapping: A/basic, B/Q, X/E, Y/R, LB/dash, RB/interact.
+        const padPress = index => this.physics.consumeGamepadPress?.(index);
+        const pad = this.physics.gamepad;
+        const spells = CLASS_SPELLS[this.localPlayer.wizardClass] || CLASS_SPELLS.pyromancer;
+        if (padPress(1)) this.tryCastSpell('skill1', spells.skill1);
+        if (padPress(2)) this.tryCastSpell('skill2', spells.skill2);
+        if (padPress(3)) this.tryCastSpell('ult', spells.ult);
+        if (padPress(4)) this.tryDash();
+        if (padPress(5)) this.tryInteract();
         this.engineScene.updateCameraPosition(this.localPlayer.position, deltaTime);
 
         if (this.fpViewmodel) {
@@ -1549,8 +1887,7 @@ class GameApp {
         }
 
         // First-Person LMB Attack (Shoots basic elemental projectile)
-        if (this.physics.isLMBDown && this.cooldowns.isReady('basic')) {
-          const spells = CLASS_SPELLS[this.localPlayer.wizardClass] || CLASS_SPELLS.pyromancer;
+        if ((this.physics.isLMBDown || Boolean(pad?.buttons?.[0]?.pressed)) && this.cooldowns.isReady('basic')) {
           this.cooldowns.trigger('basic', spells.basic.cd, derived.cdr);
 
           const dir = this.physics.updateCrosshairAim();
@@ -1661,7 +1998,7 @@ class GameApp {
 
         if (this.respawnTimer <= 0) {
           // Reconstitute local wizard at the Awakening Slab
-          this.resurrectLocalPlayer(0, 0, 31);
+          this.resurrectLocalPlayer();
         }
       }
     }
@@ -1701,7 +2038,7 @@ class GameApp {
           }
         }
 
-        if (this.currentFloor === 2) {
+        if (this.currentFloor === 2 || this.currentFloor === 5) {
           for (const item of this.tower.interactables) {
             if (item.type === 'crucible') {
               const cDist = projectile.mesh.position.distanceTo(new THREE.Vector3(item.x, 1, item.z));

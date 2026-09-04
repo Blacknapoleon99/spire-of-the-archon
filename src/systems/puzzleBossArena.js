@@ -228,7 +228,7 @@ export class PuzzleBossArena {
     this.createBeam(ped, key);
   }
 
-  createBeam(ped, key = null) {
+  createBeam(ped, key = null, { checkAlignment = true } = {}) {
     if (ped.beamMesh) return;
 
     const beamLen = ped.pos.distanceTo(this.coreMatrixPos);
@@ -249,8 +249,63 @@ export class PuzzleBossArena {
     ped.mirrorGroup.add(beam);
     ped.beamMesh = beam;
 
-    // Check if initial angle is already aligned
-    this.checkAlignment(ped, key);
+    // Check if initial angle is already aligned. Server reconciliation skips
+    // this client-side action so a stale prediction cannot emit a duplicate
+    // alignment request.
+    if (checkAlignment) this.checkAlignment(ped, key);
+  }
+
+  /**
+   * Apply the authoritative Floor 10 pedestal state.  Projectile and mirror
+   * interactions can be predicted locally for responsiveness, but the relay
+   * is the source of truth after reconnects or rejected actions.
+   */
+  syncServerState(state = {}) {
+    const incoming = state?.pedestals && typeof state.pedestals === 'object'
+      ? state.pedestals
+      : {};
+    for (const [key, ped] of Object.entries(incoming)) {
+      const local = this.pedestals[key];
+      if (!local || !ped) continue;
+      const charged = Boolean(ped.isCharged);
+      const aligned = Boolean(ped.isAligned);
+      const wasAligned = local.isAligned;
+      if (!charged && local.isCharged) {
+        if (local.beamMesh) {
+          local.mirrorGroup.remove(local.beamMesh);
+          local.beamMesh.geometry?.dispose?.();
+          local.beamMesh.material?.dispose?.();
+          local.beamMesh = null;
+        }
+        local.crystalMesh.material.emissiveIntensity = 1.5;
+        local.angle = 0;
+        local.mirrorGroup.rotation.y = 0;
+      }
+      local.isCharged = charged;
+      local.isAligned = aligned;
+      if (charged && !aligned && wasAligned) {
+        local.angle = 0;
+        local.mirrorGroup.rotation.y = 0;
+      }
+      if (charged) {
+        local.crystalMesh.material.emissiveIntensity = 5.0;
+        if (!local.beamMesh) this.createBeam(local, key, { checkAlignment: false });
+      }
+      if (aligned) {
+        local.angle = local.targetAngle;
+        local.mirrorGroup.rotation.y = local.targetAngle;
+      }
+    }
+    if (Number.isFinite(Number(state.alignedCount))) {
+      this.alignedCount = Math.max(0, Math.min(this.totalBeams, Number(state.alignedCount)));
+    }
+    if (state.meltdownActive !== undefined) {
+      this.isMeltdownActive = Boolean(state.meltdownActive);
+      if (this.isMeltdownActive && Number.isFinite(Number(state.meltdownTimer))) {
+        this.meltdownTimer = Math.max(0, Number(state.meltdownTimer));
+      }
+    }
+    if (state.unlocked !== undefined) this.isContained = Boolean(state.unlocked);
   }
 
   /**
@@ -354,6 +409,7 @@ export class PuzzleBossArena {
   }
 
   containMeltdown() {
+    if (this.isContained) return;
     this.isMeltdownActive = false;
     this.isContained = true;
 
@@ -421,5 +477,11 @@ export class PuzzleBossArena {
 
   destroy() {
     this.scene.remove(this.group);
+    this.group.traverse((object) => {
+      object.geometry?.dispose?.();
+      const material = object.material;
+      if (Array.isArray(material)) material.forEach(item => item?.dispose?.());
+      else material?.dispose?.();
+    });
   }
 }

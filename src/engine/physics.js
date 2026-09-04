@@ -20,6 +20,9 @@ export class PhysicsController {
     this.keys = {};
     this.isLMBDown = false;
     this.isRMBDown = false;
+    this.gamepad = null;
+    this.gamepadButtons = [];
+    this.previousGamepadButtons = [];
 
     // Raycaster for First-Person crosshair center
     this.raycaster = new THREE.Raycaster();
@@ -117,6 +120,7 @@ export class PhysicsController {
    * Updates kinematics, strafe roll smoothing, and orientation
    */
   update(deltaTime = 0.016) {
+    this.pollGamepad(deltaTime);
     // Strafe roll calculation (subtle camera lean into turns)
     let strafeInput = 0;
     if (this.keys['KeyA'] || this.keys['ArrowLeft']) strafeInput += 1;
@@ -143,10 +147,38 @@ export class PhysicsController {
     if (this.keys['KeyD'] || this.keys['ArrowRight']) move.add(right);
     if (this.keys['KeyA'] || this.keys['ArrowLeft']) move.sub(right);
 
+    if (this.gamepad) {
+      const deadzone = 0.16;
+      const axis = value => Math.abs(value) < deadzone ? 0 : value;
+      move.addScaledVector(forward, -axis(this.gamepad.axes[1] || 0));
+      move.addScaledVector(right, axis(this.gamepad.axes[0] || 0));
+    }
+
     if (move.lengthSq() > 0) {
       move.normalize();
     }
     return move;
+  }
+
+  pollGamepad(deltaTime = 0.016) {
+    const pad = typeof navigator !== 'undefined' ? navigator.getGamepads?.().find(Boolean) : null;
+    this.gamepad = pad;
+    if (!pad) return;
+    this.previousGamepadButtons = this.gamepadButtons;
+    this.gamepadButtons = pad.buttons.map(button => Boolean(button?.pressed));
+    const axis = value => Math.abs(value) < 0.16 ? 0 : value;
+    const lookX = axis(pad.axes[2] || 0);
+    const lookY = axis(pad.axes[3] || 0);
+    if (lookX || lookY) {
+      this.yaw -= lookX * this.mouseSensitivity * 900 * deltaTime;
+      this.pitch -= lookY * this.mouseSensitivity * 900 * deltaTime;
+      const maxPitch = Math.PI / 2 - 0.08;
+      this.pitch = Math.max(-maxPitch, Math.min(maxPitch, this.pitch));
+    }
+  }
+
+  consumeGamepadPress(index) {
+    return Boolean(this.gamepadButtons[index] && !this.previousGamepadButtons[index]);
   }
 
   /**

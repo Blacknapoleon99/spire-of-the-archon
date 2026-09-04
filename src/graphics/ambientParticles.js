@@ -20,7 +20,7 @@ export class AmbientParticles {
     else if (floorNumber === 7) this.initFloorGenericDust(0x00ccff, 0x0088aa, 90); // Golem Lab - cyan sparks
     else if (floorNumber === 8) this.initFloorGenericDust(0x4488ff, 0x2244cc, 100); // Crystal Caverns - ice motes
     else if (floorNumber === 9) this.initFloorGenericDust(0x7722ee, 0x330088, 60);  // Void Catwalks - void wisps
-    else if (floorNumber === 10) this.initFloorEmbers(0x9900ff, 0x6600cc, 180);    // Boss Xyris - void corruption
+    else if (floorNumber === 10) this.initFloorEmbers(0x9900ff, 0x6600cc, 180);    // Boss Astraea - void corruption
     else if (floorNumber === 11) this.initFloorGenericDust(0xeeddff, 0xaabbff, 120); // Star Gallery - star motes
     else if (floorNumber === 12) this.initFloorGenericDust(0xffcc44, 0xdd8800, 60);  // Chronometer - golden sparks
     else if (floorNumber === 13) this.initFloorGenericDust(0x8899ff, 0x4466dd, 70);  // Sky Promenade - sky motes
