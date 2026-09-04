@@ -31,6 +31,7 @@ import { voiceEngine } from './engine/voiceNarration.js';
 import { achievementSystem } from './systems/achievementSystem.js';
 import { storyLoreManager } from './systems/storyLore.js';
 import { assetLoader } from './graphics/assetLoader.js';
+import { ModelFactory } from './graphics/modelFactory.js';
 import { VoiceChatSystem } from './systems/voiceChatSystem.js';
 import { GroundSpellManager } from './graphics/groundSpells.js';
 import { animationPackManager } from './graphics/animationPack.js';
@@ -164,8 +165,6 @@ class GameApp {
     this.initCombatInputs();
     this.setupUIButtons();
 
-    this.setupUIButtons();
-
     // 12-Second Cinematic Loading Sequence with 100% Guaranteed Upfront Preloading
     const TOTAL_LOAD_TIME = 12000; // 12.0 seconds minimum cinematic display
     const loadStartTime = performance.now();
@@ -186,6 +185,14 @@ class GameApp {
     let hasWarmedShaders = false;
     let isPreloadFinished = false;
     let isLoadComplete = false;
+
+    // Safety fallback timeout ensuring loading screen unlocks even on slow networks
+    setTimeout(() => {
+      if (!isPreloadFinished) {
+        isPreloadFinished = true;
+        console.log('[Loading] Preload safety timeout reached; proceeding.');
+      }
+    }, 13500);
 
     // Initialize WebRTC STUN network in background
     onlineNetwork.init((peerId) => {
