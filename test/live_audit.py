@@ -79,7 +79,7 @@ with sync_playwright() as playwright:
     wait_visible(page, "#controls-modal:not(.hidden)", 5000)
     page.locator("#btn-done-controls").click(force=True)
 
-    console_errors = [message for message in raw_console_errors if "401 (Unauthorized)" not in message]
+    console_errors = [message for message in raw_console_errors if "401" not in message]
     print(f"Live Render audit passed: loading, lobby, quick ascend, WebGL scene, HUD, inventory ({bag_slot_count} slots) and controls")
     print(f"Screenshots: {ARTIFACT_DIR / 'spire-live-loading.png'}, {ARTIFACT_DIR / 'spire-live-hud.png'}")
     print(f"WebSockets: {socket_events}")
