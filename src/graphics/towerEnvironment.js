@@ -2462,8 +2462,10 @@ export class TowerEnvironment {
 
     this.animatedProps.forEach(prop => {
       if (prop.type === 'torch') {
-        const flicker = 0.6 + 0.6 * Math.sin(time * 12 + Math.random() * 2);
-        prop.light.intensity = flicker;
+        if (prop.light) {
+          const flicker = 0.6 + 0.6 * Math.sin(time * 12 + Math.random() * 2);
+          prop.light.intensity = flicker;
+        }
         if (prop.flame) {
           const s = 0.9 + 0.2 * Math.sin(time * 16);
           prop.flame.scale.set(s, 0.85 + 0.3 * Math.cos(time * 14), s);
@@ -2478,14 +2480,18 @@ export class TowerEnvironment {
           });
         }
       } else if (prop.type === 'floating_tome') {
-        prop.mesh.position.y = (prop.initialY || 2.0) + Math.sin(time * 2.5 * (prop.speed || 1.0)) * 0.15;
-        prop.mesh.rotation.y += deltaTime * 0.6 * (prop.speed || 1.0);
-        if (prop.mesh.userData?.runeRing) {
-          prop.mesh.userData.runeRing.rotation.z += deltaTime * 2.4;
+        if (prop.mesh) {
+          prop.mesh.position.y = (prop.initialY || 2.0) + Math.sin(time * 2.5 * (prop.speed || 1.0)) * 0.15;
+          prop.mesh.rotation.y += deltaTime * 0.6 * (prop.speed || 1.0);
+          if (prop.mesh.userData?.runeRing) {
+            prop.mesh.userData.runeRing.rotation.z += deltaTime * 2.4;
+          }
         }
       } else if (prop.type === 'mana_crystal') {
-        prop.group.position.y = (prop.initialY || 2.8) + Math.sin(time * 2.2 * (prop.speed || 1.0)) * 0.16;
-        prop.group.rotation.y += deltaTime * 0.75 * (prop.speed || 1.0);
+        if (prop.group) {
+          prop.group.position.y = (prop.initialY || 2.8) + Math.sin(time * 2.2 * (prop.speed || 1.0)) * 0.16;
+          prop.group.rotation.y += deltaTime * 0.75 * (prop.speed || 1.0);
+        }
         if (prop.ring) {
           prop.ring.rotation.z += deltaTime * 1.8;
           prop.ring.rotation.y += deltaTime * 0.9;
@@ -2507,47 +2513,51 @@ export class TowerEnvironment {
           });
         }
       } else if (prop.type === 'runic_circle') {
-        prop.mesh.rotation.z += deltaTime * 0.15;
+        if (prop.mesh) prop.mesh.rotation.z += deltaTime * 0.15;
       } else if (prop.type === 'orrery') {
-        prop.r1.rotation.y += deltaTime * 0.5;
-        prop.r1.rotation.x += deltaTime * 0.2;
-        prop.r2.rotation.y -= deltaTime * 0.4;
-        prop.r2.rotation.z += deltaTime * 0.3;
+        if (prop.r1) { prop.r1.rotation.y += deltaTime * 0.5; prop.r1.rotation.x += deltaTime * 0.2; }
+        if (prop.r2) { prop.r2.rotation.y -= deltaTime * 0.4; prop.r2.rotation.z += deltaTime * 0.3; }
         if (prop.r3) prop.r3.rotation.x += deltaTime * 0.35;
       } else if (prop.type === 'rift') {
-        prop.mesh.material.opacity = 0.6 + 0.4 * Math.sin(time * 3);
+        if (prop.mesh?.material) prop.mesh.material.opacity = 0.6 + 0.4 * Math.sin(time * 3);
         if (prop.light) prop.light.intensity = 2.0 + 1.2 * Math.sin(time * 4);
       } else if (prop.type === 'book_orb') {
-        prop.mesh.position.y = (prop.initialY || 1.88) + Math.sin(time * (prop.speed || 2.2)) * 0.08;
-        prop.mesh.rotation.y += deltaTime * 1.5;
+        if (prop.mesh) {
+          prop.mesh.position.y = (prop.initialY || 1.88) + Math.sin(time * (prop.speed || 2.2)) * 0.08;
+          prop.mesh.rotation.y += deltaTime * 1.5;
+        }
         if (prop.ring) {
-          prop.ring.position.y = prop.mesh.position.y;
+          prop.ring.position.y = prop.mesh ? prop.mesh.position.y : 0;
           prop.ring.rotation.z += deltaTime * 1.8;
         }
         if (prop.light) {
           prop.light.intensity = 1.8 + 0.5 * Math.sin(time * 3);
         }
       } else if (prop.type === 'vault_gate_lock') {
-        if (prop.lock && prop.lock.visible) {
+        if (prop.lock?.visible) {
           prop.lock.rotation.z += deltaTime * 0.8;
         }
-        if (prop.core && prop.core.visible) {
+        if (prop.core?.visible) {
           prop.core.rotation.y += deltaTime * 1.2;
           prop.core.rotation.x += deltaTime * 0.6;
         }
       } else if (prop.type === 'god_rays') {
-        prop.mesh.material.opacity = prop.baseOpacity + 0.04 * Math.sin(time * 1.8);
+        if (prop.mesh?.material) prop.mesh.material.opacity = prop.baseOpacity + 0.04 * Math.sin(time * 1.8);
       } else if (prop.type === 'ground_mist') {
-        prop.mesh.material.opacity = prop.baseOpacity + 0.06 * Math.sin(time * 1.4);
-        prop.mesh.rotation.z += deltaTime * 0.02;
+        if (prop.mesh?.material) {
+          prop.mesh.material.opacity = prop.baseOpacity + 0.06 * Math.sin(time * 1.4);
+          prop.mesh.rotation.z += deltaTime * 0.02;
+        }
       } else if (prop.type === 'ghost_npc') {
-        prop.mesh.position.y = (prop.initialY || 0) + Math.sin(time * 2.2) * 0.12;
-        if (prop.mesh.userData.book) {
-          prop.mesh.userData.book.rotation.y += deltaTime * 0.8;
-          prop.mesh.userData.book.position.y = 1.5 + Math.sin(time * 3.0) * 0.08;
+        if (prop.mesh) {
+          prop.mesh.position.y = (prop.initialY || 0) + Math.sin(time * 2.2) * 0.12;
+          if (prop.mesh.userData?.book) {
+            prop.mesh.userData.book.rotation.y += deltaTime * 0.8;
+            prop.mesh.userData.book.position.y = 1.5 + Math.sin(time * 3.0) * 0.08;
+          }
         }
       } else if (prop.type === 'alchemist_npc') {
-        if (prop.mesh.userData.forgeLight) {
+        if (prop.mesh?.userData?.forgeLight) {
           prop.mesh.userData.forgeLight.intensity = 1.4 + 0.6 * Math.sin(time * 4);
         }
       } else if (prop.type === 'convict_npc') {
@@ -2555,14 +2565,18 @@ export class TowerEnvironment {
           prop.mesh.userData.lanternLight.intensity = 1.8 + 0.6 * Math.sin(time * 6 + Math.cos(time * 11) * 0.5);
         }
       } else if (prop.type === 'monolith_anim') {
-        prop.ring.rotation.z += deltaTime * 0.6;
-        prop.crystal.rotation.y += deltaTime * 0.9;
-        prop.crystal.position.y = 4.1 + Math.sin(time * 2.5) * 0.1;
+        if (prop.ring) prop.ring.rotation.z += deltaTime * 0.6;
+        if (prop.crystal) {
+          prop.crystal.rotation.y += deltaTime * 0.9;
+          prop.crystal.position.y = 4.1 + Math.sin(time * 2.5) * 0.1;
+        }
       } else if (prop.type === 'gear') {
         // Clockwork gear animation (Floors 12 & 15)
-        if (prop.axis === 'x') prop.mesh.rotation.x += deltaTime * (prop.speed || 0.5);
-        else if (prop.axis === 'z') prop.mesh.rotation.z += deltaTime * (prop.speed || 0.5);
-        else prop.mesh.rotation.y += deltaTime * (prop.speed || 0.5);
+        if (prop.mesh) {
+          if (prop.axis === 'x') prop.mesh.rotation.x += deltaTime * (prop.speed || 0.5);
+          else if (prop.axis === 'z') prop.mesh.rotation.z += deltaTime * (prop.speed || 0.5);
+          else prop.mesh.rotation.y += deltaTime * (prop.speed || 0.5);
+        }
       }
     });
   }
