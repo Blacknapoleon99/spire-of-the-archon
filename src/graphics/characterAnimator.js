@@ -1,19 +1,13 @@
 import * as THREE from 'three';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { assetLoader } from './assetLoader.js';
+import { animationPackManager } from './animationPack.js';
 
 /**
  * CharacterAnimator
  * Wraps Three.js AnimationMixer to manage rigged GLB character animations.
- * Supports smooth crossfading between named NLA animation strips.
- * 
- * Usage:
- *   const anim = new CharacterAnimator(scene, '/models/boss_ignis.glb');
- *   await anim.init();
- *   scene.add(anim.group);
- *   anim.play('Idle');
- *   // In update loop:
- *   anim.update(deltaTime);
+ * Supports smooth crossfading between named NLA animation strips and
+ * text-to-animation natural language prompts via basis sample animation packs.
  */
 export class CharacterAnimator {
   constructor(scene, glbUrl, options = {}) {
@@ -48,10 +42,8 @@ export class CharacterAnimator {
             child.castShadow = true;
             child.receiveShadow = true;
           }
-          // Ensure PBR materials render correctly
           if (child.material) {
             child.material.needsUpdate = true;
-            // Enable emissive on emission-mapped materials
             if (child.material.emissive) {
               child.material.emissiveIntensity = child.material.emissiveIntensity || 1.0;
             }
@@ -65,23 +57,22 @@ export class CharacterAnimator {
       // Setup AnimationMixer
       this.mixer = new THREE.AnimationMixer(model);
 
-      // Register all animation clips
+      // Register all embedded animation clips
       if (gltf.animations && gltf.animations.length > 0) {
         gltf.animations.forEach((clip) => {
           const action = this.mixer.clipAction(clip);
           action.setLoop(THREE.LoopRepeat, Infinity);
           this.actions[clip.name] = action;
         });
-      } else {
-        console.warn(`[CharacterAnimator] No animations found in ${this.glbUrl}`);
       }
 
       this.loaded = true;
       this._readyCallbacks.forEach(cb => cb(this));
 
-      // Auto-play Idle if it exists
-      if (this.actions['Idle']) {
-        this.play('Idle', 0);
+      // Auto-play Idle if available
+      if (this.actions['Idle'] || this.actions['Idle_A'] || this.actions['Walk']) {
+        const defaultAnim = this.actions['Idle'] ? 'Idle' : (this.actions['Idle_A'] ? 'Idle_A' : 'Walk');
+        this.play(defaultAnim, 0);
       }
 
     } catch (err) {
@@ -96,14 +87,64 @@ export class CharacterAnimator {
 
   /**
    * Play a named animation with optional crossfade duration.
-   * @param {string} name - Animation clip name (e.g. 'Idle', 'Stomp_Attack')
-   * @param {number} fadeIn - Crossfade duration in seconds (default 0.3)
-   * @param {boolean} loop - Whether to loop (default true)
-   * @param {Function} onFinish - Optional callback when non-looping animation finishes
+   * Can resolve from embedded animations or basis sample animation packs.
    */
   play(name, fadeIn = 0.3, loop = true, onFinish = null) {
     if (!this.loaded || !this.mixer) return;
-    const action = this.actions[name];
+
+    let action = this.actions[name];
+    if (!action) {
+      // Check animation pack for matching clip
+      const externalClip = animationPackManager.getClip(name);
+      if (externalClip) {
+        action = this.mixer.clipAction(externalClip);
+        this.actions[name] = action;
+      }
+    }
+
+    if (!action) {
+      // Fallback check case-insensitively
+      const lower = name.toLowerCase();
+      for (const k of Object.keys(this.actions)) {
+        if (k.toLowerCase() === lower) {
+          action = this.actions[k];
+          break;
+        }
+      }
+    }
+
+    if (!action) {
+      // Fallback check substring match in existing actions (e.g. 'walk' in 'preset:quadruped:walk')
+      const lower = name.toLowerCase();
+      for (const k of Object.keys(this.actions)) {
+        if (k.toLowerCase().includes(lower)) {
+          action = this.actions[k];
+          break;
+        }
+      }
+    }
+
+    if (!action) {
+      // Try natural language prompt resolution from animation pack
+      const resolvedClip = animationPackManager.resolvePromptToClip(name);
+      if (resolvedClip) {
+        let act = this.actions[resolvedClip.name];
+        if (!act) {
+          act = this.mixer.clipAction(resolvedClip);
+          this.actions[resolvedClip.name] = act;
+        }
+        action = act;
+      }
+    }
+
+    if (!action && (name === 'Idle' || name === 'Walk')) {
+      // Fallback to any available action so entity is never statically frozen
+      const availableKeys = Object.keys(this.actions);
+      if (availableKeys.length > 0) {
+        action = this.actions[availableKeys[0]];
+      }
+    }
+
     if (!action) {
       console.warn(`[CharacterAnimator] Animation "${name}" not found. Available:`, Object.keys(this.actions));
       return;
@@ -111,7 +152,6 @@ export class CharacterAnimator {
 
     if (this.currentAction === action) return;
 
-    // Crossfade from current
     if (this.currentAction) {
       this.currentAction.fadeOut(fadeIn);
     }
@@ -123,7 +163,6 @@ export class CharacterAnimator {
     action.play();
     this.currentAction = action;
 
-    // Fire callback when done (for once-off animations)
     if (onFinish && !loop) {
       const listener = (e) => {
         if (e.action === action) {
@@ -132,6 +171,23 @@ export class CharacterAnimator {
         }
       };
       this.mixer.addEventListener('finished', listener);
+    }
+  }
+
+  /**
+   * Play an animation based on a natural language text prompt!
+   * Example: animator.playPrompt("cast huge fireball") or animator.playPrompt("spin attack")
+   */
+  playPrompt(promptText, fadeIn = 0.25, loop = true, onFinish = null) {
+    if (!promptText || !this.mixer) return;
+    const clip = animationPackManager.resolvePromptToClip(promptText);
+    if (clip) {
+      let action = this.actions[clip.name];
+      if (!action) {
+        action = this.mixer.clipAction(clip);
+        this.actions[clip.name] = action;
+      }
+      this.play(clip.name, fadeIn, loop, onFinish);
     }
   }
 
@@ -192,8 +248,28 @@ export class CharacterAnimator {
     this.group.position.set(x, y, z);
   }
 
+  setRotation(angle) {
+    this.group.rotation.y = angle;
+  }
+
+  setRotationY(angle) {
+    this.group.rotation.y = angle;
+  }
+
   lookAt(x, y, z) {
     this.group.lookAt(x, y, z);
+  }
+
+  playIdle(fadeIn = 0.3) {
+    this.play('Idle', fadeIn, true);
+  }
+
+  playWalk(fadeIn = 0.25) {
+    this.play('Walk', fadeIn, true);
+  }
+
+  playAttack(attackName = 'Attack', fadeIn = 0.2) {
+    this.playOnce(attackName, 'Idle', fadeIn);
   }
 
   dispose() {

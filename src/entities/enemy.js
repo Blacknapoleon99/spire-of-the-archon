@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ModelFactory } from '../graphics/modelFactory.js';
 import { createDissolveMaterial } from '../graphics/shaders/dissolveMaterial.js';
+import { CharacterAnimator } from '../graphics/characterAnimator.js';
 
 export class EnemyEntity {
   constructor(scene, data) {
@@ -16,27 +17,62 @@ export class EnemyEntity {
     this.position = new THREE.Vector3(data.x, data.y || 0, data.z);
     this.targetPos = this.position.clone();
 
-    // Create 3D Mesh
+    // Procedural Fallback Mesh & Rigged 3D GLB Configuration
     if (this.type === 'sentry') {
       this.mesh = ModelFactory.createSentinelMesh();
+      this.glbUrl = '/models/enemy_sentinel.glb';
+      this.glbScale = 1.1;
     } else if (this.type === 'golem') {
       this.mesh = ModelFactory.createGolemMesh();
+      this.glbUrl = '/models/enemy_golem.glb';
+      this.glbScale = 1.35;
     } else if (this.type === 'shade') {
       this.mesh = ModelFactory.createVoidShadeMesh();
+      this.glbUrl = '/models/enemy_knight.glb';
+      this.glbScale = 1.15;
     } else if (this.type === 'boss') {
       if (data.bossType === 'ignis' || data.id?.includes('ignis')) {
         this.mesh = ModelFactory.createIgnisColossusMesh();
+        this.glbUrl = '/models/boss_ignis.glb';
+        this.glbScale = 1.6;
       } else if (data.bossType === 'xyris' || data.id?.includes('xyris')) {
         this.mesh = ModelFactory.createXyrisVoidSovereignMesh();
+        this.glbUrl = '/models/boss_xyris.glb';
+        this.glbScale = 1.7;
       } else {
         this.mesh = ModelFactory.createBossMesh();
+        this.glbUrl = '/models/boss_valerius.glb';
+        this.glbScale = 1.5;
       }
+    } else if (this.type === 'direwolf' || this.type === 'wolf') {
+      this.mesh = ModelFactory.createSentinelMesh();
+      this.glbUrl = '/models/enemy_direwolf.glb';
+      this.glbScale = 0.012;
     } else {
       this.mesh = ModelFactory.createSentinelMesh();
+      this.glbUrl = '/models/enemy_sentinel.glb';
+      this.glbScale = 1.1;
     }
 
     this.mesh.position.copy(this.position);
     this.scene.add(this.mesh);
+
+    // Rigged 3D Character with Baked Animations
+    this.hasRiggedModel = false;
+    this.animator = new CharacterAnimator(this.scene, this.glbUrl, {
+      scale: this.glbScale,
+      yOffset: 0
+    });
+
+    this.animator.init().then(() => {
+      this.animator.onReady((anim) => {
+        this.hasRiggedModel = true;
+        this.mesh.visible = false;
+        anim.setPosition(this.position.x, this.position.y, this.position.z);
+        this.scene.add(anim.group);
+        if (this.hpSprite) anim.group.add(this.hpSprite);
+      });
+    });
 
     // Floating HP Bar Canvas
     this.hpSprite = this.createHpBarSprite();
@@ -89,39 +125,79 @@ export class EnemyEntity {
 
   update(deltaTime, animController) {
     if (!this.isAlive) {
-      this.mesh.visible = false;
+      if (this.mesh) this.mesh.visible = false;
+      if (this.animator && this.animator.group) this.animator.group.visible = false;
       return;
     }
-    this.mesh.visible = true;
 
     this.position.lerp(this.targetPos, 12 * deltaTime);
-    this.mesh.position.copy(this.position);
 
     // Face movement direction if moving (zero-allocation)
     const dx = this.targetPos.x - this.position.x;
     const dz = this.targetPos.z - this.position.z;
-    if (dx * dx + dz * dz > 0.01) {
-      const targetAngle = Math.atan2(dx, dz);
-      this.mesh.rotation.y = THREE.MathUtils.lerp(this.mesh.rotation.y, targetAngle, Math.min(1.0, 12 * deltaTime));
-    }
+    const isMoving = (dx * dx + dz * dz) > 0.01;
 
-    if (animController) {
-      if (this.type === 'sentry') {
-        animController.animateSentinel(this.mesh, deltaTime);
-      } else if (this.type === 'golem') {
-        animController.animateGolem(this.mesh, this.state, deltaTime);
-      } else if (this.type === 'shade') {
-        animController.animateVoidShade(this.mesh, deltaTime);
+    if (this.hasRiggedModel && this.animator) {
+      this.mesh.visible = false;
+      this.animator.group.visible = true;
+      this.animator.setPosition(this.position.x, this.position.y, this.position.z);
+
+      if (isMoving) {
+        const targetAngle = Math.atan2(dx, dz);
+        this.animator.group.rotation.y = THREE.MathUtils.lerp(this.animator.group.rotation.y, targetAngle, Math.min(1.0, 12 * deltaTime));
+        if (this.state === 'attack') {
+          this.animator.playAttack('Attack', 0.2);
+        } else {
+          this.animator.playWalk(0.25);
+        }
+      } else {
+        if (this.state === 'attack') {
+          this.animator.playAttack('Attack', 0.2);
+        } else {
+          this.animator.playIdle(0.3);
+        }
+      }
+
+      this.animator.update(deltaTime);
+    } else {
+      this.mesh.visible = true;
+      this.mesh.position.copy(this.position);
+
+      if (isMoving) {
+        const targetAngle = Math.atan2(dx, dz);
+        this.mesh.rotation.y = THREE.MathUtils.lerp(this.mesh.rotation.y, targetAngle, Math.min(1.0, 12 * deltaTime));
+      }
+
+      if (animController) {
+        if (this.type === 'sentry') {
+          animController.animateSentinel(this.mesh, deltaTime);
+        } else if (this.type === 'golem') {
+          animController.animateGolem(this.mesh, this.state, deltaTime);
+        } else if (this.type === 'shade') {
+          animController.animateVoidShade(this.mesh, deltaTime);
+        }
       }
     }
   }
 
   destroyWithDissolve() {
-    if (!this.mesh) return;
-
     if (this.hpSprite) {
-      this.mesh.remove(this.hpSprite);
+      if (this.mesh) this.mesh.remove(this.hpSprite);
+      if (this.animator?.group) this.animator.group.remove(this.hpSprite);
     }
+
+    if (this.hasRiggedModel && this.animator) {
+      this.animator.play('Death', 0.2, false, () => {
+        if (this.animator) this.animator.dispose();
+      });
+      setTimeout(() => {
+        if (this.animator) this.animator.dispose();
+      }, 1500);
+      if (this.mesh) this.scene.remove(this.mesh);
+      return;
+    }
+
+    if (!this.mesh) return;
 
     const edgeColor = this.type === 'golem' ? 0xff5722 : (this.type === 'shade' ? 0xbf5af2 : 0x00e5ff);
     const dissolveMat = createDissolveMaterial({
@@ -150,6 +226,11 @@ export class EnemyEntity {
   }
 
   destroy() {
-    this.scene.remove(this.mesh);
+    if (this.animator) {
+      this.animator.dispose();
+    }
+    if (this.mesh) {
+      this.scene.remove(this.mesh);
+    }
   }
 }

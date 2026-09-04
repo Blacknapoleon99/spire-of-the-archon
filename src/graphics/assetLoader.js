@@ -126,7 +126,11 @@ export class AssetLoader {
       '/models/boss_valerius.glb',
       '/models/npc_merchant.glb',
       '/models/npc_alchemist.glb',
-      '/models/npc_quest_giver.glb'
+      '/models/npc_quest_giver.glb',
+      '/models/enemy_direwolf.glb',
+      '/models/enemy_knight.glb',
+      '/models/enemy_golem.glb',
+      '/models/enemy_sentinel.glb'
     ];
     return Promise.allSettled(urls.map(u => this.loadGLTFRaw(u)));
   }

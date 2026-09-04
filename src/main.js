@@ -31,6 +31,7 @@ import { storyLoreManager } from './systems/storyLore.js';
 import { assetLoader } from './graphics/assetLoader.js';
 import { VoiceChatSystem } from './systems/voiceChatSystem.js';
 import { GroundSpellManager } from './graphics/groundSpells.js';
+import { animationPackManager } from './graphics/animationPack.js';
 
 /** Loading screen lore tips */
 const LOADING_TIPS = [
@@ -197,6 +198,7 @@ class GameApp {
     // Kick off 100% upfront preloading across all modules
     Promise.allSettled([
       assetLoader.preloadAll(),
+      animationPackManager.loadPack(),
       this.chunkLoader.preloadEverything(this.engineScene.renderer),
       ModelFactory.preloadAllEntities(this.engineScene.scene, this.engineScene.camera, this.engineScene.renderer),
       this.tower.preloadAllFloors(this.engineScene.renderer, this.engineScene.camera),
@@ -1701,6 +1703,9 @@ class GameApp {
         // Off-screen: update position without heavy skeletal animations or matrix updates
         enemy.position.lerp(enemy.targetPos, 12 * deltaTime);
         enemy.mesh.position.copy(enemy.position);
+        if (enemy.hasRiggedModel && enemy.animator) {
+          enemy.animator.setPosition(enemy.position.x, enemy.position.y, enemy.position.z);
+        }
         enemy.mesh.matrixAutoUpdate = false;
       }
     }
