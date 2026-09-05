@@ -1,6 +1,15 @@
 import * as THREE from 'three';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { ModelFactory } from '../graphics/modelFactory.js';
+import { assetLoader } from '../graphics/assetLoader.js';
 import { disposeObjectGeometries, disposeSprite } from '../graphics/resourceUtils.js';
+
+const PLAYER_MODEL_URLS = Object.freeze({
+  pyromancer: '/models/sorcerer.glb',
+  cryomancer: '/models/knight.glb',
+  luminary: '/models/druid.glb',
+  chronomancer: '/models/elf_mage.glb'
+});
 
 export class PlayerEntity {
   constructor(scene, data, isLocal = false) {
@@ -33,7 +42,9 @@ export class PlayerEntity {
     this.isCasting = false;
     this.castTimer = 0;
 
-    // Build 3D Wizard Mesh with class robes, glowing staff and ground rune
+    // Keep the procedural wizard as an immediate fallback while the local
+    // rigged character is resolved. The GLBs are preloaded during the boot
+    // screen, so this normally upgrades before the first frame of the ascent.
     this.mesh = ModelFactory.createWizardMesh(this.wizardClass, data.color);
     this.mesh.position.copy(this.position);
     this.mesh.rotation.y = this.rotationY;
@@ -43,6 +54,63 @@ export class PlayerEntity {
     // Name billboard & overhead team health bar above head
     this.nameplate = this.createNameplate();
     this.mesh.add(this.nameplate);
+
+    this.hasRiggedModel = false;
+    this.modelRoot = null;
+    this.loadRiggedModel();
+  }
+
+  getVisualRoot() {
+    return this.hasRiggedModel && this.modelRoot ? this.modelRoot : this.mesh;
+  }
+
+  async loadRiggedModel() {
+    const url = PLAYER_MODEL_URLS[this.wizardClass] || PLAYER_MODEL_URLS.pyromancer;
+    try {
+      const source = await assetLoader.loadGLTF(url);
+      if (this.destroyed) return;
+      const model = SkeletonUtils.clone(source);
+      model.name = `PlayerRig_${this.wizardClass}`;
+      model.scale.setScalar(1.0);
+      // The authored characters face +Z while the Spire's forward direction
+      // is -Z. Keep the wrapper transform independent from network yaw.
+      model.rotation.y = Math.PI;
+      // These generated humanoids are authored around their hip (roughly
+      // -1..+1m Y), while world actors stand on y=0. Lift the mesh so the
+      // feet sit on the floor instead of being clipped through it.
+      model.position.set(this.position.x, this.position.y + 1.0, this.position.z);
+      model.traverse(child => {
+        if (!child.isMesh) return;
+        child.castShadow = true;
+        child.receiveShadow = true;
+        child.frustumCulled = true;
+      });
+
+      this.mesh.visible = false;
+      this.modelRoot = model;
+      this.hasRiggedModel = true;
+      model.visible = !this.isLocal && this.isAlive;
+      // Move UI attachments to the rigged root so they track the real
+      // character instead of the hidden procedural fallback.
+      this.mesh.remove(this.nameplate);
+      this.nameplate.position.y = 1.95;
+      model.add(this.nameplate);
+      if (this.speakingBadge) {
+        this.mesh.remove(this.speakingBadge);
+        this.speakingBadge.position.y = 2.4;
+        model.add(this.speakingBadge);
+      }
+      if (this.speechBubble) {
+        this.mesh.remove(this.speechBubble);
+        this.speechBubble.position.y = 2.65;
+        model.add(this.speechBubble);
+      }
+      this.scene.add(model);
+    } catch (error) {
+      // The procedural PBR wizard remains a valid fallback when a local GLB
+      // is absent or generated on a different installation.
+      console.warn(`[PlayerEntity] Rigged avatar unavailable (${url}); using procedural fallback.`, error?.message || error);
+    }
   }
 
   createNameplate() {
@@ -128,7 +196,7 @@ export class PlayerEntity {
     if (isSpeaking) {
       if (!this.speakingBadge) {
         this.speakingBadge = this.createSpeakingBadge();
-        this.mesh.add(this.speakingBadge);
+        this.getVisualRoot().add(this.speakingBadge);
       }
       this.speakingBadge.visible = true;
     } else if (this.speakingBadge) {
@@ -164,7 +232,7 @@ export class PlayerEntity {
 
   showSpeechBubble(message) {
     if (this.speechBubble) {
-      this.mesh.remove(this.speechBubble);
+      this.speechBubble.parent?.remove(this.speechBubble);
       if (this.speechBubble.material.map) this.speechBubble.material.map.dispose();
       this.speechBubble.material.dispose();
       this.speechBubble = null;
@@ -208,12 +276,12 @@ export class PlayerEntity {
     sprite.scale.set(3.4, 0.85, 1);
 
     this.speechBubble = sprite;
-    this.mesh.add(sprite);
+    this.getVisualRoot().add(sprite);
 
     if (this.speechBubbleTimeout) clearTimeout(this.speechBubbleTimeout);
     this.speechBubbleTimeout = setTimeout(() => {
       if (this.speechBubble) {
-        this.mesh.remove(this.speechBubble);
+        this.speechBubble.parent?.remove(this.speechBubble);
         if (this.speechBubble.material.map) this.speechBubble.material.map.dispose();
         this.speechBubble.material.dispose();
         this.speechBubble = null;
@@ -224,20 +292,40 @@ export class PlayerEntity {
   update(deltaTime, animController) {
     if (!this.isAlive) {
       this.mesh.visible = false;
+      if (this.modelRoot) this.modelRoot.visible = false;
       return;
     }
-    this.mesh.visible = !this.isLocal;
 
     if (!this.isLocal) {
       // Smooth interpolation for remote wizards
       const dist = this.position.distanceTo(this.targetPos);
       this.isMoving = dist > 0.1;
       this.position.lerp(this.targetPos, 14 * deltaTime);
-      this.mesh.position.copy(this.position);
-      this.mesh.rotation.y = THREE.MathUtils.lerp(this.mesh.rotation.y, this.rotationY, Math.min(1.0, 14 * deltaTime));
+      if (!this.hasRiggedModel) {
+        this.mesh.position.copy(this.position);
+        this.mesh.rotation.y = THREE.MathUtils.lerp(this.mesh.rotation.y, this.rotationY, Math.min(1.0, 14 * deltaTime));
+      }
     } else {
-      this.mesh.position.copy(this.position);
-      this.mesh.rotation.y = this.rotationY;
+      if (!this.hasRiggedModel) {
+        this.mesh.position.copy(this.position);
+        this.mesh.rotation.y = this.rotationY;
+      }
+    }
+
+    if (this.hasRiggedModel && this.modelRoot) {
+      this.mesh.visible = false;
+      this.modelRoot.visible = !this.isLocal;
+      this.modelRoot.position.set(this.position.x, this.position.y + 1.0, this.position.z);
+      const currentYaw = this.modelRoot.rotation.y - Math.PI;
+      this.modelRoot.rotation.y = Math.PI + THREE.MathUtils.lerp(currentYaw, this.rotationY, Math.min(1.0, 14 * deltaTime));
+      // Small procedural breathing keeps static generated GLBs alive without
+      // invoking incompatible embedded animation tracks on older exports.
+      const bob = Math.sin(performance.now() * 0.003 + this.id.length) * (this.isMoving ? 0.035 : 0.018);
+      this.modelRoot.position.y += bob;
+      if (this.isCasting) this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, -0.08, Math.min(1, deltaTime * 14));
+      else this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, 0, Math.min(1, deltaTime * 8));
+    } else {
+      this.mesh.visible = !this.isLocal;
     }
 
     if (this.castTimer > 0) {
@@ -246,7 +334,7 @@ export class PlayerEntity {
     }
 
     // Run procedural animation
-    if (animController) {
+    if (animController && !this.hasRiggedModel) {
       animController.animateWizard(this.mesh, this.isMoving, this.isCasting, deltaTime);
     }
   }
@@ -268,12 +356,17 @@ export class PlayerEntity {
       this.mesh.position.copy(this.position);
       this.mesh.visible = !this.isLocal;
     }
+    if (this.modelRoot) {
+      this.modelRoot.position.set(this.position.x, this.position.y + 1.0, this.position.z);
+      this.modelRoot.visible = !this.isLocal;
+    }
   }
 
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
     if (this.speechBubbleTimeout) clearTimeout(this.speechBubbleTimeout);
+    if (this.modelRoot) this.scene.remove(this.modelRoot);
     disposeSprite(this.nameplate);
     disposeSprite(this.speakingBadge);
     disposeSprite(this.speechBubble);

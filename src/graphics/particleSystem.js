@@ -161,13 +161,28 @@ export class ParticleSystem {
     this.geoCoin = new THREE.CylinderGeometry(0.18, 0.18, 0.04, 16);
 
     // Pre-allocated Vortex Geometries for Zero-Allocation Ultimate Casting
-    this.geoVortexFunnel = new THREE.CylinderGeometry(3.6, 0.4, 7.5, 24, 8, true);
-    this.geoVortexCore = new THREE.CylinderGeometry(1.5, 0.25, 7.0, 16, 4, true);
+    this.geoVortexFunnel = new THREE.CylinderGeometry(2.8, 0.32, 6.8, 48, 12, true);
+    this.geoVortexCore = new THREE.CylinderGeometry(0.9, 0.18, 6.4, 32, 8, true);
     this.geoVortexRibbons = [
-      new THREE.TorusGeometry(1.8, 0.14, 8, 32, Math.PI * 1.5),
-      new THREE.TorusGeometry(2.4, 0.14, 8, 32, Math.PI * 1.5),
-      new THREE.TorusGeometry(3.0, 0.14, 8, 32, Math.PI * 1.5)
+      new THREE.TorusGeometry(1.25, 0.055, 8, 64, Math.PI * 1.7),
+      new THREE.TorusGeometry(1.9, 0.06, 8, 64, Math.PI * 1.7),
+      new THREE.TorusGeometry(2.45, 0.065, 8, 64, Math.PI * 1.7)
     ];
+    this.geoVortexWindRings = [
+      new THREE.TorusGeometry(0.85, 0.018, 6, 64),
+      new THREE.TorusGeometry(1.45, 0.022, 6, 64),
+      new THREE.TorusGeometry(2.05, 0.026, 6, 64),
+      new THREE.TorusGeometry(2.55, 0.03, 6, 64)
+    ];
+    this.geoVortexHelixes = [
+      this._createVortexHelixGeometry(0.45, 2.65, 6.4, 1.65, 72, 0.055, 0.0),
+      this._createVortexHelixGeometry(0.65, 2.4, 6.1, 1.9, 72, 0.07, Math.PI * 0.5),
+      this._createVortexHelixGeometry(0.35, 2.2, 5.7, 2.15, 72, 0.045, Math.PI),
+      this._createVortexHelixGeometry(0.75, 2.75, 6.7, 1.45, 72, 0.04, Math.PI * 1.5)
+    ];
+    this.geoVortexFlameCore = new THREE.SphereGeometry(1.0, 32, 20);
+    this.geoVortexFlameCard = new THREE.PlaneGeometry(0.82, 4.9, 1, 12);
+    this.geoVortexEmbers = this._createVortexEmberGeometry(72, 2.75, 6.5);
     this.geoVortexRuneRing = new THREE.RingGeometry(0.3, 5.5, 32);
     this.geoDomeHalf = new THREE.SphereGeometry(6.5, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
     this.geoDomeRuneRing = new THREE.RingGeometry(0.3, 6.5, 32);
@@ -188,27 +203,77 @@ export class ParticleSystem {
       map: lavaTex,
       color: 0xff3700,
       emissive: new THREE.Color(0xff2200),
-      emissiveIntensity: 2.8,
+      emissiveIntensity: 2.2,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.82
+      opacity: 0.055,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
     });
     this.matVortexCore = new THREE.MeshBasicMaterial({
-      color: 0xffea00,
+      color: 0xffa000,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.88
+      opacity: 0.075,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
     });
     this.matVortexRune = new THREE.MeshStandardMaterial({
       map: lavaTex,
       emissive: new THREE.Color(0xff4500),
-      emissiveIntensity: 2.2,
+      emissiveIntensity: 1.8,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.9
+      opacity: 0.58,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
     });
-    this.matVortexRibbon1 = new THREE.MeshBasicMaterial({ color: 0xff9100, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
-    this.matVortexRibbon2 = new THREE.MeshBasicMaterial({ color: 0xff3d00, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+    this.matVortexRibbon1 = new THREE.MeshBasicMaterial({ color: 0xffb300, side: THREE.DoubleSide, transparent: true, opacity: 0.48, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexRibbon2 = new THREE.MeshBasicMaterial({ color: 0xff4d00, side: THREE.DoubleSide, transparent: true, opacity: 0.38, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexHelixFire = new THREE.MeshBasicMaterial({ color: 0xff5a00, side: THREE.DoubleSide, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexHelixHot = new THREE.MeshBasicMaterial({ color: 0xffd54f, side: THREE.DoubleSide, transparent: true, opacity: 0.76, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexWind = new THREE.MeshBasicMaterial({ color: 0xffc107, side: THREE.DoubleSide, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexFlameCore = new THREE.MeshBasicMaterial({ color: 0xff6d00, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexEmbers = new THREE.PointsMaterial({ color: 0xffd54f, size: 0.085, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+    this.matVortexFlameCard = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uPhase: { value: 0 },
+        uColor: { value: new THREE.Color(0xff6d00) }
+      },
+      vertexShader: `
+        uniform float uTime;
+        uniform float uPhase;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec3 p = position;
+          float sway = sin(uTime * 5.0 + uPhase + uv.y * 8.0) * (0.05 + uv.y * 0.16);
+          p.x += sway;
+          p.z += cos(uTime * 4.0 + uPhase + uv.y * 6.0) * (0.03 + uv.y * 0.08);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uPhase;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+        void main() {
+          float sideFade = pow(1.0 - smoothstep(0.08, 0.5, abs(vUv.x - 0.5)), 1.6);
+          float baseFade = smoothstep(0.0, 0.12, vUv.y);
+          float tipFade = 1.0 - smoothstep(0.44, 0.9, vUv.y);
+          float lick = 0.72 + 0.28 * sin(uTime * 7.0 + uPhase + vUv.y * 12.0);
+          float alpha = sideFade * baseFade * tipFade * lick * 0.28;
+          vec3 hot = mix(uColor * 0.72, vec3(1.0, 0.55, 0.08), pow(vUv.y, 1.8));
+          gl_FragColor = vec4(hot, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
 
     this.matDomeDivine = new THREE.MeshStandardMaterial({
       color: 0xffd700,
@@ -279,6 +344,39 @@ export class ParticleSystem {
     }
 
     this._setupTransientPools();
+  }
+
+  _createVortexHelixGeometry(baseRadius, topRadius, height, turns, segments, tubeRadius, phase = 0) {
+    const points = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const angle = phase + t * turns * Math.PI * 2;
+      const radius = THREE.MathUtils.lerp(baseRadius, topRadius, t);
+      points.push(new THREE.Vector3(
+        Math.cos(angle) * radius,
+        0.12 + t * height,
+        Math.sin(angle) * radius
+      ));
+    }
+    const curve = new THREE.CatmullRomCurve3(points);
+    return new THREE.TubeGeometry(curve, segments, tubeRadius, 6, false);
+  }
+
+  _createVortexEmberGeometry(count, radius, height) {
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      // Deterministic distribution keeps asset warmup and replay captures
+      // stable while still giving the column a natural turbulent profile.
+      const t = (i * 0.61803398875) % 1;
+      const angle = t * Math.PI * 2 * 7.0 + (i % 5) * 0.37;
+      const radial = 0.18 + ((i * 17) % 101) / 100 * radius * (0.35 + t * 0.65);
+      positions[i * 3] = Math.cos(angle) * radial;
+      positions[i * 3 + 1] = 0.18 + t * height;
+      positions[i * 3 + 2] = Math.sin(angle) * radial;
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    return geometry;
   }
 
   _setupTransientPools() {
@@ -476,22 +574,67 @@ export class ParticleSystem {
       groundRune.rotation.x = -Math.PI / 2;
       const vortexGroup = new THREE.Group();
       const funnel = new THREE.Mesh(this.geoVortexFunnel, this.matVortexFunnel);
-      funnel.position.y = 3.75;
+      funnel.position.y = 3.42;
       vortexGroup.add(funnel);
       const helixRibbons = [];
       for (let r = 0; r < 3; r++) {
         const ribbon = new THREE.Mesh(this.geoVortexRibbons[r], r % 2 === 0 ? this.matVortexRibbon1 : this.matVortexRibbon2);
-        ribbon.position.y = 1.5 + r * 2.0;
+        ribbon.position.y = 0.75 + r * 1.8;
         ribbon.rotation.x = Math.PI / 2.5;
         ribbon.rotation.z = (r * Math.PI * 2) / 3;
         vortexGroup.add(ribbon);
         helixRibbons.push(ribbon);
       }
       const core = new THREE.Mesh(this.geoVortexCore, this.matVortexCore);
-      core.position.y = 3.5;
+      core.position.y = 3.2;
       vortexGroup.add(core);
+
+      const flameHelixes = [];
+      this.geoVortexHelixes.forEach((geometry, idx) => {
+        const strand = new THREE.Mesh(geometry, idx % 3 === 1 ? this.matVortexHelixHot : this.matVortexHelixFire);
+        strand.rotation.y = (idx * Math.PI * 2) / this.geoVortexHelixes.length;
+        vortexGroup.add(strand);
+        flameHelixes.push(strand);
+      });
+
+      const windRings = [];
+      this.geoVortexWindRings.forEach((geometry, idx) => {
+        const ring = new THREE.Mesh(geometry, this.matVortexWind);
+        ring.position.y = 0.55 + idx * 1.45;
+        ring.scale.set(0.82 + idx * 0.14, 1, 0.82 + idx * 0.14);
+        ring.rotation.x = Math.PI / 2;
+        vortexGroup.add(ring);
+        windRings.push(ring);
+      });
+
+      const flameCore = new THREE.Mesh(this.geoVortexFlameCore, this.matVortexFlameCore);
+      flameCore.position.y = 3.15;
+      flameCore.scale.set(0.8, 2.6, 0.8);
+      vortexGroup.add(flameCore);
+
+      const flameCards = [];
+      for (let c = 0; c < 6; c++) {
+        const cardMaterial = this.matVortexFlameCard.clone();
+        cardMaterial.uniforms.uPhase.value = (c / 6) * Math.PI * 2;
+        cardMaterial.uniforms.uColor.value.setHex(c % 2 === 0 ? 0xff4d00 : 0xffa000);
+        const card = new THREE.Mesh(this.geoVortexFlameCard, cardMaterial);
+        const angle = (c / 6) * Math.PI * 2;
+        const cardRadius = 0.92 + (c % 2) * 0.2;
+        card.position.set(Math.cos(angle) * cardRadius, 2.25 + (c % 3) * 0.32, Math.sin(angle) * cardRadius);
+        // Tangential cards catch the wind from the side instead of stacking
+        // into a flat orange wall when viewed head-on.
+        card.rotation.y = angle + Math.PI / 2;
+        card.scale.set(0.72 + (c % 3) * 0.09, 1.0 + (c % 2) * 0.08, 1);
+        vortexGroup.add(card);
+        flameCards.push(card);
+      }
+
+      const emberCloud = new THREE.Points(this.geoVortexEmbers, this.matVortexEmbers);
+      emberCloud.position.y = 0.1;
+      vortexGroup.add(emberCloud);
+
       group.add(groundRune, vortexGroup);
-      Object.assign(entry, { groundRune, vortexGroup, funnel, core, helixRibbons });
+      Object.assign(entry, { groundRune, vortexGroup, funnel, core, helixRibbons, flameHelixes, windRings, flameCore, flameCards, emberCloud });
     } else if (type === 'divine_sanctuary') {
       const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeDivine);
       const seal = new THREE.Mesh(this.geoDomeRuneRing, this.matSealDivine);
@@ -538,6 +681,20 @@ export class ParticleSystem {
     entry.group.visible = false;
     entry.group.rotation.set(0, 0, 0);
     entry.group.scale.set(1, 1, 1);
+    entry.flameHelixes?.forEach((strand, idx) => {
+      strand.rotation.set(0, (idx * Math.PI * 2) / entry.flameHelixes.length, 0);
+      strand.scale.set(1, 1, 1);
+    });
+    entry.windRings?.forEach((ring, idx) => {
+      ring.rotation.set(Math.PI / 2, 0, idx * 0.7);
+      ring.scale.y = 1;
+    });
+    if (entry.flameCore) entry.flameCore.scale.set(0.8, 2.6, 0.8);
+    entry.flameCards?.forEach((card, idx) => {
+      card.rotation.set(0, (idx / entry.flameCards.length) * Math.PI * 2 + Math.PI / 2, 0);
+      card.material.uniforms.uTime.value = 0;
+    });
+    if (entry.emberCloud) entry.emberCloud.rotation.set(0, 0, 0);
     this.releaseVortexLight(entry.light);
     entry.light = null;
   }
@@ -925,13 +1082,25 @@ export class ParticleSystem {
     entry.position.copy(groundPos);
     entry.groundRune.rotation.z = 0;
     entry.vortexGroup.rotation.set(0, 0, 0);
-    entry.vortexGroup.scale.set(1, 1, 1);
-    entry.funnel.material.opacity = 0.82;
-    entry.core.material.opacity = 0.88;
+    const visualScale = THREE.MathUtils.clamp(radius / 5.5, 0.78, 1.45);
+    entry.vortexGroup.scale.set(visualScale, visualScale, visualScale);
     entry.helixRibbons.forEach((ribbon, idx) => {
       ribbon.rotation.z = (idx * Math.PI * 2) / 3;
-      ribbon.material.opacity = 0.9;
     });
+    entry.flameHelixes?.forEach((strand, idx) => {
+      strand.rotation.y = (idx * Math.PI * 2) / entry.flameHelixes.length;
+      strand.scale.set(1, 1, 1);
+    });
+    entry.windRings?.forEach((ring, idx) => {
+      ring.rotation.z = idx * 0.7;
+      ring.scale.y = 1;
+    });
+    if (entry.flameCore) entry.flameCore.scale.set(0.8, 2.6, 0.8);
+    entry.flameCards?.forEach((card, idx) => {
+      card.rotation.set(0, (idx / entry.flameCards.length) * Math.PI * 2 + Math.PI / 2, 0);
+      card.material.uniforms.uTime.value = 0;
+    });
+    if (entry.emberCloud) entry.emberCloud.rotation.set(0, 0, 0);
     const light = this.acquireVortexLight(0xff5722, groundPos);
     if (light) {
       light.position.y += 3.5;
@@ -944,6 +1113,12 @@ export class ParticleSystem {
       funnel: entry.funnel,
       core: entry.core,
       helixRibbons: entry.helixRibbons,
+      flameHelixes: entry.flameHelixes,
+      windRings: entry.windRings,
+      flameCore: entry.flameCore,
+      flameCards: entry.flameCards,
+      emberCloud: entry.emberCloud,
+      visualScale,
       light,
       groundRune: entry.groundRune,
       poolEntry: entry,
@@ -1628,12 +1803,48 @@ export class ParticleSystem {
       // Spin the funnel vortex fast
       if (v.vortexGroup) {
         v.vortexGroup.rotation.y += deltaTime * 9.5;
-        v.vortexGroup.scale.y = 1.0 + Math.sin(v.life * 12) * 0.12;
+        const pulse = 1.0 + Math.sin(v.life * 12) * 0.08;
+        const baseScale = v.visualScale || 1;
+        v.vortexGroup.scale.y = baseScale * pulse;
       }
       if (v.helixRibbons) {
         v.helixRibbons.forEach((rib, idx) => {
-          rib.rotation.z += deltaTime * (idx % 2 === 0 ? 8.0 : -10.0);
+          rib.rotation.z += deltaTime * (idx % 2 === 0 ? 7.0 : -9.0);
+          rib.scale.x = 0.88 + Math.sin(v.life * 8 + idx) * 0.1;
         });
+      }
+      if (v.flameHelixes) {
+        v.flameHelixes.forEach((strand, idx) => {
+          strand.rotation.y += deltaTime * (idx % 2 === 0 ? 5.5 : -7.0);
+          const flare = 1.0 + Math.sin(v.life * (7.5 + idx) + idx * 1.7) * 0.12;
+          strand.scale.set(flare, 0.96 + Math.sin(v.life * 9 + idx) * 0.06, flare);
+        });
+      }
+      if (v.windRings) {
+        v.windRings.forEach((ring, idx) => {
+          ring.rotation.z += deltaTime * (idx % 2 === 0 ? 4.5 : -5.5);
+          ring.rotation.y += deltaTime * 1.4;
+          const ringPulse = 1.0 + Math.sin(v.life * 10 + idx * 1.2) * 0.09;
+          ring.scale.x = ringPulse;
+          ring.scale.z = ringPulse;
+        });
+      }
+      if (v.flameCore) {
+        const corePulse = 0.94 + Math.sin(v.life * 14) * 0.1;
+        v.flameCore.scale.set(0.8 * corePulse, 2.6 * (1.0 + Math.sin(v.life * 10) * 0.08), 0.8 * corePulse);
+      }
+      if (v.flameCards) {
+        const flameTime = v.maxLife - v.life;
+        v.flameCards.forEach((card, idx) => {
+          card.material.uniforms.uTime.value = flameTime;
+          card.rotation.y += deltaTime * (idx % 2 === 0 ? 0.65 : -0.8);
+          const cardPulse = 1.0 + Math.sin(flameTime * 6.0 + idx) * 0.08;
+          card.scale.x = (0.72 + (idx % 3) * 0.09) * cardPulse;
+        });
+      }
+      if (v.emberCloud) {
+        v.emberCloud.rotation.y -= deltaTime * 4.2;
+        v.emberCloud.rotation.x += deltaTime * 0.45;
       }
       if (v.groundRune) {
         v.groundRune.rotation.z -= deltaTime * 3.5;

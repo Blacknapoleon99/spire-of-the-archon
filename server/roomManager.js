@@ -121,6 +121,7 @@ export class RoomManager {
     // Notify others
     socket.to(roomId).emit('player_joined', {
       player,
+      players: Array.from(room.gameState.players.values()),
       hostPeerId: room.gameState.players.get(room.hostId)?.peerId || null
     });
 

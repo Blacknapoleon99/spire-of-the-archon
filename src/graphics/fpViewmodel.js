@@ -482,8 +482,12 @@ export class FPViewmodel {
       .then((gltf) => {
         const model = gltf.scene;
         // Position and scale first-person viewmodel in front of camera
-        model.scale.set(0.68, 0.68, 0.68);
-        model.position.set(0.04, -0.28, -0.32);
+        // The authored first-person rig is centered around the hips. Lift and
+        // enlarge it slightly so both gauntleted hands and the focus wand sit
+        // in the lower camera frustum instead of clipping below the HUD.
+        model.scale.set(0.9, 0.9, 0.9);
+        model.position.set(0, -0.04, -0.85);
+        model.rotation.y = Math.PI;
 
         // Customize materials and glowing crystal / runes safely
         model.traverse((child) => {

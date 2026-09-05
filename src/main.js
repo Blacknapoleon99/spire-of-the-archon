@@ -428,11 +428,14 @@ class GameApp {
     });
 
     onlineNetwork.on('player_joined', (data) => {
-      const playersList = Array.from(this.players.values()).map(p => ({
-        name: p.name,
-        wizardClass: p.wizardClass
-      }));
-      playersList.push(data.player);
+      const playersList = Array.isArray(data?.players) && data.players.length
+        ? data.players
+        : Array.from(this.players.values()).map(p => ({
+          id: p.id,
+          name: p.name,
+          wizardClass: p.wizardClass
+        }));
+      if (!playersList.some(player => player.id === data?.player?.id)) playersList.push(data.player);
       this.ui.updateLobbyPlayerList(playersList);
 
       // Spawn remote wizard character immediately if joined during active ascent

@@ -216,6 +216,19 @@ export class GameState {
     return { x: 0, y: 0, z: 14 };
   }
 
+  // Keep the covenant in a readable first-person formation. The host starts
+  // a couple of metres ahead and other slots fan out behind them, which keeps
+  // the host inside a joining player's forward camera instead of placing the
+  // two avatars side-by-side at the exact same depth (an off-screen 90° angle).
+  getPartySpawnPosition(floorNumber = this.floor, slot = 0) {
+    const base = this.getSpawnPosition(floorNumber);
+    const index = Math.max(0, Number(slot) || 0);
+    if (index === 0) return { x: base.x - 2.0, y: base.y, z: base.z - 4.0 };
+    const side = index % 2 === 1 ? -1 : 1;
+    const lane = Math.ceil(index / 2);
+    return { x: base.x + side * (0.75 + (lane - 1) * 0.9), y: base.y, z: base.z };
+  }
+
   resetObjective(floorNumber = this.floor) {
     const definition = getFloorObjective(floorNumber);
     this.objective = {
@@ -467,10 +480,10 @@ export class GameState {
 
     // Reset player floor positions to entrance
     for (const [socketId, player] of this.players) {
-      const spawn = this.getSpawnPosition(floorNumber);
-      player.x = (Math.random() - 0.5) * 2;
-      player.y = spawn.y;
-      player.z = spawn.z;
+      const partySpawn = this.getPartySpawnPosition(floorNumber, Array.from(this.players.keys()).indexOf(socketId));
+      player.x = partySpawn.x;
+      player.y = partySpawn.y;
+      player.z = partySpawn.z;
       player.rotY = 0;
       player.health = player.maxHealth;
       player.mana = player.maxMana;
@@ -651,7 +664,7 @@ export class GameState {
   addPlayer(socketId, name, wizardClass) {
     const safeClass = CLASS_IDS.includes(wizardClass) ? wizardClass : 'pyromancer';
     const config = PLAYER_CLASS_CONFIG[safeClass] || PLAYER_CLASS_CONFIG.pyromancer;
-    const spawn = this.getSpawnPosition(this.floor);
+    const spawn = this.getPartySpawnPosition(this.floor, this.players.size);
 
     const player = {
       id: socketId,
@@ -660,8 +673,8 @@ export class GameState {
       color: config.color,
       speed: config.speed,
       damageMitigation: 0,
-      x: (this.players.size * 2) - 2,
-      y: 0,
+      x: spawn.x,
+      y: spawn.y,
       z: spawn.z,
       rotY: 0,
       health: config.maxHealth,
@@ -1816,7 +1829,7 @@ export class GameState {
           player.isAlive = true;
           player.health = player.maxHealth;
           player.mana = player.maxMana;
-          const spawn = this.getSpawnPosition(this.floor);
+          const spawn = this.getPartySpawnPosition(this.floor, Array.from(this.players.keys()).indexOf(player.id));
           player.x = spawn.x;
           player.y = spawn.y;
           player.z = spawn.z;
