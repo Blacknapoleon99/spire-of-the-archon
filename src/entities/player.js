@@ -24,6 +24,7 @@ export class PlayerEntity {
     this.peerId = data.peerId || null;
     this.name = data.name;
     this.wizardClass = data.wizardClass || 'pyromancer';
+    this.color = data.color || 0x332244;
     this.isLocal = isLocal;
     this.destroyed = false;
 
@@ -114,7 +115,7 @@ export class PlayerEntity {
           if (material.map) material.map.colorSpace = THREE.SRGBColorSpace;
           if (material.color) material.color.lerp(new THREE.Color(0xffffff), material.map ? 0.08 : 0.22);
           if (material.emissive) {
-            material.emissive.lerp(new THREE.Color(data.color || 0x332244), 0.12);
+            material.emissive.lerp(new THREE.Color(this.color), 0.12);
             material.emissiveIntensity = Math.max(0.08, Number(material.emissiveIntensity) || 0.08);
           }
           material.needsUpdate = true;

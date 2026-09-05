@@ -214,7 +214,7 @@ class GameApp {
     // Core-only preloading. Floor 2 and later are requested on demand.
     Promise.allSettled([
       assetLoader.preloadFloor1(),
-      assetLoader.loadGLTFRaw('/models/fp_viewmodel_wand.glb').catch(() => {}),
+      assetLoader.preloadViewmodelWand(),
       animationPackManager.loadPack(),
       this.spellVfx.preloadHeroAssets().then(() => this.spellVfx.warmup(this.engineScene.renderer, this.engineScene.camera)),
       Promise.resolve()

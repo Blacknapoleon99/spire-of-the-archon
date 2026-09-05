@@ -1,5 +1,12 @@
 {
-  "players": [],
-  "fpWand": false,
-  "note": "Blender hero exports register themselves here. Empty entries intentionally use the shipped GLB/procedural fallbacks."
+  "players": [
+    "pyromancer",
+    "cryomancer",
+    "luminary",
+    "chronomancer"
+  ],
+  "fpWand": true,
+  "note": "Generated hero meshes are enabled when present; the shipped GLB/procedural fallback remains available if a file is absent.",
+  "generator": "scripts/generate_fp_wand_hero.py",
+  "version": "spire-fp-wand-v3-authored"
 }

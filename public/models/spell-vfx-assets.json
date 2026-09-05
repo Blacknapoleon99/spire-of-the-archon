@@ -1,4 +1,12 @@
 {
-  "assets": [],
-  "note": "Optional local hero meshes. The Blender fireball recipe registers itself here after export; missing families fall back to pooled procedural VFX."
+  "assets": [
+    "fireball",
+    "fire",
+    "frost",
+    "light",
+    "chrono"
+  ],
+  "note": "Authored Blender anchors are enabled per family; pooled procedural VFX remains active for animation and graceful fallback.",
+  "generator": "scripts/generate_spell_hero_assets.py",
+  "version": "spire-spell-v3-authored"
 }

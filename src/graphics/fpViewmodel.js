@@ -488,7 +488,7 @@ export class FPViewmodel {
       let lastError = null;
       for (const url of candidates) {
         try {
-          return await assetLoader.loadGLTFRaw(url);
+          return { gltf: await assetLoader.loadGLTFRaw(url), url };
         } catch (error) {
           lastError = error;
         }
@@ -497,7 +497,7 @@ export class FPViewmodel {
     };
 
     loadCandidate()
-      .then((gltf) => {
+      .then(({ gltf, url }) => {
         const model = gltf.scene;
         // Position and scale first-person viewmodel in front of camera
         // The authored first-person rig is centered around the hips. Lift and
@@ -505,7 +505,11 @@ export class FPViewmodel {
         // in the lower camera frustum instead of clipping below the HUD.
         model.scale.set(0.9, 0.9, 0.9);
         model.position.set(0, -0.04, -0.85);
-        model.rotation.y = Math.PI;
+        // The authored hero wand is already camera-facing. The legacy
+        // fallback was authored in the opposite convention and still needs
+        // the historical half-turn.
+        model.rotation.y = url.endsWith('/fp_wand_hero.glb') ? 0 : Math.PI;
+        model.userData.assetUrl = url;
 
         // Customize materials and glowing crystal / runes safely
         model.traverse((child) => {

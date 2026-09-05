@@ -208,13 +208,23 @@ export class AssetLoader {
     return Promise.allSettled(urls.map(u => this.loadGLTFRaw(u)));
   }
 
+  preloadViewmodelWand() {
+    const fallback = '/models/fp_viewmodel_wand.glb';
+    return fetch('/models/hero-assets.json', { cache: 'no-store' })
+      .then(response => response.ok ? response.json() : {})
+      .catch(() => ({}))
+      .then(manifest => manifest?.fpWand ? this.loadGLTFRaw('/models/fp_wand_hero.glb') : this.loadGLTFRaw(fallback))
+      .catch(err => {
+        console.warn('[AssetLoader] Viewmodel wand preload notice:', err);
+        return null;
+      });
+  }
+
   preloadAll() {
     // Explicit opt-in full preload for tooling/benchmark scenes. The game boot
     // path uses ChunkLoader so production sessions stay within a small memory
     // window.
-    const wandPromise = this.loadGLTFRaw('/models/fp_viewmodel_wand.glb').catch(err => {
-      console.warn('[AssetLoader] Viewmodel wand preload notice:', err);
-    });
+    const wandPromise = this.preloadViewmodelWand();
 
     const f1Promise = this.preloadFloor1();
     const f2Promise = this.preloadFloor2();
