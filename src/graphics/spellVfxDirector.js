@@ -43,6 +43,7 @@ export class SpellVfxDirector {
   preloadHeroAssets() {
     const assets = [
       ['fire', '/models/spell_fire_tornado_core.glb'],
+      ['fireball', '/models/spell_fireball.glb'],
       ['frost', '/models/spell_frost_crystal.glb'],
       ['light', '/models/spell_luminary_halo.glb'],
       ['chrono', '/models/spell_chrono_astrolabe.glb']
@@ -89,7 +90,8 @@ export class SpellVfxDirector {
     damage = 0,
     duration = null,
     source = 'local',
-    seed = null
+    seed = null,
+    worldImpact = null
   }) {
     if (!spellId || !origin || !direction) return null;
     const started = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -104,7 +106,7 @@ export class SpellVfxDirector {
 
     if (profile.kind === 'field') {
       if (spellId === 'fire_tornado') {
-        const ground = target || this._groundTarget(origin, safeDirection, 10);
+        const ground = target || worldImpact?.point || this._groundTarget(origin, safeDirection, 10);
         this.particles.spawnFireTornado(ground, duration || profile.duration, damage || 32, profile.radius);
         if (!reduced) this.particles.spawnBurst(ground, 'fire', this.qualityProfile === 'ultra' ? 18 : 10);
       } else if (spellId === 'divine_sanctuary') {
@@ -112,15 +114,15 @@ export class SpellVfxDirector {
         this.particles.spawnDivineSanctuary(ground, duration || profile.duration, profile.radius);
         this.particles.spawnCleansingWave(ground, reduced ? 0.55 : 0.9);
       } else if (spellId === 'frost_nova') {
-        const ground = target || this._groundTarget(origin, safeDirection, 9);
+        const ground = target || worldImpact?.point || this._groundTarget(origin, safeDirection, 9);
         this.particles.spawnBlizzardZone(ground, duration || profile.duration, profile.radius, damage || 28);
         this.particles.spawnImpactShockwave(ground, 0x80d8ff, profile.radius, reduced ? 0.35 : 0.7);
       } else if (spellId === 'temporal_stasis') {
-        const ground = target || this._groundTarget(origin, safeDirection, 10);
+        const ground = target || worldImpact?.point || this._groundTarget(origin, safeDirection, 10);
         this.particles.spawnTemporalStasisDome(ground, duration || profile.duration, profile.radius, damage || 35);
         this.particles.spawnTemporalRewind(ground, reduced ? 0.55 : 1.0);
       } else if (spellId === 'time_dilation') {
-        const ground = target || this._groundTarget(origin, safeDirection, 7);
+        const ground = target || worldImpact?.point || this._groundTarget(origin, safeDirection, 7);
         this.particles.spawnTimeDilation(ground, profile.radius, duration || profile.duration);
         this.particles.spawnImpactShockwave(ground, 0x7c4dff, profile.radius, reduced ? 0.35 : 0.65);
       }
@@ -143,7 +145,16 @@ export class SpellVfxDirector {
     } else {
       // Basic attacks and offensive skills use the richer elemental projectile
       // models already owned by ParticleSystem, plus a cheap directional flare.
-      this.particles.spawnProjectile(origin, safeDirection, spellType, element);
+      const travelDistance = Number(worldImpact?.distance);
+      this.particles.spawnProjectile(
+        origin,
+        safeDirection,
+        spellType,
+        element,
+        24,
+        Number.isFinite(travelDistance) ? Math.max(0.5, travelDistance) : 35,
+        worldImpact
+      );
       this.particles.spawnMuzzleFlash(origin, safeDirection, element);
     }
 

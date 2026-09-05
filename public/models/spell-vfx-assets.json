@@ -1,4 +1,4 @@
 {
   "assets": [],
-  "note": "Populate with fire, frost, light, and chrono after exporting optional local hero meshes. Procedural VFX is the default fallback."
+  "note": "Optional local hero meshes. The Blender fireball recipe registers itself here after export; missing families fall back to pooled procedural VFX."
 }

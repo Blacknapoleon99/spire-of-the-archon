@@ -5,11 +5,17 @@ import { assetLoader } from '../graphics/assetLoader.js';
 import { disposeObjectGeometries, disposeSprite } from '../graphics/resourceUtils.js';
 
 const PLAYER_MODEL_URLS = Object.freeze({
-  pyromancer: '/models/sorcerer.glb',
-  cryomancer: '/models/knight.glb',
-  luminary: '/models/druid.glb',
-  chronomancer: '/models/elf_mage.glb'
+  pyromancer: ['/models/player_pyromancer.glb', '/models/sorcerer.glb'],
+  cryomancer: ['/models/player_cryomancer.glb', '/models/knight.glb'],
+  luminary: ['/models/player_luminary.glb', '/models/druid.glb'],
+  chronomancer: ['/models/player_chronomancer.glb', '/models/elf_mage.glb']
 });
+
+const HERO_ASSET_MANIFEST = typeof fetch === 'function'
+  ? fetch('/models/hero-assets.json', { cache: 'no-store' })
+      .then(response => response.ok ? response.json() : {})
+      .catch(() => ({}))
+  : Promise.resolve({});
 
 export class PlayerEntity {
   constructor(scene, data, isLocal = false) {
@@ -65,12 +71,29 @@ export class PlayerEntity {
   }
 
   async loadRiggedModel() {
-    const url = PLAYER_MODEL_URLS[this.wizardClass] || PLAYER_MODEL_URLS.pyromancer;
+    let urls = PLAYER_MODEL_URLS[this.wizardClass] || PLAYER_MODEL_URLS.pyromancer;
     try {
-      const source = await assetLoader.loadGLTF(url);
+      const manifest = await HERO_ASSET_MANIFEST;
+      const generatedPlayers = Array.isArray(manifest.players) ? manifest.players : [];
+      const fallbackUrls = PLAYER_MODEL_URLS[this.wizardClass] || PLAYER_MODEL_URLS.pyromancer;
+      urls = generatedPlayers.includes(this.wizardClass) ? fallbackUrls : fallbackUrls.slice(1);
+      let source = null;
+      let loadedUrl = urls[urls.length - 1];
+      for (const url of urls) {
+        try {
+          source = await assetLoader.loadGLTF(url);
+          loadedUrl = url;
+          break;
+        } catch {
+          // Optional hero GLBs can be generated locally after the browser
+          // build is deployed. Keep the shipped class fallback available.
+        }
+      }
+      if (!source) throw new Error(`No avatar candidate loaded: ${urls.join(', ')}`);
       if (this.destroyed) return;
       const model = SkeletonUtils.clone(source);
       model.name = `PlayerRig_${this.wizardClass}`;
+      model.userData.assetUrl = loadedUrl;
       model.scale.setScalar(1.0);
       // The authored characters face +Z while the Spire's forward direction
       // is -Z. Keep the wrapper transform independent from network yaw.
@@ -84,6 +107,18 @@ export class PlayerEntity {
         child.castShadow = true;
         child.receiveShadow = true;
         child.frustumCulled = true;
+        const materials = Array.isArray(child.material) ? child.material : [child.material];
+        materials.forEach(material => {
+          if (!material) return;
+          material.envMapIntensity = Math.max(1, Number(material.envMapIntensity) || 0);
+          if (material.map) material.map.colorSpace = THREE.SRGBColorSpace;
+          if (material.color) material.color.lerp(new THREE.Color(0xffffff), material.map ? 0.08 : 0.22);
+          if (material.emissive) {
+            material.emissive.lerp(new THREE.Color(data.color || 0x332244), 0.12);
+            material.emissiveIntensity = Math.max(0.08, Number(material.emissiveIntensity) || 0.08);
+          }
+          material.needsUpdate = true;
+        });
       });
 
       this.mesh.visible = false;
@@ -109,7 +144,7 @@ export class PlayerEntity {
     } catch (error) {
       // The procedural PBR wizard remains a valid fallback when a local GLB
       // is absent or generated on a different installation.
-      console.warn(`[PlayerEntity] Rigged avatar unavailable (${url}); using procedural fallback.`, error?.message || error);
+      console.warn(`[PlayerEntity] Rigged avatar unavailable (${urls.join(', ')}); using procedural fallback.`, error?.message || error);
     }
   }
 

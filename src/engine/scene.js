@@ -122,6 +122,10 @@ export class EngineScene {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     // Capping at 1.0 default eliminates 75% GPU fillrate bottlenecks on 1440p/4K displays
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.0));
+    // Keep generated PBR textures and emissive spell colors in the same
+    // color-managed space on every browser/GPU combination.
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.useLegacyLights = false;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // Much faster than PCFSoft
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;

@@ -57,6 +57,60 @@ test('server validates spell ownership, cooldowns and damage tokens', () => {
   assert.ok(enemy.health >= before - 75);
 });
 
+test('server rejects projectile damage through an interior world blocker', () => {
+  const state = new GameState('LOS', { to: () => ({ emit: () => {} }) }, { difficulty: 'standard' });
+  state.initFloor(4);
+  const player = state.addPlayer('p1', 'Tester', 'pyromancer');
+  player.x = 0;
+  player.y = 0;
+  player.z = 10;
+  const enemy = {
+    id: 'los_enemy', type: 'sentinel', name: 'LOS Target', x: 0, y: 0, z: -15,
+    health: 200, maxHealth: 200, isAlive: true, invulnerable: false
+  };
+  state.enemies.set(enemy.id, enemy);
+  state.handleSpellCast('p1', {
+    spellId: 'fireball',
+    spellType: 'skill1',
+    origin: { x: 0, y: 1.7, z: 10 },
+    direction: { x: 0, y: 0, z: -1 }
+  });
+  const before = enemy.health;
+  state.handleDamageToEnemy(enemy.id, 75, 'fire', 'p1');
+  assert.equal(enemy.health, before);
+  assert.equal(state.players.get('p1').lastSpell.worldImpact.kind, 'object');
+});
+
+test('server mirrors the floor nine central platform for projectile LOS', () => {
+  const state = new GameState('LOS9', { to: () => ({ emit: () => {} }) }, { difficulty: 'standard' });
+  state.initFloor(9);
+  const hit = state.resolveEnemyProjectileImpact(
+    { x: 0, y: 1.8, z: 15 },
+    { x: 0, y: 1.2, z: -15 },
+    0.22
+  );
+  assert.equal(hit.worldImpact?.kind, 'object');
+  assert.ok(hit.worldImpact.distance < hit.distance);
+});
+
+test('boss ground hazards damage only players inside the authoritative volume', () => {
+  const state = new GameState('HAZARD', { to: () => ({ emit: () => {} }) }, { difficulty: 'standard' });
+  state.initFloor(5);
+  state.enemies.clear();
+  const player = state.addPlayer('p1', 'Tester', 'pyromancer');
+  player.x = 0;
+  player.z = 0;
+  const hazard = state.registerBossHazard('magma_caldera', 0, 0, 5.5, 2.2, 35);
+  const before = player.health;
+  state.tick(0.05);
+  assert.equal(player.health, before - 35);
+  player.x = 20;
+  const outside = player.health;
+  state.tick(0.55);
+  assert.equal(player.health, outside);
+  assert.ok(state.activeHazards.includes(hazard));
+});
+
 test('movement bounds, floor objectives and profile sync are authoritative', () => {
   const events = [];
   const io = { to: () => ({ emit: (event, payload) => events.push({ event, payload }) }) };

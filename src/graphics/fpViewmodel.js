@@ -478,7 +478,25 @@ export class FPViewmodel {
   }
 
   loadRiggedModel(colorConfig) {
-    assetLoader.loadGLTFRaw('/models/fp_viewmodel_wand.glb')
+    const loadCandidate = async () => {
+      const manifest = typeof fetch === 'function'
+        ? await fetch('/models/hero-assets.json', { cache: 'no-store' }).then(response => response.ok ? response.json() : {}).catch(() => ({}))
+        : {};
+      const candidates = manifest.fpWand
+        ? ['/models/fp_wand_hero.glb', '/models/fp_viewmodel_wand.glb']
+        : ['/models/fp_viewmodel_wand.glb'];
+      let lastError = null;
+      for (const url of candidates) {
+        try {
+          return await assetLoader.loadGLTFRaw(url);
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError || new Error('No first-person wand asset available');
+    };
+
+    loadCandidate()
       .then((gltf) => {
         const model = gltf.scene;
         // Position and scale first-person viewmodel in front of camera
@@ -508,7 +526,11 @@ export class FPViewmodel {
         });
 
         // Wand Tip Effect: Add High-Intensity Elemental Point Light
-        let wandTip = model.getObjectByName('FocusCrystal') || model.getObjectByName('WandShaft') || model;
+        let wandTip = model.getObjectByName('WandTip')
+          || model.getObjectByName('FocusCrystal')
+          || model.getObjectByName('WandCore')
+          || model.getObjectByName('WandShaft')
+          || model;
         const wandLight = new THREE.PointLight(colorConfig.light, 3.4, 4.5);
         wandTip.add(wandLight);
         this.riggedWandLight = wandLight;

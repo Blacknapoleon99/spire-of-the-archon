@@ -3,6 +3,12 @@
   "notes": "Generate as low-poly, single-material hero meshes. Transient particles remain procedural and pooled.",
   "assets": [
     {
+      "id": "spell_fireball",
+      "prompt": "dark arcane fantasy hero fireball, layered molten glass core, glowing orange rune channels, four sculpted flame fins, subtle ember shell, clean game-ready PBR, centered origin, no floor, no external particles",
+      "runtime": "spell_fireball.glb",
+      "budgetKb": 768
+    },
+    {
       "id": "spell_fire_tornado_core",
       "prompt": "dark arcane fantasy fire tornado core, molten glass eye, three carved ember fins, emissive orange cracks, clean low-poly silhouette, no floor, no particles, game-ready PBR, origin centered",
       "runtime": "spell_fire_tornado_core.glb",

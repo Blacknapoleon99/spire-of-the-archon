@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { TextureGenerator } from './textureGenerator.js';
 import { DecalManager } from './shaders/impactDecals.js';
 
+const AIR_IMPACT_NORMAL = Object.freeze({ x: 0, y: 0, z: 0 });
+
 /**
  * High-performance 3D Particle, Projectile, Shockwave & Persistent Vortex/AOE System
  */
@@ -36,6 +38,11 @@ export class ParticleSystem {
     // High-Fidelity Pre-allocated Geometries for Upgraded Spells
     this.geoCore = new THREE.SphereGeometry(0.38, 14, 14);
     this.geoCoreHighPoly = new THREE.SphereGeometry(0.48, 18, 18);
+    // Hero fireball layers.  The generated GLB can replace the shell at load
+    // time, while these pooled shader layers keep the spell spectacular when
+    // the optional local asset is unavailable.
+    this.geoFireballShell = new THREE.IcosahedronGeometry(0.58, 2);
+    this.geoFireballFlameCard = new THREE.PlaneGeometry(0.72, 1.5, 1, 10);
     this.geoTorusFire = new THREE.TorusGeometry(0.68, 0.08, 8, 20);
     this.geoFlameWave = new THREE.TorusGeometry(1.2, 0.22, 8, 24, Math.PI);
     this.geoEmberBolt = new THREE.ConeGeometry(0.18, 0.8, 8);
@@ -99,6 +106,76 @@ export class ParticleSystem {
       map: flamePBR.diffuseMap,
       emissive: new THREE.Color(0xff3d00),
       emissiveIntensity: 2.5,
+      side: THREE.DoubleSide
+    });
+    this.matFireballShell = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uColor: { value: new THREE.Color(0xff4b0a) }
+      },
+      vertexShader: `
+        uniform float uTime;
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        void main() {
+          vNormal = normalize(normalMatrix * normal);
+          vec3 p = position;
+          float pulse = sin(uTime * 8.0 + position.y * 7.0 + position.x * 4.0) * 0.035;
+          p += normalize(position) * pulse;
+          vPosition = p;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec3 uColor;
+        varying vec3 vNormal;
+        varying vec3 vPosition;
+        void main() {
+          float rim = pow(1.0 - max(0.0, dot(normalize(vNormal), vec3(0.0, 0.0, 1.0))), 1.8);
+          float turbulence = 0.72 + 0.28 * sin(uTime * 10.0 + vPosition.x * 8.0 + vPosition.y * 9.0);
+          vec3 hot = mix(uColor * 0.65, vec3(1.0, 0.58, 0.08), rim * 0.8 + 0.2);
+          gl_FragColor = vec4(hot * turbulence, 0.92);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+    this.matFireballFlameCard = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uPhase: { value: 0 },
+        uColor: { value: new THREE.Color(0xff5a00) }
+      },
+      vertexShader: `
+        uniform float uTime;
+        uniform float uPhase;
+        varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          vec3 p = position;
+          p.x += sin(uTime * 9.0 + uPhase + uv.y * 12.0) * (0.04 + uv.y * 0.09);
+          p.z += cos(uTime * 7.0 + uPhase + uv.y * 8.0) * (0.03 + uv.y * 0.06);
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uPhase;
+        uniform vec3 uColor;
+        varying vec2 vUv;
+        void main() {
+          float edge = 1.0 - smoothstep(0.08, 0.5, abs(vUv.x - 0.5));
+          float fade = smoothstep(0.0, 0.14, vUv.y) * (1.0 - smoothstep(0.55, 1.0, vUv.y));
+          float lick = 0.72 + 0.28 * sin(uTime * 10.0 + uPhase + vUv.y * 14.0);
+          vec3 color = mix(uColor * 0.55, vec3(1.0, 0.72, 0.16), vUv.y);
+          gl_FragColor = vec4(color, edge * fade * lick * 0.68);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
       side: THREE.DoubleSide
     });
     this.matFireBolt = this.matFirePlasmaCore;
@@ -905,10 +982,9 @@ export class ParticleSystem {
   /**
    * Spawns an animated magical projectile with unique 3D geometries per spell (zero dynamic allocations)
    */
-  spawnProjectile(origin, direction, spellType, element, speed = 24, maxDist = 35) {
+  spawnProjectile(origin, direction, spellType, element, speed = 24, maxDist = 35, worldImpact = null) {
     const group = new THREE.Group();
     group.position.copy(origin);
-    group.position.y += 1.2;
 
     const normDir = direction.clone().normalize();
     const rotQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normDir);
@@ -917,8 +993,15 @@ export class ParticleSystem {
 
     if (element === 'fire') {
       if (spellType === 'skill1') {
-        // Fireball: Molten core with dual counter-rotating coronal flare rings & 4 orbiting plasma embers
+        // Fireball: a layered 3D molten shell, animated flame cards, dual
+        // coronal rings, and orbiting plasma embers.  The shell is deliberately
+        // separate from the optional generated GLB so the fallback remains
+        // visually complete on every device.
+        const shell = new THREE.Mesh(this.geoFireballShell, this.matFireballShell);
+        group.add(shell);
+
         const core = new THREE.Mesh(this.geoCoreHighPoly, this.matFirePlasmaCore);
+        core.scale.setScalar(0.72);
         group.add(core);
 
         const ringOuter = new THREE.Mesh(this.geoAstrolabeOuter, this.matFireRuneRing);
@@ -935,7 +1018,34 @@ export class ParticleSystem {
           group.add(orb);
           orbiters.push(orb);
         }
-        group.userData = { ringOuter, ringInner, orbiters, orbitRadius: 0.72 };
+
+        const flameCards = [];
+        for (let c = 0; c < 4; c++) {
+          const cardMaterial = this.matFireballFlameCard.clone();
+          cardMaterial.uniforms.uPhase.value = c * Math.PI * 0.5;
+          const card = new THREE.Mesh(this.geoFireballFlameCard, cardMaterial);
+          const angle = c * Math.PI * 0.5;
+          card.position.set(Math.cos(angle) * 0.26, 0.05, Math.sin(angle) * 0.26);
+          card.rotation.y = angle;
+          card.scale.set(0.72, 0.92 + (c % 2) * 0.12, 1);
+          group.add(card);
+          flameCards.push(card);
+        }
+
+        const heroAsset = this.heroAssets.fireball?.clone?.(true) || null;
+        if (heroAsset) {
+          heroAsset.name = 'FireballHeroAsset';
+          heroAsset.scale.setScalar(0.95);
+          heroAsset.traverse(child => {
+            if (child.isMesh) {
+              child.castShadow = false;
+              child.receiveShadow = false;
+              child.frustumCulled = true;
+            }
+          });
+          group.add(heroAsset);
+        }
+        group.userData = { ringOuter, ringInner, orbiters, flameCards, shell, heroAsset, orbitRadius: 0.72 };
       } else if (spellType === 'skill2') {
         // Flame Wave: Tiered crescent magma wave with forward thermal crest
         const wave = new THREE.Mesh(this.geoFlameWave, this.matFireWave);
@@ -1038,8 +1148,26 @@ export class ParticleSystem {
       maxDist,
       element,
       spellType,
+      worldImpact,
+      collisionRadius: spellType === 'skill1' ? 0.52 : (spellType === 'skill2' ? 0.38 : 0.22),
+      previousPosition: group.position.clone(),
       trailTimer: 0
     });
+  }
+
+  /**
+   * A surface-aware impact used by the shared collision path.  Ground hits
+   * receive the full decal/shockwave treatment; wall and ceiling hits still
+   * get the burst without placing a floor decal at the wrong height.
+   */
+  spawnSurfaceImpact(pos, element = 'fire', normal = null) {
+    const isGround = !normal || Math.abs(Number(normal.y) || 0) > 0.55;
+    if (isGround) {
+      this.spawnBurst(pos, element, this.qualityProfile === 'ultra' ? 32 : 22, { addDecal: true });
+    } else {
+      const count = this.qualityProfile === 'performance' ? 10 : 16;
+      this.spawnBurst(pos, element, count, { addDecal: false });
+    }
   }
 
   /**
@@ -1346,7 +1474,7 @@ export class ParticleSystem {
   /**
    * Spawns an explosion / burst of particles and expanding shockwave
    */
-  spawnBurst(pos, element, count = 28) {
+  spawnBurst(pos, element, count = 28, options = {}) {
     let color = 0xff5722;
     let secondaryColor = 0xffd600;
     if (element === 'frost') {
@@ -1364,7 +1492,7 @@ export class ParticleSystem {
     }
 
     // Trigger dynamic spell impact decal mark on ground
-    if (this.decalManager) {
+    if (this.decalManager && options.addDecal !== false) {
       this.decalManager.spawnImpactDecal(pos, element);
     }
 
@@ -1656,6 +1784,7 @@ export class ParticleSystem {
     // 1. Update Projectiles
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
+      p.previousPosition.copy(p.mesh.position);
       const moveStep = p.speed * deltaTime;
       p.mesh.position.addScaledVector(p.direction, moveStep);
       p.distanceTraveled += moveStep;
@@ -1678,6 +1807,16 @@ export class ParticleSystem {
         if (ud.spiral) {
           ud.spiral.rotation.y += deltaTime * 16;
           ud.spiral.rotation.z += deltaTime * 8;
+        }
+        if (ud.shell?.material?.uniforms?.uTime) ud.shell.material.uniforms.uTime.value += deltaTime;
+        if (ud.flameCards) {
+          ud.flameCards.forEach((card, idx) => {
+            const uniforms = card.material?.uniforms;
+            if (uniforms?.uTime) uniforms.uTime.value += deltaTime;
+            card.rotation.z += deltaTime * (idx % 2 === 0 ? 3.5 : -2.8);
+            const pulse = 1.0 + Math.sin((p.distanceTraveled + idx) * 7.0) * 0.08;
+            card.scale.y = pulse * (0.92 + (idx % 2) * 0.12);
+          });
         }
         if (ud.orbiters) {
           p.orbitAngle = (p.orbitAngle || 0) + deltaTime * 8;
@@ -1718,8 +1857,11 @@ export class ParticleSystem {
       }
 
       // Check collision callback
-      if (onProjectileHit && onProjectileHit(p)) {
-        this.spawnBurst(p.mesh.position, p.element, 28);
+      const collision = onProjectileHit ? onProjectileHit(p) : null;
+      if (collision) {
+        const impactPoint = collision.point || collision.position;
+        if (impactPoint) p.mesh.position.copy(impactPoint);
+        this.spawnSurfaceImpact(p.mesh.position, p.element, collision === true ? AIR_IMPACT_NORMAL : (collision.normal || null));
         if (p.light) this.releaseProjectileLight(p.light);
         this.scene.remove(p.mesh);
         this.projectiles.splice(i, 1);
@@ -1727,7 +1869,8 @@ export class ParticleSystem {
       }
 
       if (p.distanceTraveled >= p.maxDist) {
-        this.spawnBurst(p.mesh.position, p.element, 16);
+        if (p.worldImpact?.point) p.mesh.position.set(p.worldImpact.point.x, p.worldImpact.point.y, p.worldImpact.point.z);
+        this.spawnSurfaceImpact(p.mesh.position, p.element, p.worldImpact?.normal || null);
         if (p.light) this.releaseProjectileLight(p.light);
         this.scene.remove(p.mesh);
         this.projectiles.splice(i, 1);

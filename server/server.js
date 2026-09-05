@@ -244,10 +244,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('hazard_damage', ({ damage }) => {
+  socket.on('hazard_damage', ({ damage, type } = {}) => {
     const room = roomManager.getRoomBySocket(socket);
     if (room && room.gameState) {
-      room.gameState.handleHazardDamage(socket.id, damage);
+      room.gameState.handleHazardDamage(socket.id, damage, type);
     }
   });
 

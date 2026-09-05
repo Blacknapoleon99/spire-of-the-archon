@@ -163,7 +163,15 @@ export class AssetLoader {
       '/models/elf_mage.glb',
       '/models/heavy_warrior.glb'
     ];
-    return Promise.allSettled(floor1Urls.map(u => this.loadGLTF(u)));
+    const optional = typeof fetch === 'function'
+      ? fetch('/models/hero-assets.json', { cache: 'no-store' })
+          .then(response => response.ok ? response.json() : {})
+          .catch(() => ({}))
+          .then(manifest => Promise.all((Array.isArray(manifest.players) ? manifest.players : [])
+            .filter(classId => ['pyromancer', 'cryomancer', 'luminary', 'chronomancer'].includes(classId))
+            .map(classId => this.loadGLTF(`/models/player_${classId}.glb`))))
+      : Promise.resolve([]);
+    return Promise.allSettled([...floor1Urls.map(u => this.loadGLTF(u)), optional]);
   }
 
   preloadFloor2() {

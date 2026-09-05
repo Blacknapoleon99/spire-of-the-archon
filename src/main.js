@@ -37,6 +37,10 @@ import { VoiceChatSystem } from './systems/voiceChatSystem.js';
 import { GroundSpellManager } from './graphics/groundSpells.js';
 import { animationPackManager } from './graphics/animationPack.js';
 import { accountClient } from './state/accountClient.js';
+import { firstWorldHit, firstWorldHitAlongRay, resolveGroundTarget } from './shared/worldCollision.js';
+
+const CLIENT_GROUND_AIMED_SPELLS = new Set(['fire_tornado', 'frost_nova', 'divine_sanctuary', 'time_dilation', 'temporal_stasis']);
+const CLIENT_SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION = new Set(['glacial_bulwark', 'radiant_heal', 'cleansing_wave', 'temporal_rewind']);
 
 /** Loading screen lore tips */
 const LOADING_TIPS = [
@@ -897,11 +901,14 @@ class GameApp {
       }
       const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
       const direction = new THREE.Vector3(data.direction.x, data.direction.y, data.direction.z);
+      const target = data.target ? new THREE.Vector3(data.target.x, data.target.y, data.target.z) : null;
       this.spellVfx.playCast({
         spellId: data.spellId,
         spellType: data.spellType,
         origin,
         direction,
+        target,
+        worldImpact: data.worldImpact || null,
         element: data.element,
         damage: data.damage,
         seed: data.token,
@@ -941,7 +948,11 @@ class GameApp {
         const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
         const target = new THREE.Vector3(data.targetPos.x, data.targetPos.y, data.targetPos.z);
         const dir = target.clone().sub(origin).normalize();
-        this.particles.spawnProjectile(origin, dir, 'basic', 'frost');
+        const worldImpact = data.worldImpact || null;
+        const maxDist = Number.isFinite(Number(worldImpact?.distance))
+          ? Math.max(0.5, Number(worldImpact.distance))
+          : origin.distanceTo(target);
+        this.particles.spawnProjectile(origin, dir, 'basic', 'frost', 24, maxDist, worldImpact);
       } else if (data.ability === 'ground_slam') {
         soundEngine.playGolemSlam();
         const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
@@ -952,7 +963,11 @@ class GameApp {
         const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
         const target = new THREE.Vector3(data.targetPos.x, data.targetPos.y, data.targetPos.z);
         const dir = target.clone().sub(origin).normalize();
-        this.particles.spawnProjectile(origin, dir, 'basic', 'chrono');
+        const worldImpact = data.worldImpact || null;
+        const maxDist = Number.isFinite(Number(worldImpact?.distance))
+          ? Math.max(0.5, Number(worldImpact.distance))
+          : origin.distanceTo(target);
+        this.particles.spawnProjectile(origin, dir, 'basic', 'chrono', 24, maxDist, worldImpact);
       }
     });
 
@@ -1424,6 +1439,37 @@ class GameApp {
     });
   }
 
+  resolveSpellCollision(spellConfig, origin, direction) {
+    const floor = this.tower?.currentFloor || this.currentFloor || 1;
+    const colliders = this.tower?.colliders || [];
+    if (CLIENT_GROUND_AIMED_SPELLS.has(spellConfig?.id)) {
+      const target = resolveGroundTarget(origin, direction, spellConfig.id === 'time_dilation' ? 7 : 10, { floor, colliders });
+      return {
+        target: new THREE.Vector3(target.point.x, target.point.y, target.point.z),
+        worldImpact: target.obstruction ? {
+          point: target.point,
+          normal: target.normal,
+          kind: target.obstruction.kind,
+          distance: target.distance
+        } : null
+      };
+    }
+
+    const ranged = !CLIENT_SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION.has(spellConfig?.id);
+    if (!ranged) return { target: null, worldImpact: null };
+    const range = spellConfig?.id === 'flame_wave' ? 18 : 42;
+    const hit = firstWorldHitAlongRay(origin, direction, range, { floor, colliders, radius: spellConfig?.id === 'fireball' ? 0.52 : 0.22 });
+    return {
+      target: null,
+      worldImpact: hit ? {
+        point: hit.point,
+        normal: hit.normal,
+        kind: hit.kind,
+        distance: hit.distance
+      } : null
+    };
+  }
+
   tryCastSpell(slot, spellConfig) {
     if (!this.cooldowns.isReady(slot)) return;
     if (this.localPlayer.mana < spellConfig.mana) {
@@ -1437,6 +1483,7 @@ class GameApp {
 
     const dir = this.physics.updateCrosshairAim();
     const origin = this.engineScene.camera.position.clone();
+    const collision = this.resolveSpellCollision(spellConfig, origin, dir);
 
     const modifiedDamage = Math.round((spellConfig.damage || 0) * derived.spellPowerMultiplier);
 
@@ -1455,6 +1502,8 @@ class GameApp {
       spellType: slot,
       origin,
       direction: dir,
+      target: collision.target,
+      worldImpact: collision.worldImpact,
       element: spellConfig.element,
       damage: modifiedDamage,
       source: 'local'
@@ -1484,6 +1533,7 @@ class GameApp {
       spellType: slot,
       origin: { x: origin.x, y: origin.y - 0.2, z: origin.z },
       direction: { x: dir.x, y: dir.y, z: dir.z },
+      target: collision.target ? { x: collision.target.x, y: collision.target.y, z: collision.target.z } : null,
       damage: modifiedDamage,
       element: spellConfig.element,
       manaCost: spellConfig.mana
@@ -1897,6 +1947,7 @@ class GameApp {
           const dir = this.physics.updateCrosshairAim();
           const origin = this.engineScene.camera.position.clone();
           const basicDmg = Math.round(spells.basic.damage * derived.spellPowerMultiplier);
+          const collision = this.resolveSpellCollision(spells.basic, origin, dir);
 
           // Instantly spawn local projectile & muzzle flash through the VFX director.
           this.spellVfx.playCast({
@@ -1904,6 +1955,7 @@ class GameApp {
             spellType: 'basic',
             origin,
             direction: dir,
+            worldImpact: collision.worldImpact,
             element: spells.basic.element,
             damage: basicDmg,
             source: 'local'
@@ -1914,6 +1966,7 @@ class GameApp {
             spellType: 'basic',
             origin: { x: origin.x, y: origin.y - 0.2, z: origin.z },
             direction: { x: dir.x, y: dir.y, z: dir.z },
+            target: null,
             damage: basicDmg,
             element: spells.basic.element,
             manaCost: 0
@@ -2024,6 +2077,19 @@ class GameApp {
     this.particles.update(
       deltaTime,
       (projectile) => {
+        const worldHit = firstWorldHit(
+          projectile.previousPosition || projectile.mesh.position,
+          projectile.mesh.position,
+          {
+            floor: this.tower?.currentFloor || this.currentFloor || 1,
+            colliders: this.tower?.colliders || [],
+            radius: projectile.collisionRadius || 0.22
+          }
+        );
+        if (worldHit) {
+          return { point: worldHit.point, normal: worldHit.normal, kind: worldHit.kind };
+        }
+
         for (const enemy of this.enemies.values()) {
           if (!enemy.isAlive) continue;
           const dist = projectile.mesh.position.distanceTo(enemy.position);
@@ -2169,7 +2235,6 @@ class GameApp {
           this.engineScene.triggerDamageFlash(0.35);
           this.particles.spawnFloatingText(this.localPlayer.position, `-${damage} HP`, '#ff3b30');
           soundEngine.playDamage();
-          onlineNetwork.takeHazardDamage(damage);
         }
       });
     }

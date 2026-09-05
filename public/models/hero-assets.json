@@ -1,0 +1,5 @@
+{
+  "players": [],
+  "fpWand": false,
+  "note": "Blender hero exports register themselves here. Empty entries intentionally use the shipped GLB/procedural fallbacks."
+}

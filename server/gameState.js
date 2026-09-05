@@ -1,6 +1,11 @@
 import { CLASS_IDS, getDifficulty, getFloorObjective, MAX_FLOORS } from '../src/shared/gameData.js';
 import { CLASS_SPELL_IDS, PLAYER_CLASS_CONFIG, SPELL_RULES, clampNumber, getSpellRule, sanitizeDirection } from '../src/shared/combatRules.js';
 import { getAllClassTalents } from '../src/systems/talents.js';
+import { firstWorldHitAlongRay, getWorldFloorConfig, resolveGroundTarget } from '../src/shared/worldCollision.js';
+
+const GROUND_AIMED_SPELLS = new Set(['fire_tornado', 'frost_nova', 'divine_sanctuary', 'time_dilation', 'temporal_stasis']);
+const FIELD_DAMAGE_SPELLS = new Set(['fire_tornado', 'frost_nova', 'time_dilation', 'temporal_stasis']);
+const SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION = new Set(['glacial_bulwark', 'radiant_heal', 'cleansing_wave', 'temporal_rewind']);
 
 // World-space puzzle anchors are shared with the client arena.  Keeping these
 // coordinates on the authority means a forged socket event cannot solve a
@@ -113,6 +118,7 @@ export class GameState {
     this.players = new Map(); // socketId -> PlayerState
     this.enemies = new Map(); // enemyId -> EnemyState
     this.projectiles = [];
+    this.activeHazards = [];
     this.activePuzzles = {};
 
     // Puzzles for Exploration & Climactic Boss Levels (Floors 5, 10, 15)
@@ -340,6 +346,7 @@ export class GameState {
     this.resetObjective(this.floor);
     this.enemies.clear();
     this.projectiles = [];
+    this.activeHazards = [];
     this.currentQuiz = null;
     this.quizVotes.clear();
     this.lastHitAt.clear();
@@ -820,6 +827,146 @@ export class GameState {
     player.lastInputAt = now;
   }
 
+  getServerSpellColliders() {
+    const colliders = [];
+    // Keep authority-side blockers dependency-free while mirroring the
+    // gameplay-critical static colliders authored by TowerEnvironment.
+    if (this.floor === 1) {
+      if (!this.puzzles.floor1?.unlocked) colliders.push({ type: 'cylinder', x: 0, z: 18.0, radius: 2.5, isGate: true });
+      for (const point of [[-9, -9], [9, -9], [-9, 9], [9, 9]]) {
+        colliders.push({ type: 'cylinder', x: point[0], z: point[1], radius: 1.4 });
+      }
+      for (const point of [[-7, -5], [7, -5], [0, -11]]) {
+        colliders.push({ type: 'cylinder', x: point[0], z: point[1], radius: 1.2 });
+      }
+    } else if (this.floor === 2) {
+      for (const point of [[-12, -4], [0, -14], [12, -4]]) {
+        colliders.push({ type: 'cylinder', x: point[0], z: point[1], radius: 1.8 });
+      }
+    } else if (this.floor === 3) {
+      for (const point of [[0, -17], [0, 17], [17, 0], [-17, 0]]) {
+        colliders.push({ type: 'cylinder', x: point[0], z: point[1], radius: 1.2 });
+      }
+    }
+    if (this.floor === 4 || this.floor === 9) {
+      colliders.push({ type: 'rect', minX: -8, maxX: 8, minZ: -8, maxZ: 8 });
+    }
+    return colliders;
+  }
+
+  resolveEnemyProjectileImpact(origin, target, radius = 0.22) {
+    const dx = (Number(target?.x) || 0) - (Number(origin?.x) || 0);
+    const dy = (Number(target?.y) || 0) - (Number(origin?.y) || 0);
+    const dz = (Number(target?.z) || 0) - (Number(origin?.z) || 0);
+    const distance = Math.hypot(dx, dy, dz);
+    if (distance <= 0.01) return { distance: 0, worldImpact: null };
+    const direction = { x: dx / distance, y: dy / distance, z: dz / distance };
+    const hit = firstWorldHitAlongRay(origin, direction, distance, {
+      floor: this.floor,
+      config: getWorldFloorConfig(this.floor),
+      colliders: this.getServerSpellColliders(),
+      radius
+    });
+    return {
+      distance,
+      worldImpact: hit ? {
+        point: hit.point,
+        normal: hit.normal,
+        kind: hit.kind,
+        distance: hit.distance
+      } : null
+    };
+  }
+
+  clampBossGroundTarget(x, z, padding = 0.75) {
+    const config = getWorldFloorConfig(this.floor);
+    const limit = Math.max(1, config.outerRadius - Math.max(0, padding));
+    const px = Number(x) || 0;
+    const pz = Number(z) || 0;
+    const length = Math.hypot(px, pz);
+    if (length <= limit || length <= 0.001) return { x: px, y: config.floorY + 0.03, z: pz };
+    const scale = limit / length;
+    return { x: px * scale, y: config.floorY + 0.03, z: pz * scale };
+  }
+
+  registerBossHazard(type, x, z, radius, duration, damage) {
+    const point = this.clampBossGroundTarget(x, z, 0.25);
+    const hazard = {
+      id: `${type}:${this.serverTick}:${Math.random().toString(36).slice(2, 8)}`,
+      type: String(type || 'hazard').slice(0, 48),
+      x: point.x,
+      z: point.z,
+      radius: clampNumber(radius, 0.5, 40, 1),
+      damage: clampNumber(damage, 0, 250, 0),
+      expiresAt: Date.now() + clampNumber(duration, 0.1, 30, 1) * 1000,
+      lastHitAt: new Map()
+    };
+    this.activeHazards.push(hazard);
+    return hazard;
+  }
+
+  isPlayerInsideHazard(player, hazard) {
+    if (!player || !hazard) return false;
+    return Math.hypot(player.x - hazard.x, player.z - hazard.z) <= hazard.radius;
+  }
+
+  tickActiveHazards(now = Date.now()) {
+    if (!this.activeHazards.length) return;
+    const live = [];
+    for (const hazard of this.activeHazards) {
+      if (hazard.expiresAt <= now) continue;
+      live.push(hazard);
+      if (hazard.damage <= 0) continue;
+      for (const player of this.players.values()) {
+        if (!player.isAlive || player.connected === false || !this.isPlayerInsideHazard(player, hazard)) continue;
+        const readyAt = Number(hazard.lastHitAt.get(player.id) || 0);
+        if (readyAt > now) continue;
+        hazard.lastHitAt.set(player.id, now + 500);
+        this.damagePlayer(player, hazard.damage, hazard.type);
+      }
+    }
+    this.activeHazards = live;
+  }
+
+  resolveSpellWorldData(spellId, rule, origin, direction) {
+    const colliders = this.getServerSpellColliders();
+    const config = getWorldFloorConfig(this.floor);
+    if (GROUND_AIMED_SPELLS.has(spellId)) {
+      const ground = resolveGroundTarget(origin, direction, spellId === 'time_dilation' ? 7 : 10, {
+        floor: this.floor,
+        config,
+        colliders
+      });
+      return {
+        target: ground.point,
+        worldImpact: ground.obstruction ? {
+          point: ground.point,
+          normal: ground.normal,
+          kind: ground.obstruction.kind,
+          distance: ground.distance
+        } : null
+      };
+    }
+
+    const ranged = Boolean(rule?.range) && !SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION.has(spellId);
+    if (!ranged) return { target: null, worldImpact: null };
+    const hit = firstWorldHitAlongRay(origin, direction, rule.range, {
+      floor: this.floor,
+      config,
+      colliders,
+      radius: spellId === 'fireball' ? 0.52 : 0.22
+    });
+    return {
+      target: null,
+      worldImpact: hit ? {
+        point: hit.point,
+        normal: hit.normal,
+        kind: hit.kind,
+        distance: hit.distance
+      } : null
+    };
+  }
+
   handleSpellCast(socketId, spellData) {
     const player = this.players.get(socketId);
     if (!player || !player.isAlive || player.connected === false) return;
@@ -864,6 +1011,7 @@ export class GameState {
       ? requestedOrigin
       : { x: player.x, y: player.y + 1.7, z: player.z };
     const direction = sanitizeDirection(spellData?.direction);
+    const worldData = this.resolveSpellWorldData(spell, rule, origin, direction);
     const serverDamage = Math.round(rule.damage
       * clampNumber(player.spellPowerMultiplier, 0.5, 4, 1)
       * (1 + clampNumber(player.spellPowerBonus, 0, 1, 0)));
@@ -873,6 +1021,8 @@ export class GameState {
       element: rule.element,
       origin,
       direction,
+      target: worldData.target,
+      worldImpact: worldData.worldImpact,
       at: now,
       token: `${socketId}:${now}:${Math.random().toString(36).slice(2, 8)}`
     };
@@ -884,6 +1034,8 @@ export class GameState {
       spellType: typeof spellData.spellType === 'string' ? spellData.spellType : 'basic',
       origin,
       direction,
+      target: worldData.target,
+      worldImpact: worldData.worldImpact,
       damage: serverDamage,
       element: rule.element,
       mana: player.mana,
@@ -973,6 +1125,12 @@ export class GameState {
     const rule = SPELL_RULES[recentSpell.id];
     if (!rule || rule.damage <= 0) return;
 
+    if (FIELD_DAMAGE_SPELLS.has(recentSpell.id) && recentSpell.target) {
+      const fieldRadius = Number(rule.aoeRadius) || (recentSpell.id === 'time_dilation' ? 5.5 : 6.5);
+      const fieldDistance = Math.hypot(enemy.x - recentSpell.target.x, enemy.z - recentSpell.target.z);
+      if (fieldDistance > fieldRadius + 1.2) return;
+    }
+
     if (recentSpell.origin && recentSpell.direction && rule?.range) {
       const toTarget = { x: enemy.x - recentSpell.origin.x, y: enemy.y - recentSpell.origin.y, z: enemy.z - recentSpell.origin.z };
       const along = toTarget.x * recentSpell.direction.x + toTarget.y * recentSpell.direction.y + toTarget.z * recentSpell.direction.z;
@@ -983,6 +1141,13 @@ export class GameState {
       };
       const rayDistance = Math.hypot(enemy.x - nearest.x, enemy.y - nearest.y, enemy.z - nearest.z);
       if (along < -1 || along > rule.range + 3 || rayDistance > 5.5) return;
+      const worldHit = recentSpell.worldImpact || firstWorldHitAlongRay(recentSpell.origin, recentSpell.direction, rule.range, {
+        floor: this.floor,
+        config: getWorldFloorConfig(this.floor),
+        colliders: this.getServerSpellColliders(),
+        radius: recentSpell.id === 'fireball' ? 0.52 : 0.22
+      });
+      if (worldHit && along > worldHit.distance + 1.1) return;
     }
     damage = Math.max(1, Math.min(300, Number(damage) || 1));
     damage = Math.min(damage, Math.max(1, recentSpell.damage));
@@ -1732,6 +1897,11 @@ export class GameState {
     this.serverTick += 1;
     const now = Date.now();
 
+    // Boss fields are simulated by the authority. Clients render the
+    // telegraph, but never decide whether a player was inside the damaging
+    // volume or how often a tick may be applied.
+    this.tickActiveHazards(now);
+
     // Expire temporary authority-owned effects and apply regeneration.
     for (const player of this.players.values()) {
       for (const [key, effect] of Object.entries(player.statusEffects || {})) {
@@ -1907,16 +2077,22 @@ export class GameState {
 
         if (dist >= 6 && dist <= 24 && enemy.cooldown <= 0) {
           enemy.cooldown = 2.8;
+          const origin = { x: enemy.x, y: 1.8, z: enemy.z };
+          const targetPos = { x: target.x, y: 1.2, z: target.z };
+          const projectile = this.resolveEnemyProjectileImpact(origin, targetPos, 0.22);
           this.io.to(this.roomId).emit('enemy_ability', {
             enemyId: enemy.id,
             type: 'sentry',
             ability: 'arcane_laser',
-            origin: { x: enemy.x, y: 1.8, z: enemy.z },
+            origin,
             targetId: target.id,
             targetPos: { x: target.x, y: 1.2, z: target.z },
+            worldImpact: projectile.worldImpact,
             damage: 20
           });
-          this.damagePlayer(target, 20, 'sentry_laser');
+          if (!projectile.worldImpact || projectile.worldImpact.distance >= projectile.distance - 0.35) {
+            this.damagePlayer(target, 20, 'sentry_laser');
+          }
         }
       } else if (enemy.type === 'golem') {
         // === Forge Golem: Heavy Tank & Seismic Slam ===
@@ -1956,16 +2132,22 @@ export class GameState {
 
         if (dist > 8 && dist < 22 && enemy.cooldown <= 0) {
           enemy.cooldown = 2.4;
+          const origin = { x: enemy.x, y: 1.5, z: enemy.z };
+          const targetPos = { x: target.x, y: 1.2, z: target.z };
+          const projectile = this.resolveEnemyProjectileImpact(origin, targetPos, 0.22);
           this.io.to(this.roomId).emit('enemy_ability', {
             enemyId: enemy.id,
             type: 'shade',
             ability: 'void_missile',
-            origin: { x: enemy.x, y: 1.5, z: enemy.z },
+            origin,
             targetId: target.id,
             targetPos: { x: target.x, y: 1.2, z: target.z },
+            worldImpact: projectile.worldImpact,
             damage: 18
           });
-          this.damagePlayer(target, 18, 'void_missile');
+          if (!projectile.worldImpact || projectile.worldImpact.distance >= projectile.distance - 0.35) {
+            this.damagePlayer(target, 18, 'void_missile');
+          }
         } else if (dist <= 3.0 && enemy.cooldown <= 0) {
           enemy.cooldown = 1.6;
           enemy.state = 'attack';
@@ -2013,6 +2195,7 @@ export class GameState {
     const dx = target.x - boss.x;
     const dz = target.z - boss.z;
     const angle = Math.atan2(dx, dz);
+    const groundTarget = this.clampBossGroundTarget(target.x, target.z);
 
     if (dist > (boss.bossType === 'ignis' ? 4 : 6)) {
       boss.x += Math.sin(angle) * boss.speed * deltaTime;
@@ -2042,11 +2225,12 @@ export class GameState {
 
       if (boss.specialTimer <= 0) {
         boss.specialTimer = 6.0;
+        this.registerBossHazard('magma_caldera', groundTarget.x, groundTarget.z, 5.5, 2.2, 35);
         this.io.to(this.roomId).emit('boss_special', {
           bossId: boss.id,
           ability: 'magma_slam',
-          targetX: target.x,
-          targetZ: target.z,
+          targetX: groundTarget.x,
+          targetZ: groundTarget.z,
           duration: 2.2
         });
       }
@@ -2073,15 +2257,17 @@ export class GameState {
           ability: 'void_cataclysm',
           duration: 2.0
         });
+        this.registerBossHazard('void_cataclysm', boss.x, boss.z, 6.5, 2.0, 40);
       }
 
       if (boss.specialTimer <= 0) {
         boss.specialTimer = 7.0;
+        this.registerBossHazard('void_cataclysm', groundTarget.x, groundTarget.z, 3.5, 2.5, 25);
         this.io.to(this.roomId).emit('boss_special', {
           bossId: boss.id,
           ability: 'void_missiles',
-          targetX: target.x,
-          targetZ: target.z,
+          targetX: groundTarget.x,
+          targetZ: groundTarget.z,
           duration: 2.5
         });
       }
@@ -2115,11 +2301,19 @@ export class GameState {
         const chosenAbility = abilities[Math.floor(Math.random() * (boss.phase >= 2 ? 4 : 2))];
         boss.specialTimer = boss.phase === 3 ? 4.5 : 6.0;
 
+        if (chosenAbility === 'seraph_caldera') {
+          this.registerBossHazard('brimstone_seraph_caldera', groundTarget.x, groundTarget.z, 6.5, 3.0, 38);
+        } else if (chosenAbility === 'halo_singularity') {
+          this.registerBossHazard('halo_singularity', groundTarget.x, groundTarget.z, 5.0, 3.0, 30);
+        } else if (chosenAbility === 'twin_rupture') {
+          this.registerBossHazard('twin_prismatic_rupture', groundTarget.x, groundTarget.z, 9.0, 3.0, 40);
+        }
+
         this.io.to(this.roomId).emit('boss_special', {
           bossId: boss.id,
           ability: chosenAbility,
-          targetX: target.x,
-          targetZ: target.z,
+          targetX: groundTarget.x,
+          targetZ: groundTarget.z,
           duration: 3.0
         });
       }
@@ -2159,15 +2353,17 @@ export class GameState {
         boss.specialTimer = boss.phase === 3 ? 5.0 : 7.0;
 
         if (boss.phase === 1) {
+          this.registerBossHazard('chrono_dial', groundTarget.x, groundTarget.z, 3.2, 2.5, 25);
           this.io.to(this.roomId).emit('boss_special', {
             bossId: boss.id,
             ability: 'arcane_barrage',
             voiceKey: 'valerius_special_barrage',
-            targetX: target.x,
-            targetZ: target.z,
+            targetX: groundTarget.x,
+            targetZ: groundTarget.z,
             duration: 2.5
           });
         } else if (boss.phase === 2) {
+          this.registerBossHazard('chrono_dial', boss.x, boss.z, 7.0, 4.0, 35);
           this.io.to(this.roomId).emit('boss_special', {
             bossId: boss.id,
             ability: 'chrono_vortex',
@@ -2201,10 +2397,16 @@ export class GameState {
     }
   }
 
-  handleHazardDamage(playerId, damage) {
+  handleHazardDamage(playerId, damage, hazardType = '') {
     const player = this.players.get(playerId);
     if (!player || !player.isAlive || player.connected === false) return;
-    this.damagePlayer(player, clampNumber(damage, 0, 250, 0), 'hazard');
+    const now = Date.now();
+    const hazard = this.activeHazards.find(item => item.type === String(hazardType || '') && item.expiresAt > now && this.isPlayerInsideHazard(player, item));
+    if (!hazard || hazard.damage <= 0) return;
+    const readyAt = Number(hazard.lastHitAt.get(player.id) || 0);
+    if (readyAt > now) return;
+    hazard.lastHitAt.set(player.id, now + 500);
+    this.damagePlayer(player, Math.min(hazard.damage, clampNumber(damage, 0, 250, hazard.damage)), hazard.type);
   }
 
   broadcastState() {
