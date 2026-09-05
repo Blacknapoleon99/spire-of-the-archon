@@ -57,6 +57,31 @@ def baked_albedo(name, color, pattern='stone', size=256, seed=0.0):
     return image
 
 
+def baked_scalar(name, pattern='stone', size=256, seed=0.0, low=0.18, high=0.82):
+    """Create a packed grayscale detail map for roughness/normal strength."""
+    width = max(64, int(size))
+    height = width
+    image = bpy.data.images.new(f'{name}_Scalar', width=width, height=height, alpha=False)
+    pixels = [0.0] * (width * height * 4)
+    for py in range(height):
+        v = py / max(1, height - 1)
+        for px in range(width):
+            u = px / max(1, width - 1)
+            coarse = _hash_noise(math.floor(u * 16), math.floor(v * 16), seed)
+            fine = _hash_noise(math.floor(u * 72), math.floor(v * 72), seed + 7.0)
+            wave = 0.5 + 0.5 * math.sin((u * 18.0 + v * 11.0 + seed) * math.pi)
+            value = clamp(low + (high - low) * (0.56 * coarse + 0.26 * fine + 0.18 * wave))
+            idx = (py * width + px) * 4
+            pixels[idx] = value
+            pixels[idx + 1] = value
+            pixels[idx + 2] = value
+            pixels[idx + 3] = 1.0
+    image.pixels = pixels
+    image.pack()
+    image.colorspace_settings.name = 'Non-Color'
+    return image
+
+
 def pbr_material(name, color, pattern='stone', metallic=0.0, roughness=0.45,
                  emission=None, emission_strength=0.0, texture_size=256, seed=0.0,
                  alpha=1.0):
@@ -81,6 +106,22 @@ def pbr_material(name, color, pattern='stone', metallic=0.0, roughness=0.45,
     texture.interpolation = 'Linear'
     texture.location = (-220, 10)
     links.new(texture.outputs['Color'], bsdf.inputs['Base Color'])
+    # Export a real detail normal and roughness signal instead of relying on a
+    # single flat numeric roughness value. Blender's glTF exporter preserves
+    # these image links in the packed GLB for Three.js PBR materials.
+    detail = baked_scalar(f'{name}_Detail', pattern, max(128, int(texture_size // 2)), seed + 19.0,
+                          low=0.22 if pattern in ('metal', 'crystal') else 0.34,
+                          high=0.82 if pattern in ('cloth', 'leather') else 0.68)
+    detail_tex = nodes.new('ShaderNodeTexImage')
+    detail_tex.image = detail
+    detail_tex.interpolation = 'Linear'
+    detail_tex.location = (-220, -150)
+    links.new(detail_tex.outputs['Color'], bsdf.inputs['Roughness'])
+    normal = nodes.new('ShaderNodeNormalMap')
+    normal.inputs['Strength'].default_value = 0.24 if pattern in ('cloth', 'leather') else 0.16
+    normal.location = (40, -150)
+    links.new(detail_tex.outputs['Color'], normal.inputs['Color'])
+    links.new(normal.outputs['Normal'], bsdf.inputs['Normal'])
     bsdf.inputs['Metallic'].default_value = metallic
     bsdf.inputs['Roughness'].default_value = roughness
     if alpha < 1.0:

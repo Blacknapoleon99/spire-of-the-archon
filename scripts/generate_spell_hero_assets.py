@@ -83,37 +83,64 @@ def cube(name, location, scale, material, bevel=0.03, rotation=(0, 0, 0)):
     return obj
 
 
-def vortex_ribbon(name, phase, material, hot_material):
-    segments = 36
-    width = 0.20
+def vortex_tube(name, phase, material, hot_material, height=4.9, base_radius=0.32,
+                top_radius=1.36, tube_radius=0.13):
+    """Build a closed, lit flame stream instead of a billboard ribbon.
+
+    The centerline spirals around the tapered body while each sample gets a
+    real circular cross-section. The exported mesh therefore catches light
+    from every camera angle and still remains compact enough for four pooled
+    tornadoes in WebGL.
+    """
+    path_segments = 48
+    cross_segments = 10
     verts = []
     faces = []
-    for i in range(segments + 1):
-        t = i / segments
-        z = -1.42 + t * 2.84
-        radius = 0.34 + 0.96 * t + 0.12 * math.sin(t * math.pi * 2.0)
-        angle = phase + t * math.tau * 1.9
-        center = (math.cos(angle) * radius, math.sin(angle) * radius, z)
-        tangent = (-math.sin(angle), math.cos(angle), 0.0)
-        for side in (-1, 1):
-            verts.append((center[0] + tangent[0] * width * side, center[1] + tangent[1] * width * side, center[2]))
-    for i in range(segments):
-        a = i * 2
-        faces.append((a, a + 1, a + 3, a + 2))
+    for i in range(path_segments + 1):
+        t = i / path_segments
+        z = -height * 0.5 + t * height
+        wobble = math.sin(t * math.pi * 5.0 + phase) * 0.12 * (0.25 + t)
+        radius = base_radius + (top_radius - base_radius) * t + wobble
+        angle = phase + t * math.tau * 2.15
+        cx = math.cos(angle) * radius
+        cy = math.sin(angle) * radius
+        local_tube = tube_radius * (0.7 + 0.45 * math.sin(math.pi * (0.12 + 0.78 * t)))
+        for j in range(cross_segments):
+            theta = j / cross_segments * math.tau
+            # The slightly elliptical cross-section gives the stream a flame-
+            # like edge rather than a perfectly manufactured cable.
+            ring = local_tube * (0.82 + 0.18 * math.sin(theta * 3.0 + phase))
+            verts.append((cx + math.cos(theta) * ring,
+                          cy + math.sin(theta) * ring,
+                          z))
+    for i in range(path_segments):
+        for j in range(cross_segments):
+            nxt = (j + 1) % cross_segments
+            a = i * cross_segments + j
+            b = i * cross_segments + nxt
+            c = (i + 1) * cross_segments + nxt
+            d = (i + 1) * cross_segments + j
+            faces.append((a, b, c, d))
+    # Close both ends so the stream is a real volume and has no disappearing
+    # backface when viewed from inside the vortex.
+    bottom = len(verts)
+    verts.append((math.cos(phase) * base_radius, math.sin(phase) * base_radius, -height * 0.5))
+    top = len(verts)
+    verts.append((math.cos(phase + math.tau * 2.15) * top_radius,
+                  math.sin(phase + math.tau * 2.15) * top_radius, height * 0.5))
+    for j in range(cross_segments):
+        nxt = (j + 1) % cross_segments
+        faces.append((bottom, nxt, j))
+        a = path_segments * cross_segments + j
+        b = path_segments * cross_segments + nxt
+        faces.append((top, a, b))
     mesh = bpy.data.meshes.new(f'{name}_Mesh')
     mesh.from_pydata(verts, [], faces)
     mesh.update()
     obj = bpy.data.objects.new(name, mesh)
     bpy.context.collection.objects.link(obj)
     obj.data.materials.append(hot_material if int(phase * 10) % 2 else material)
-    # Give the authored ribbon actual volume so it catches light from the side
-    # instead of reading as a single flat web line in a dark room.
-    solidify = obj.modifiers.new('FlameRibbonThickness', 'SOLIDIFY')
-    solidify.thickness = 0.075
-    solidify.offset = 0.0
-    bevel = obj.modifiers.new('FlameRibbonEdgeSoftening', 'BEVEL')
-    bevel.width = 0.018
-    bevel.segments = 2
+    smooth(obj)
     return obj
 
 
@@ -140,7 +167,7 @@ def save_manifest(asset_id):
     if asset_id not in assets:
         assets.append(asset_id)
     manifest['generator'] = 'scripts/generate_spell_hero_assets.py'
-    manifest['version'] = 'spire-spell-v3-authored'
+    manifest['version'] = 'spire-spell-v4-volumetric'
     with open(MANIFEST, 'w', encoding='utf-8') as handle:
         json.dump(manifest, handle, indent=2)
         handle.write('\n')
@@ -167,18 +194,33 @@ def build_fire():
     root = bpy.data.objects.new('FireTornadoHeroRoot', None)
     scene.collection.objects.link(root)
     root['asset_contract'] = 'spire-fire-vfx-v3-authored'
-    flame = pbr_material('FireTornado_Flame', (0.78, 0.025, 0.003), 'ember', metallic=0.12, roughness=0.22,
-                         emission=(1.0, 0.08, 0.002), emission_strength=6, texture_size=256, seed=30)
-    hot = pbr_material('FireTornado_Hot', (1.0, 0.23, 0.006), 'ember', metallic=0.08, roughness=0.17,
-                       emission=(1.0, 0.18, 0.004), emission_strength=9, texture_size=256, seed=31)
-    rune = pbr_material('FireTornado_Rune', (1.0, 0.10, 0.002), 'crystal', emission=(1.0, 0.05, 0.001), emission_strength=12, texture_size=128, seed=32)
+    flame = pbr_material('FireTornado_Flame', (0.46, 0.012, 0.002), 'ember', metallic=0.10, roughness=0.28,
+                         emission=(1.0, 0.035, 0.001), emission_strength=1.7, texture_size=512, seed=30)
+    hot = pbr_material('FireTornado_Hot', (0.98, 0.13, 0.003), 'ember', metallic=0.06, roughness=0.19,
+                       emission=(1.0, 0.12, 0.002), emission_strength=3.6, texture_size=512, seed=31)
+    smoke = pbr_material('FireTornado_Smoke', (0.035, 0.008, 0.004), 'stone', metallic=0.0, roughness=0.78,
+                         emission=(0.12, 0.008, 0.002), emission_strength=0.25, texture_size=256, seed=33, alpha=0.62)
+    rune = pbr_material('FireTornado_Rune', (1.0, 0.07, 0.001), 'crystal', emission=(1.0, 0.025, 0.001), emission_strength=6.0, texture_size=256, seed=32)
     pieces = [
-        sphere('VortexCore', (0, 0, 0), (0.34, 0.34, 1.15), flame),
-        cone('VortexFlameBody', 0.76, 0.16, 2.72, (0, 0, 0), flame, vertices=56, scale=(1.0, 0.92, 1.0)),
+        sphere('VortexCore', (0, 0, 0), (0.42, 0.42, 1.70), hot, segments=48, rings=28),
+        cone('VortexFlameBody', 0.28, 1.52, 4.9, (0, 0, 0), flame, vertices=96, scale=(1.0, 0.92, 1.0)),
     ]
-    pieces += [vortex_ribbon(f'VortexRibbon_{i}', i * math.tau / 3, flame, hot) for i in range(3)]
-    for index, z in enumerate((-1.2, -0.45, 0.35, 1.1)):
-        pieces.append(torus(f'WindRune_{index}', 0.45 + index * 0.20, 0.018, (0, 0, z), rune, rotation=(0, 0, 0), segments=72))
+    pieces += [vortex_tube(f'FlameStream_{i}', i * math.tau / 4, flame, hot,
+                           height=5.15 - (i % 2) * 0.35,
+                           base_radius=0.25 + (i % 2) * 0.08,
+                           top_radius=1.26 + (i % 3) * 0.12,
+                           tube_radius=0.13 + (i % 2) * 0.025) for i in range(4)]
+    # Closed smoky puffs give the top of the vortex a soft silhouette without
+    # relying on a camera-facing sprite card.
+    for index, z in enumerate((1.55, 1.95, 2.25, 2.55)):
+        angle = index * math.tau / 4.0
+        pieces.append(sphere(f'SmokePuff_{index}',
+                             (math.cos(angle) * (0.82 + index * 0.08),
+                              math.sin(angle) * (0.82 + index * 0.08), z),
+                             (0.58 + index * 0.05, 0.46 + index * 0.04, 0.48), smoke,
+                             segments=32, rings=20))
+    for index, z in enumerate((-1.95, -0.9, 0.1, 1.15, 2.05)):
+        pieces.append(torus(f'WindRune_{index}', 0.48 + index * 0.22, 0.028, (0, 0, z), rune, rotation=(0, 0, 0), segments=96))
     for piece in pieces:
         piece.parent = root
     export_asset('fire', root, scene)

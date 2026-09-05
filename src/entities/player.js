@@ -26,6 +26,7 @@ export class PlayerEntity {
     this.wizardClass = data.wizardClass || 'pyromancer';
     this.color = data.color || 0x332244;
     this.isLocal = isLocal;
+    this.serverConnected = data.connected !== false;
     this.destroyed = false;
 
     this.health = data.health || 180;
@@ -64,11 +65,28 @@ export class PlayerEntity {
 
     this.hasRiggedModel = false;
     this.modelRoot = null;
+    this.visualVisible = !this.isLocal && this.serverConnected && this.isAlive;
     this.loadRiggedModel();
   }
 
   getVisualRoot() {
     return this.hasRiggedModel && this.modelRoot ? this.modelRoot : this.mesh;
+  }
+
+  /**
+   * Keep the fallback mesh and the authored GLB on the same visibility state.
+   *
+   * Remote state updates used to toggle only `mesh.visible`. Once the authored
+   * GLB finished loading it lived in `modelRoot`, so a later snapshot, death,
+   * reconnect, or host migration could hide the fallback while leaving the
+   * actual remote avatar permanently invisible. All network/lifecycle paths
+   * now go through this one gate.
+   */
+  setVisualVisibility(visible) {
+    this.visualVisible = Boolean(visible) && !this.isLocal && this.serverConnected && this.isAlive && !this.destroyed;
+    if (this.mesh) this.mesh.visible = this.visualVisible && !this.hasRiggedModel;
+    if (this.modelRoot) this.modelRoot.visible = this.visualVisible;
+    return this.visualVisible;
   }
 
   async loadRiggedModel() {
@@ -96,9 +114,13 @@ export class PlayerEntity {
       model.name = `PlayerRig_${this.wizardClass}`;
       model.userData.assetUrl = loadedUrl;
       model.scale.setScalar(1.0);
-      // The authored characters face +Z while the Spire's forward direction
-      // is -Z. Keep the wrapper transform independent from network yaw.
-      model.rotation.y = Math.PI;
+      // The Blender recipes author the face toward Blender -Y, which becomes
+      // runtime -Z after glTF's Z-up to Y-up conversion. The older fallback
+      // models use the opposite convention, so retain their historical half-
+      // turn without rotating the new authored heroes onto their backs.
+      const visualYawOffset = loadedUrl.includes('/models/player_') ? 0 : Math.PI;
+      model.rotation.y = visualYawOffset;
+      model.userData.visualYawOffset = visualYawOffset;
       // These generated humanoids are authored around their hip (roughly
       // -1..+1m Y), while world actors stand on y=0. Lift the mesh so the
       // feet sit on the floor instead of being clipped through it.
@@ -116,16 +138,19 @@ export class PlayerEntity {
           if (material.color) material.color.lerp(new THREE.Color(0xffffff), material.map ? 0.08 : 0.22);
           if (material.emissive) {
             material.emissive.lerp(new THREE.Color(this.color), 0.12);
-            material.emissiveIntensity = Math.max(0.08, Number(material.emissiveIntensity) || 0.08);
+            // Blender-authored glow maps are intentionally bright for the
+            // isolated asset preview. Clamp them in the shared scene so bloom
+            // preserves robe/skin/metal detail instead of washing the whole
+            // remote wizard into one red/blue silhouette.
+            material.emissiveIntensity = Math.min(2.6, Math.max(0.08, Number(material.emissiveIntensity) || 0.08));
           }
           material.needsUpdate = true;
         });
       });
 
-      this.mesh.visible = false;
       this.modelRoot = model;
       this.hasRiggedModel = true;
-      model.visible = !this.isLocal && this.isAlive;
+      this.setVisualVisibility(this.visualVisible);
       // Move UI attachments to the rigged root so they track the real
       // character instead of the hidden procedural fallback.
       this.mesh.remove(this.nameplate);
@@ -327,8 +352,7 @@ export class PlayerEntity {
 
   update(deltaTime, animController) {
     if (!this.isAlive) {
-      this.mesh.visible = false;
-      if (this.modelRoot) this.modelRoot.visible = false;
+      this.setVisualVisibility(false);
       return;
     }
 
@@ -349,20 +373,18 @@ export class PlayerEntity {
     }
 
     if (this.hasRiggedModel && this.modelRoot) {
-      this.mesh.visible = false;
-      this.modelRoot.visible = !this.isLocal;
+      this.setVisualVisibility(this.visualVisible);
       this.modelRoot.position.set(this.position.x, this.position.y + 1.0, this.position.z);
-      const currentYaw = this.modelRoot.rotation.y - Math.PI;
-      this.modelRoot.rotation.y = Math.PI + THREE.MathUtils.lerp(currentYaw, this.rotationY, Math.min(1.0, 14 * deltaTime));
+      const yawOffset = Number(this.modelRoot.userData.visualYawOffset) || 0;
+      const currentYaw = this.modelRoot.rotation.y - yawOffset;
+      this.modelRoot.rotation.y = yawOffset + THREE.MathUtils.lerp(currentYaw, this.rotationY, Math.min(1.0, 14 * deltaTime));
       // Small procedural breathing keeps static generated GLBs alive without
       // invoking incompatible embedded animation tracks on older exports.
       const bob = Math.sin(performance.now() * 0.003 + this.id.length) * (this.isMoving ? 0.035 : 0.018);
       this.modelRoot.position.y += bob;
       if (this.isCasting) this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, -0.08, Math.min(1, deltaTime * 14));
       else this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, 0, Math.min(1, deltaTime * 8));
-    } else {
-      this.mesh.visible = !this.isLocal;
-    }
+    } else this.setVisualVisibility(this.visualVisible);
 
     if (this.castTimer > 0) {
       this.castTimer -= deltaTime;
@@ -382,6 +404,7 @@ export class PlayerEntity {
 
   resurrect(pos = null) {
     this.isAlive = true;
+    this.serverConnected = true;
     this.health = this.maxHealth;
     this.mana = this.maxMana;
     if (pos) {
@@ -390,12 +413,11 @@ export class PlayerEntity {
     }
     if (this.mesh) {
       this.mesh.position.copy(this.position);
-      this.mesh.visible = !this.isLocal;
     }
     if (this.modelRoot) {
       this.modelRoot.position.set(this.position.x, this.position.y + 1.0, this.position.z);
-      this.modelRoot.visible = !this.isLocal;
     }
+    this.setVisualVisibility(true);
   }
 
   destroy() {

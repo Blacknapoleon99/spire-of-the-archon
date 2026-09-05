@@ -46,9 +46,31 @@ with sync_playwright() as playwright:
     guest.locator('#hud:not(.hidden)').wait_for(state='visible', timeout=30000)
     host.wait_for_timeout(6000)
     guest.wait_for_timeout(6000)
+    host_visuals = host.evaluate("""() => [...(window.__spireGame?.players?.values?.() || [])]
+      .filter(player => !player.isLocal)
+      .map(player => ({ name: player.name, classId: player.wizardClass,
+        hasRiggedModel: player.hasRiggedModel,
+        rootVisible: Boolean(player.modelRoot?.visible),
+        fallbackVisible: Boolean(player.mesh?.visible),
+        visualVisible: Boolean(player.visualVisible),
+        assetUrl: player.modelRoot?.userData?.assetUrl || null }))""")
+    guest_visuals = guest.evaluate("""() => [...(window.__spireGame?.players?.values?.() || [])]
+      .filter(player => !player.isLocal)
+      .map(player => ({ name: player.name, classId: player.wizardClass,
+        hasRiggedModel: player.hasRiggedModel,
+        rootVisible: Boolean(player.modelRoot?.visible),
+        fallbackVisible: Boolean(player.mesh?.visible),
+        visualVisible: Boolean(player.visualVisible),
+        assetUrl: player.modelRoot?.userData?.assetUrl || null }))""")
     host.screenshot(path=str(ARTIFACT_DIR / 'spire-host-remote-hero.png'), full_page=True)
     guest.screenshot(path=str(ARTIFACT_DIR / 'spire-guest-remote-hero.png'), full_page=True)
-    print({'room': room_code, 'hostGlb': host_glb, 'guestGlb': guest_glb, 'logs': [line for line in logs if 'AssetLoader' in line or 'PlayerEntity' in line or 'Draco' in line]})
+    print({'room': room_code, 'hostGlb': host_glb, 'guestGlb': guest_glb,
+           'hostVisuals': host_visuals, 'guestVisuals': guest_visuals,
+           'logs': [line for line in logs if 'AssetLoader' in line or 'PlayerEntity' in line or 'Draco' in line]})
     assert any('player_cryomancer.glb' in url for url in host_glb)
     assert any('player_pyromancer.glb' in url for url in guest_glb)
+    assert any(item['classId'] == 'cryomancer' and item['hasRiggedModel'] and item['rootVisible'] and item['visualVisible']
+               and item['assetUrl'] and item['assetUrl'].endswith('player_cryomancer.glb') for item in host_visuals)
+    assert any(item['classId'] == 'pyromancer' and item['hasRiggedModel'] and item['rootVisible'] and item['visualVisible']
+               and item['assetUrl'] and item['assetUrl'].endswith('player_pyromancer.glb') for item in guest_visuals)
     browser.close()

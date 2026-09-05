@@ -41,10 +41,26 @@ with sync_playwright() as playwright:
     page.wait_for_timeout(900)
     page.screenshot(path=str(ARTIFACT_DIR / 'spire-local-fire-tornado.png'), full_page=True)
     stats = page.evaluate('window.__vfxPerf || null')
-    print({'glb': loaded_glb, 'vfx': stats, 'pageErrors': errors, 'failed': failed})
+    fire_visual = page.evaluate("""() => {
+      const vortex = window.__spireGame?.particles?.vortices?.find(item => item.type === 'fire_tornado');
+      return vortex ? {
+        hasHeroAsset: Boolean(vortex.heroAsset),
+        hasClosedVolume: Boolean(vortex.volume),
+        heroPosition: vortex.heroAsset ? vortex.heroAsset.position.toArray() : null,
+        heroScale: vortex.heroAsset ? vortex.heroAsset.scale.toArray() : null,
+        volumePosition: vortex.volume ? vortex.volume.position.toArray() : null,
+        volumeVisible: Boolean(vortex.volume?.visible),
+        groupPosition: vortex.group ? vortex.group.position.toArray() : null,
+        flatCardsVisible: (vortex.flameCards || []).filter(card => card.visible).length,
+        groundedY: vortex.group?.position?.y ?? null
+      } : null;
+    }""")
+    print({'glb': loaded_glb, 'vfx': stats, 'fireVisual': fire_visual, 'pageErrors': errors, 'failed': failed})
     assert not errors, errors
     assert not failed, failed
     assert any('player_pyromancer.glb' in url for url, status in loaded_glb if status == 200)
     assert any('fp_wand_hero.glb' in url for url, status in loaded_glb if status == 200)
     assert any('spell_fireball.glb' in url for url, status in loaded_glb if status == 200)
+    assert fire_visual and fire_visual['hasHeroAsset'] and fire_visual['hasClosedVolume']
+    assert fire_visual['flatCardsVisible'] == 0
     browser.close()

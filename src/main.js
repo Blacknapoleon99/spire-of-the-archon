@@ -149,6 +149,11 @@ class GameApp {
     this.basicAttackCount = 0;
     this.gameTime = 0;
 
+    // Read-only browser diagnostics used by the multiplayer/asset smoke tests
+    // and useful when validating a Render deployment. No gameplay authority
+    // is exposed here; the server remains the source of truth.
+    if (typeof window !== 'undefined') window.__spireGame = this;
+
     // Death / Respawn
     this.isDead = false;
     this.respawnTimer = 0;
@@ -466,7 +471,8 @@ class GameApp {
       const entity = this.players.get(data.socketId);
       if (entity) {
         entity.isAlive = false;
-        entity.mesh.visible = false;
+        entity.serverConnected = false;
+        entity.setVisualVisibility(false);
         this.ui.addKillFeedEntry(`${entity.name} lost the leyline connection; holding their place.`);
       }
     });
@@ -617,7 +623,7 @@ class GameApp {
         if (isLocal) {
           this.localPlayer = player;
           onlineNetwork.localPlayerId = pData.id;
-          player.mesh.visible = false;
+          player.setVisualVisibility(false);
           if (this.fpViewmodel) this.fpViewmodel.destroy();
           this.fpViewmodel = new FPViewmodel(this.engineScene.camera, player.wizardClass);
           this.ui.startGameHUD(player);
@@ -629,7 +635,7 @@ class GameApp {
         this.localPlayer = first;
         onlineNetwork.localPlayerId = first.id;
         first.isLocal = true;
-        first.mesh.visible = false;
+        first.setVisualVisibility(false);
         if (this.fpViewmodel) this.fpViewmodel.destroy();
         this.fpViewmodel = new FPViewmodel(this.engineScene.camera, first.wizardClass);
         this.ui.startGameHUD(first);
@@ -735,8 +741,9 @@ class GameApp {
           existing.talentPoints = pData.talentPoints;
           existing.talents = pData.talents;
           existing.isAlive = pData.isAlive;
+          existing.serverConnected = pData.connected !== false;
           existing.score = pData.score;
-          if (!existing.isLocal) existing.mesh.visible = pData.connected !== false && pData.isAlive !== false;
+          existing.setVisualVisibility(pData.connected !== false && pData.isAlive !== false);
           if (existing.syncHealth) {
             existing.syncHealth(pData.health, pData.maxHealth);
           }
@@ -754,10 +761,11 @@ class GameApp {
         } else {
           const newPlayer = new PlayerEntity(this.engineScene.scene, pData, isLocal);
           this.players.set(pData.id, newPlayer);
-          if (!isLocal && (pData.connected === false || pData.isAlive === false)) newPlayer.mesh.visible = false;
+          newPlayer.serverConnected = pData.connected !== false;
+          newPlayer.setVisualVisibility(!isLocal && pData.connected !== false && pData.isAlive !== false);
           if (isLocal) {
             this.localPlayer = newPlayer;
-            newPlayer.mesh.visible = false;
+            newPlayer.setVisualVisibility(false);
           }
         }
       });

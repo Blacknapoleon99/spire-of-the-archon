@@ -6,7 +6,14 @@
     "chronomancer"
   ],
   "fpWand": true,
-  "note": "Generated hero meshes are enabled when present; the shipped GLB/procedural fallback remains available if a file is absent.",
-  "generator": "scripts/generate_fp_wand_hero.py",
-  "version": "spire-fp-wand-v3-authored"
+  "assets": {
+    "pyromancer": { "url": "/models/player_pyromancer.glb", "lod": "hero", "textureSet": "pbr-2k-packed", "sockets": ["Hand_L", "Hand_R", "CastSocket", "HeadSocket"] },
+    "cryomancer": { "url": "/models/player_cryomancer.glb", "lod": "hero", "textureSet": "pbr-2k-packed", "sockets": ["Hand_L", "Hand_R", "CastSocket", "HeadSocket"] },
+    "luminary": { "url": "/models/player_luminary.glb", "lod": "hero", "textureSet": "pbr-2k-packed", "sockets": ["Hand_L", "Hand_R", "CastSocket", "HeadSocket"] },
+    "chronomancer": { "url": "/models/player_chronomancer.glb", "lod": "hero", "textureSet": "pbr-2k-packed", "sockets": ["Hand_L", "Hand_R", "CastSocket", "HeadSocket"] },
+    "fpWand": { "url": "/models/fp_wand_hero.glb", "lod": "hero", "textureSet": "pbr-2k-packed", "sockets": ["WandTipSocket"] }
+  },
+  "note": "Generated PBR hero meshes are enabled when present; the shipped GLB/procedural fallback remains available if a file is absent.",
+  "generator": "scripts/generate_player_heroes.py",
+  "version": "spire-player-v4-pbr-rig-ready"
 }

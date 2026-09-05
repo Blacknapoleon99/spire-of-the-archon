@@ -6,7 +6,14 @@
     "light",
     "chrono"
   ],
+  "assetMeta": {
+    "fireball": { "url": "/models/spell_fireball.glb", "lod": "hero", "textureSet": "pbr-1k-packed", "sockets": ["ImpactSocket"] },
+    "fire": { "url": "/models/spell_fire_tornado_core.glb", "lod": "hero", "textureSet": "pbr-1k-packed", "sockets": ["SpellSocket"] },
+    "frost": { "url": "/models/spell_frost_crystal.glb", "lod": "hero", "textureSet": "pbr-1k-packed", "sockets": ["SpellSocket"] },
+    "light": { "url": "/models/spell_luminary_halo.glb", "lod": "hero", "textureSet": "pbr-1k-packed", "sockets": ["SpellSocket"] },
+    "chrono": { "url": "/models/spell_chrono_astrolabe.glb", "lod": "hero", "textureSet": "pbr-1k-packed", "sockets": ["SpellSocket"] }
+  },
   "note": "Authored Blender anchors are enabled per family; pooled procedural VFX remains active for animation and graceful fallback.",
   "generator": "scripts/generate_spell_hero_assets.py",
-  "version": "spire-spell-v3-authored"
+  "version": "spire-spell-v4-volumetric"
 }

@@ -304,7 +304,7 @@ def build_hero(hero_id, colors):
     if hero_id not in players:
         players.append(hero_id)
     manifest['generator'] = 'scripts/generate_player_heroes.py'
-    manifest['version'] = 'spire-player-v3-authored'
+    manifest['version'] = 'spire-player-v4-pbr-rig-ready'
     with open(HERO_MANIFEST, 'w', encoding='utf-8') as handle:
         json.dump(manifest, handle, indent=2)
         handle.write('\n')
@@ -313,4 +313,3 @@ def build_hero(hero_id, colors):
 
 for hero_id, colors in HEROES.items():
     build_hero(hero_id, colors)
-

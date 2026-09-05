@@ -149,7 +149,7 @@ def build():
         manifest = {'players': [], 'fpWand': False}
     manifest['fpWand'] = True
     manifest['generator'] = 'scripts/generate_fp_wand_hero.py'
-    manifest['version'] = 'spire-fp-wand-v3-authored'
+    manifest['version'] = 'spire-fp-wand-v4-pbr-rig-ready'
     with open(HERO_MANIFEST, 'w', encoding='utf-8') as handle:
         json.dump(manifest, handle, indent=2)
         handle.write('\n')
@@ -157,4 +157,3 @@ def build():
 
 
 build()
-

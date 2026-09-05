@@ -175,7 +175,8 @@ export class SpellVfxDirector {
       activeParticles: this.particles.particles.length,
       activeVortices: this.particles.vortices.length,
       activeEffects: this.particles.spellEffects.length,
-      activeText: this.particles.floatingTexts.length
+      activeText: this.particles.floatingTexts.length,
+      heroAssets: Object.keys(this.particles.heroAssets || {})
     };
   }
 

@@ -179,7 +179,7 @@ def build():
     if 'fireball' not in assets:
         assets.append('fireball')
     manifest['generator'] = 'scripts/generate_spell_fireball.py'
-    manifest['version'] = 'spire-spell-v3-authored'
+    manifest['version'] = 'spire-spell-v4-volumetric'
     with open(SPELL_MANIFEST, 'w', encoding='utf-8') as handle:
         json.dump(manifest, handle, indent=2)
         handle.write('\n')

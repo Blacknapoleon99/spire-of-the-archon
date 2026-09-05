@@ -239,6 +239,10 @@ export class ParticleSystem {
 
     // Pre-allocated Vortex Geometries for Zero-Allocation Ultimate Casting
     this.geoVortexFunnel = new THREE.CylinderGeometry(2.8, 0.32, 6.8, 48, 12, true);
+    // Closed volume used by the authored fire asset and by the procedural
+    // fallback. Its noise shader gives the tornado a fire/smoke body instead
+    // of a flat cone or camera-facing flame cards.
+    this.geoVortexVolume = new THREE.CylinderGeometry(1.45, 0.28, 5.8, 64, 24, false);
     this.geoVortexCore = new THREE.CylinderGeometry(0.9, 0.18, 6.4, 32, 8, true);
     this.geoVortexRibbons = [
       new THREE.TorusGeometry(1.25, 0.055, 8, 64, Math.PI * 1.7),
@@ -260,7 +264,9 @@ export class ParticleSystem {
     this.geoVortexFlameCore = new THREE.SphereGeometry(1.0, 32, 20);
     this.geoVortexFlameCard = new THREE.PlaneGeometry(0.82, 4.9, 1, 12);
     this.geoVortexEmbers = this._createVortexEmberGeometry(72, 2.75, 6.5);
-    this.geoVortexRuneRing = new THREE.RingGeometry(0.3, 5.5, 32);
+    // A narrow annulus reads as a rune boundary. The previous 0.3→5.5 ring
+    // was effectively a glowing floor disk that overwhelmed the actual fire.
+    this.geoVortexRuneRing = new THREE.RingGeometry(4.65, 5.5, 64);
     this.geoDomeHalf = new THREE.SphereGeometry(6.5, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
     this.geoDomeRuneRing = new THREE.RingGeometry(0.3, 6.5, 32);
     this.geoIceSpire = new THREE.ConeGeometry(0.5, 4.2, 6);
@@ -287,6 +293,66 @@ export class ParticleSystem {
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
+    this.matVortexVolume = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0 },
+        uOpacity: { value: 0.42 },
+        uColorHot: { value: new THREE.Color(0xff8a00) },
+        uColorDeep: { value: new THREE.Color(0x7b1200) }
+      },
+      vertexShader: `
+        uniform float uTime;
+        varying vec3 vLocal;
+        void main() {
+          vLocal = position;
+          vec3 p = position;
+          float h = clamp((position.y + 2.9) / 5.8, 0.0, 1.0);
+          float wind = sin(uTime * 2.4 + position.y * 1.6) * (0.035 + h * 0.12);
+          p.x += wind + sin(uTime * 1.6 + position.y * 3.1) * h * 0.045;
+          p.z += cos(uTime * 1.9 + position.y * 2.4) * h * 0.045;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform float uTime;
+        uniform float uOpacity;
+        uniform vec3 uColorHot;
+        uniform vec3 uColorDeep;
+        varying vec3 vLocal;
+
+        float hash31(vec3 p) {
+          p = fract(p * 0.1031);
+          p += dot(p, p.yzx + 33.33);
+          return fract((p.x + p.y) * p.z);
+        }
+        float noise3(vec3 p) {
+          vec3 i = floor(p);
+          vec3 f = fract(p);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(mix(hash31(i), hash31(i + vec3(1,0,0)), f.x),
+                         mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), f.x), f.y),
+                     mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), f.x),
+                         mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), f.x), f.y), f.z);
+        }
+        void main() {
+          float h = clamp((vLocal.y + 2.9) / 5.8, 0.0, 1.0);
+          float bodyRadius = mix(0.28, 1.45, h);
+          float radial = length(vLocal.xz) / max(0.001, bodyRadius);
+          float edge = 1.0 - smoothstep(0.45, 1.04, radial);
+          float n = noise3(vLocal * vec3(2.0, 1.25, 2.0) + vec3(0.0, uTime * 1.8, 0.0));
+          float n2 = noise3(vLocal * vec3(4.8, 2.1, 4.8) - vec3(uTime * 0.7, uTime * 1.2, 0.0));
+          float flame = smoothstep(0.25, 0.78, n * 0.72 + n2 * 0.38);
+          float taper = smoothstep(0.02, 0.16, h) * (1.0 - smoothstep(0.9, 1.0, h) * 0.35);
+          vec3 color = mix(uColorDeep, uColorHot, clamp(flame + (1.0 - radial) * 0.4, 0.0, 1.0));
+          float alpha = edge * flame * taper * uOpacity;
+          gl_FragColor = vec4(color, alpha);
+        }
+      `,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    });
     this.matVortexCore = new THREE.MeshBasicMaterial({
       color: 0xffa000,
       side: THREE.DoubleSide,
@@ -301,7 +367,7 @@ export class ParticleSystem {
       emissiveIntensity: 1.8,
       side: THREE.DoubleSide,
       transparent: true,
-      opacity: 0.58,
+      opacity: 0.30,
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
@@ -624,8 +690,20 @@ export class ParticleSystem {
       for (const entry of this.vortexPool[targetType] || []) {
         if (entry.heroAsset) continue;
         const clone = model.clone(true);
-        clone.scale.setScalar(type === 'fire' ? 1.2 : 0.9);
-        clone.position.y = type === 'fire' ? 3.5 : 1.4;
+        // Fit authored assets by their measured bounds so Blender/external
+        // generator origin conventions cannot leave a spell floating or
+        // buried in the floor.
+        clone.position.set(0, 0, 0);
+        clone.scale.setScalar(1);
+        clone.updateMatrixWorld(true);
+        const sourceBounds = new THREE.Box3().setFromObject(clone);
+        const sourceHeight = Math.max(0.1, sourceBounds.max.y - sourceBounds.min.y);
+        const targetHeight = type === 'fire' ? 5.8 : 2.8;
+        clone.scale.setScalar(targetHeight / sourceHeight);
+        clone.updateMatrixWorld(true);
+        const fittedBounds = new THREE.Box3().setFromObject(clone);
+        clone.position.y += 0.06 - fittedBounds.min.y;
+        clone.userData.baseScale = clone.scale.clone();
         clone.traverse(child => {
           if (child.isMesh) {
             child.castShadow = false;
@@ -633,8 +711,25 @@ export class ParticleSystem {
             child.frustumCulled = true;
           }
         });
+        clone.userData.emissiveMaterials = [];
+        clone.traverse(child => {
+          if (!child.isMesh) return;
+          const materials = Array.isArray(child.material) ? child.material : [child.material];
+          materials.forEach(material => {
+            if (material?.emissive) clone.userData.emissiveMaterials.push(material);
+          });
+        });
         entry.group.add(clone);
         entry.heroAsset = clone;
+        // The authored 3D volume becomes the primary fire silhouette. Keep
+        // only the ground rune, pooled embers, lighting, and burst fallback;
+        // the older flat procedural ribbons are hidden when the asset exists.
+        if (type === 'fire') {
+          [entry.funnel, entry.core, ...(entry.helixRibbons || []), ...(entry.flameHelixes || []),
+            ...(entry.windRings || []), entry.flameCore, ...(entry.flameCards || [])]
+            .filter(Boolean)
+            .forEach(part => { part.visible = false; });
+        }
       }
     }
     return true;
@@ -650,6 +745,9 @@ export class ParticleSystem {
       const groundRune = new THREE.Mesh(this.geoVortexRuneRing, this.matVortexRune);
       groundRune.rotation.x = -Math.PI / 2;
       const vortexGroup = new THREE.Group();
+      const volume = new THREE.Mesh(this.geoVortexVolume, this.matVortexVolume.clone());
+      volume.position.y = 2.9;
+      vortexGroup.add(volume);
       const funnel = new THREE.Mesh(this.geoVortexFunnel, this.matVortexFunnel);
       funnel.position.y = 3.42;
       vortexGroup.add(funnel);
@@ -711,7 +809,7 @@ export class ParticleSystem {
       vortexGroup.add(emberCloud);
 
       group.add(groundRune, vortexGroup);
-      Object.assign(entry, { groundRune, vortexGroup, funnel, core, helixRibbons, flameHelixes, windRings, flameCore, flameCards, emberCloud });
+      Object.assign(entry, { groundRune, vortexGroup, volume, funnel, core, helixRibbons, flameHelixes, windRings, flameCore, flameCards, emberCloud });
     } else if (type === 'divine_sanctuary') {
       const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeDivine);
       const seal = new THREE.Mesh(this.geoDomeRuneRing, this.matSealDivine);
@@ -758,6 +856,10 @@ export class ParticleSystem {
     entry.group.visible = false;
     entry.group.rotation.set(0, 0, 0);
     entry.group.scale.set(1, 1, 1);
+    if (entry.heroAsset) {
+      entry.heroAsset.rotation.set(0, 0, 0);
+      if (entry.heroAsset.userData.baseScale) entry.heroAsset.scale.copy(entry.heroAsset.userData.baseScale);
+    }
     entry.flameHelixes?.forEach((strand, idx) => {
       strand.rotation.set(0, (idx * Math.PI * 2) / entry.flameHelixes.length, 0);
       strand.scale.set(1, 1, 1);
@@ -1240,12 +1342,14 @@ export class ParticleSystem {
       vortexGroup: entry.vortexGroup,
       funnel: entry.funnel,
       core: entry.core,
+      volume: entry.volume,
       helixRibbons: entry.helixRibbons,
       flameHelixes: entry.flameHelixes,
       windRings: entry.windRings,
       flameCore: entry.flameCore,
       flameCards: entry.flameCards,
       emberCloud: entry.emberCloud,
+      heroAsset: entry.heroAsset,
       visualScale,
       light,
       groundRune: entry.groundRune,
@@ -1949,6 +2053,30 @@ export class ParticleSystem {
         const pulse = 1.0 + Math.sin(v.life * 12) * 0.08;
         const baseScale = v.visualScale || 1;
         v.vortexGroup.scale.y = baseScale * pulse;
+      }
+      if (v.heroAsset) {
+        const fireTime = v.maxLife - v.life;
+        v.heroAsset.rotation.y += deltaTime * 2.7;
+        v.heroAsset.rotation.z = Math.sin(fireTime * 2.2) * 0.045;
+        const baseScale = v.heroAsset.userData.baseScale;
+        const pulse = 1 + Math.sin(fireTime * 11.0) * 0.035;
+        if (baseScale) {
+          v.heroAsset.scale.set(
+            baseScale.x * pulse,
+            baseScale.y * (1 + Math.sin(fireTime * 8.0) * 0.045),
+            baseScale.z * pulse
+          );
+        }
+        const glow = 1.0 + Math.sin(fireTime * 13.0) * 0.22;
+        (v.heroAsset.userData.emissiveMaterials || []).forEach(material => {
+          material.emissiveIntensity = Math.max(0.35, glow * 2.2);
+        });
+      }
+      if (v.volume) {
+        const fireTime = v.maxLife - v.life;
+        v.volume.material.uniforms.uTime.value = fireTime;
+        v.volume.material.uniforms.uOpacity.value = this.qualityProfile === 'ultra' ? 0.52 : this.qualityProfile === 'performance' ? 0.24 : 0.42;
+        v.volume.rotation.y -= deltaTime * 1.4;
       }
       if (v.helixRibbons) {
         v.helixRibbons.forEach((rib, idx) => {
