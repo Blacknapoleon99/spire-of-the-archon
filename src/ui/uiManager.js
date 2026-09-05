@@ -38,7 +38,7 @@ export class UIManager {
       sensitivity: 100, fov: 75,
       graphicsQuality: 'balanced',
       fpsLimit: 'unlimited', // '60', '120', '144', '240', 'unlimited'
-      showFps: false, showDmgNumbers: true
+      showFps: false, showDmgNumbers: true, reducedVfx: false
     };
     try {
       const saved = JSON.parse(localStorage.getItem('spire_settings'));
@@ -623,6 +623,16 @@ export class UIManager {
       });
     }
 
+    const reducedVfxToggle = document.getElementById('setting-reduced-vfx');
+    if (reducedVfxToggle) {
+      reducedVfxToggle.checked = Boolean(this.settings.reducedVfx);
+      reducedVfxToggle.addEventListener('change', () => {
+        this.settings.reducedVfx = reducedVfxToggle.checked;
+        this.saveSettings();
+        if (this._onReducedVfxChange) this._onReducedVfxChange(this.settings.reducedVfx);
+      });
+    }
+
     // Narration is bundled/local. Provider credentials stay out of the client.
   }
 
@@ -634,6 +644,8 @@ export class UIManager {
 
   /** Register FPS Limit change listener */
   onFpsLimitChange(callback) { this._onFpsLimitChange = callback; }
+
+  onReducedVfxChange(callback) { this._onReducedVfxChange = callback; }
 
   /** Loading Screen Control */
   updateLoadingProgress(pct, statusText, loreTip = null) {

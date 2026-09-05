@@ -4,6 +4,7 @@ import { PhysicsController } from './engine/physics.js';
 import { TowerEnvironment } from './graphics/towerEnvironment.js';
 import { AnimationController } from './graphics/animations.js';
 import { ParticleSystem } from './graphics/particleSystem.js';
+import { SpellVfxDirector } from './graphics/spellVfxDirector.js';
 import { FPViewmodel } from './graphics/fpViewmodel.js';
 import { AmbientParticles } from './graphics/ambientParticles.js';
 import { soundEngine } from './engine/audio.js';
@@ -58,6 +59,7 @@ class GameApp {
     this.tower = new TowerEnvironment(this.engineScene.scene);
     this.animations = new AnimationController();
     this.particles = new ParticleSystem(this.engineScene.scene);
+    this.spellVfx = new SpellVfxDirector(this.engineScene.scene, this.particles, this.engineScene);
     this.groundSpells = new GroundSpellManager(this.engineScene.scene);
     this.cooldowns = new CooldownManager();
     this.questManager = new QuestManager(this.engineScene.scene);
@@ -210,7 +212,7 @@ class GameApp {
       assetLoader.preloadFloor1(),
       assetLoader.loadGLTFRaw('/models/fp_viewmodel_wand.glb').catch(() => {}),
       animationPackManager.loadPack(),
-      Promise.resolve().then(() => this.particles.warmupSpellVisuals(this.engineScene.renderer, this.engineScene.camera)),
+      this.spellVfx.preloadHeroAssets().then(() => this.spellVfx.warmup(this.engineScene.renderer, this.engineScene.camera)),
       Promise.resolve()
     ]).then(() => {
       isPreloadFinished = true;
@@ -266,6 +268,9 @@ class GameApp {
   }
 
   clearEncounterEntities() {
+    // Discard transient combat visuals when a room/floor is reset so pooled
+    // projectiles, fields, text and lights cannot survive into the next arena.
+    this.spellVfx?.clear();
     for (const entity of this.enemies.values()) entity.destroy?.();
     this.enemies.clear();
     if (this.boss) {
@@ -353,8 +358,12 @@ class GameApp {
     // Wire Graphics Quality settings to EngineScene
     this.ui.onGraphicsQualityChange((quality) => {
       this.engineScene.setGraphicsQuality(quality);
+      this.spellVfx?.setQualityProfile(quality);
     });
     this.engineScene.setGraphicsQuality(this.ui.settings.graphicsQuality || 'balanced');
+    this.spellVfx.setQualityProfile(this.ui.settings.graphicsQuality || 'balanced');
+    this.spellVfx.setReducedMotion(Boolean(this.ui.settings.reducedVfx));
+    this.ui.onReducedVfxChange?.((enabled) => this.spellVfx.setReducedMotion(enabled));
 
     // Wire Frame Rate Limit settings (60, 120, 144, 240, Unlimited)
     this.setFpsLimit(this.ui.settings.fpsLimit || 'unlimited');
@@ -533,9 +542,13 @@ class GameApp {
     });
 
     onlineNetwork.on('player_effect', (data) => {
-      if (!data || !this.ui.shouldShowDmgNumbers()) return;
-      const player = this.players.get(data.playerId);
+      if (!data) return;
+      const player = this.players.get(data.playerId) || (this.localPlayer && (this.localPlayer.id === data.playerId || data.playerId === onlineNetwork.localPlayerId) ? this.localPlayer : null);
       if (!player) return;
+      if (data.effect === 'heal' && data.source === 'party' && !this.ui.settings.reducedVfx) {
+        this.spellVfx?.particles.spawnHealingBeam(player.position, player.position, 0.55, data.element === 'chrono' ? 'chrono' : 'light');
+      }
+      if (!this.ui.shouldShowDmgNumbers()) return;
       const color = data.effect === 'heal' || data.effect === 'regeneration' ? '#63e6a2' : '#ff6b6b';
       const prefix = data.effect === 'heal' || data.effect === 'regeneration' ? '+' : '-';
       if (Number(data.amount) > 0) this.particles.spawnFloatingText(player.position, `${prefix}${Math.round(data.amount)}`, color);
@@ -881,27 +894,16 @@ class GameApp {
       }
       const origin = new THREE.Vector3(data.origin.x, data.origin.y, data.origin.z);
       const direction = new THREE.Vector3(data.direction.x, data.direction.y, data.direction.z);
-
-      if (data.spellId === 'fire_tornado') {
-        const groundTarget = origin.clone().addScaledVector(direction, 10);
-        groundTarget.y = 0;
-        this.particles.spawnFireTornado(groundTarget, 5.0, data.damage || 32);
-      } else if (data.spellId === 'divine_sanctuary') {
-        const groundTarget = origin.clone();
-        groundTarget.y = 0;
-        this.particles.spawnDivineSanctuary(groundTarget, 6.0);
-      } else if (data.spellId === 'frost_nova') {
-        const groundTarget = origin.clone().addScaledVector(direction, 9);
-        groundTarget.y = 0;
-        this.particles.spawnBlizzardZone(groundTarget, 6.0, 7.0, data.damage || 28);
-      } else if (data.spellId === 'temporal_stasis') {
-        const groundTarget = origin.clone().addScaledVector(direction, 10);
-        groundTarget.y = 0;
-        this.particles.spawnTemporalStasisDome(groundTarget, 5.0, 6.5, data.damage || 35);
-      } else {
-        this.particles.spawnMuzzleFlash(origin, direction, data.element);
-        this.particles.spawnProjectile(origin, direction, data.spellType, data.element);
-      }
+      this.spellVfx.playCast({
+        spellId: data.spellId,
+        spellType: data.spellType,
+        origin,
+        direction,
+        element: data.element,
+        damage: data.damage,
+        seed: data.token,
+        source: 'remote'
+      });
 
       if (data.element === 'fire') {
         if (data.spellType === 'ult') soundEngine.playFlameExplosion();
@@ -1443,40 +1445,35 @@ class GameApp {
       soundEngine.playPuzzleSolve();
     }
 
-    // Area-of-Effect Field Spells
-    const isAoeVortex = ['fire_tornado', 'divine_sanctuary', 'frost_nova', 'temporal_stasis'].includes(spellConfig.id);
+    // All player spells share one deterministic VFX route. Gameplay effects
+    // remain authoritative on the relay; this is render/audio prediction only.
+    this.spellVfx.playCast({
+      spellId: spellConfig.id,
+      spellType: slot,
+      origin,
+      direction: dir,
+      element: spellConfig.element,
+      damage: modifiedDamage,
+      source: 'local'
+    });
     if (spellConfig.id === 'fire_tornado') {
-      const groundTarget = origin.clone().addScaledVector(dir, 10);
-      groundTarget.y = 0;
-      this.particles.spawnFireTornado(groundTarget, 5.0, modifiedDamage || 32);
       this.ui.showActiveSpellTimer('Infernal Fire Tornado', '🌪️', 5.0);
       this.activeVortexTimer = { remaining: 5.0, total: 5.0 };
       soundEngine.playFlameExplosion();
       soundEngine.playTornadoWindRoar(5.0);
     } else if (spellConfig.id === 'divine_sanctuary') {
-      const groundTarget = this.localPlayer.position.clone();
-      groundTarget.y = 0;
-      this.particles.spawnDivineSanctuary(groundTarget, 6.0);
       this.ui.showActiveSpellTimer('Divine Sanctuary', '🌟', 6.0);
       this.activeVortexTimer = { remaining: 6.0, total: 6.0 };
     } else if (spellConfig.id === 'frost_nova') {
-      const groundTarget = origin.clone().addScaledVector(dir, 9);
-      groundTarget.y = 0;
-      this.particles.spawnBlizzardZone(groundTarget, 6.0, 7.0, modifiedDamage || 28);
       this.ui.showActiveSpellTimer('Glacial Blizzard', '🌨️', 6.0);
       this.activeVortexTimer = { remaining: 6.0, total: 6.0 };
       soundEngine.playFrostNova();
     } else if (spellConfig.id === 'temporal_stasis') {
-      const groundTarget = origin.clone().addScaledVector(dir, 10);
-      groundTarget.y = 0;
-      this.particles.spawnTemporalStasisDome(groundTarget, 5.0, 6.5, modifiedDamage || 35);
       this.ui.showActiveSpellTimer('Temporal Stasis', '⏱️', 5.0);
       this.activeVortexTimer = { remaining: 5.0, total: 5.0 };
       soundEngine.playChrono();
     } else if (!spellConfig.heal) {
-      // Instantly spawn projectile for Skill 1 (Q), Skill 2 (E), and basic attacks
-      this.particles.spawnProjectile(origin, dir, slot, spellConfig.element);
-      this.particles.spawnMuzzleFlash(origin, dir, spellConfig.element);
+      // Visuals were already predicted by SpellVfxDirector above.
     }
 
     onlineNetwork.castSpell({
@@ -1761,6 +1758,10 @@ class GameApp {
     const deltaTime = Math.min(0.1, (currentTime - this.lastTime) / 1000);
     this.lastTime = currentTime;
     this.engineScene.updatePerformance(deltaTime);
+    this.spellVfx?.update(deltaTime, {
+      quality: this.ui.settings.graphicsQuality || 'balanced',
+      reducedMotion: Boolean(this.ui.settings.reducedVfx)
+    });
 
     // FPS calculation & Dynamic Adaptive Performance
     this.fpsFrameCount++;
@@ -1894,9 +1895,16 @@ class GameApp {
           const origin = this.engineScene.camera.position.clone();
           const basicDmg = Math.round(spells.basic.damage * derived.spellPowerMultiplier);
 
-          // Instantly spawn local projectile & muzzle flash!
-          this.particles.spawnProjectile(origin, dir, 'basic', spells.basic.element);
-          this.particles.spawnMuzzleFlash(origin, dir, spells.basic.element);
+          // Instantly spawn local projectile & muzzle flash through the VFX director.
+          this.spellVfx.playCast({
+            spellId: spells.basic.id,
+            spellType: 'basic',
+            origin,
+            direction: dir,
+            element: spells.basic.element,
+            damage: basicDmg,
+            source: 'local'
+          });
 
           onlineNetwork.castSpell({
             spellId: spells.basic.id,
@@ -2085,15 +2093,15 @@ class GameApp {
             const dist = vortex.position.distanceTo(enemy.position);
             if (dist <= vortex.radius) {
               // Dramatic cyclonic vortex suction + angular spin!
-              const toCenter = vortex.position.clone().sub(enemy.position);
-              toCenter.y = 0;
-              const dist = toCenter.length();
-              if (dist <= vortex.radius) {
-                const inward = toCenter.clone().normalize().multiplyScalar(Math.min(1.4, 0.5 + (vortex.radius - dist) * 0.16));
-                const tangent = new THREE.Vector3(-toCenter.z, 0, toCenter.x).normalize().multiplyScalar(0.5);
-                enemy.position.add(inward).add(tangent);
+              const dx = vortex.position.x - enemy.position.x;
+              const dz = vortex.position.z - enemy.position.z;
+              const planarDist = Math.hypot(dx, dz);
+              if (planarDist > 0.001 && planarDist <= vortex.radius) {
+                const inwardStrength = Math.min(1.4, 0.5 + (vortex.radius - planarDist) * 0.16);
+                const tangentStrength = 0.5;
+                enemy.position.x += (dx / planarDist) * inwardStrength + (-dz / planarDist) * tangentStrength;
+                enemy.position.z += (dz / planarDist) * inwardStrength + (dx / planarDist) * tangentStrength;
                 onlineNetwork.hitEnemy(enemy.id, vortex.tickDamage || 32, 'fire');
-                this.particles.spawnFloatingText(enemy.position, `🔥 ${vortex.tickDamage || 32}`, '#ff5722');
                 this.ui.triggerHitmarker();
               }
             }
@@ -2103,7 +2111,6 @@ class GameApp {
             const dist = vortex.position.distanceTo(this.boss.position);
             if (dist <= vortex.radius) {
               onlineNetwork.hitEnemy(this.boss.id, vortex.tickDamage || 32, 'fire');
-              this.particles.spawnFloatingText(this.boss.position, `🔥 ${vortex.tickDamage || 32}`, '#ff5722');
               this.ui.triggerHitmarker();
             }
           }
@@ -2112,7 +2119,6 @@ class GameApp {
             const dist = vortex.position.distanceTo(this.localPlayer.position);
             if (dist <= vortex.radius) {
               this.localPlayer.health = Math.min(this.localPlayer.maxHealth, this.localPlayer.health + 20);
-              this.particles.spawnFloatingText(this.localPlayer.position, '+20 HP 💖', '#ffd700');
             }
           }
         } else if (vortex.type === 'blizzard') {
@@ -2121,7 +2127,6 @@ class GameApp {
             const dist = vortex.position.distanceTo(enemy.position);
             if (dist <= vortex.radius) {
               onlineNetwork.hitEnemy(enemy.id, vortex.tickDamage || 28, 'frost');
-              this.particles.spawnFloatingText(enemy.position, `❄️ ${vortex.tickDamage || 28}`, '#00e5ff');
               this.ui.triggerHitmarker();
             }
           }
@@ -2129,7 +2134,6 @@ class GameApp {
             const dist = vortex.position.distanceTo(this.boss.position);
             if (dist <= vortex.radius) {
               onlineNetwork.hitEnemy(this.boss.id, vortex.tickDamage || 28, 'frost');
-              this.particles.spawnFloatingText(this.boss.position, `❄️ ${vortex.tickDamage || 28}`, '#00e5ff');
               this.ui.triggerHitmarker();
             }
           }
@@ -2139,7 +2143,6 @@ class GameApp {
             const dist = vortex.position.distanceTo(enemy.position);
             if (dist <= vortex.radius) {
               onlineNetwork.hitEnemy(enemy.id, vortex.tickDamage || 35, 'chrono');
-              this.particles.spawnFloatingText(enemy.position, `⏳ ${vortex.tickDamage || 35}`, '#bf5af2');
               this.ui.triggerHitmarker();
             }
           }
@@ -2147,7 +2150,6 @@ class GameApp {
             const dist = vortex.position.distanceTo(this.boss.position);
             if (dist <= vortex.radius) {
               onlineNetwork.hitEnemy(this.boss.id, vortex.tickDamage || 35, 'chrono');
-              this.particles.spawnFloatingText(this.boss.position, `⏳ ${vortex.tickDamage || 35}`, '#bf5af2');
               this.ui.triggerHitmarker();
             }
           }

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "notes": "Generate as low-poly, single-material hero meshes. Transient particles remain procedural and pooled.",
+  "assets": [
+    {
+      "id": "spell_fire_tornado_core",
+      "prompt": "dark arcane fantasy fire tornado core, molten glass eye, three carved ember fins, emissive orange cracks, clean low-poly silhouette, no floor, no particles, game-ready PBR, origin centered",
+      "runtime": "spell_fire_tornado_core.glb",
+      "budgetKb": 512
+    },
+    {
+      "id": "spell_frost_crystal",
+      "prompt": "dark arcane fantasy frost crystal spear, six-sided translucent ice facets, cyan emissive rune channels, clean low-poly silhouette, game-ready PBR, origin centered",
+      "runtime": "spell_frost_crystal.glb",
+      "budgetKb": 512
+    },
+    {
+      "id": "spell_luminary_halo",
+      "prompt": "dark arcane fantasy luminary halo, three nested brass-gold rings with carved sun glyphs, emissive ivory core, clean low-poly silhouette, game-ready PBR, origin centered",
+      "runtime": "spell_luminary_halo.glb",
+      "budgetKb": 512
+    },
+    {
+      "id": "spell_chrono_astrolabe",
+      "prompt": "dark arcane fantasy chronomancer astrolabe, violet brass clockwork rings around a faceted time crystal, clean low-poly silhouette, game-ready PBR, origin centered",
+      "runtime": "spell_chrono_astrolabe.glb",
+      "budgetKb": 512
+    }
+  ]
+}

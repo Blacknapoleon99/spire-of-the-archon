@@ -16,6 +16,23 @@ export class ParticleSystem {
     this.physicalCoins = [];
     this.decalManager = new DecalManager(this.scene);
 
+    // VFX runtime controls.  Combat effects are capped and pooled so a spell
+    // cast never has to build a new scene graph or trigger garbage collection
+    // in the middle of a frame.
+    this.qualityProfile = 'balanced';
+    this.reducedMotion = false;
+    this.spellEffects = [];
+    this.heroAssets = {};
+    this.particleMeshPool = [];
+    this.shockwavePool = [];
+    this.floatingTextPool = [];
+    this.floatingTextMaterials = new Map();
+    this.spellEffectPool = { heal_beam: [], cleansing_wave: [], glacial_bulwark: [], temporal_rewind: [], time_dilation: [] };
+    this.vortexPool = { fire_tornado: [], divine_sanctuary: [], blizzard: [], stasis_dome: [] };
+    this.vortexLightsPool = [];
+    this.activeVortexLights = new Set();
+    this.vfxStats = { casts: 0, droppedEffects: 0, poolExpansions: 0 };
+
     // High-Fidelity Pre-allocated Geometries for Upgraded Spells
     this.geoCore = new THREE.SphereGeometry(0.38, 14, 14);
     this.geoCoreHighPoly = new THREE.SphereGeometry(0.48, 18, 18);
@@ -157,6 +174,13 @@ export class ParticleSystem {
     this.geoIceSpire = new THREE.ConeGeometry(0.5, 4.2, 6);
     this.geoIceShardSpire = new THREE.ConeGeometry(0.28, 2.2, 5);
 
+    // Compact reusable shapes for support, defensive and telegraph effects.
+    this.geoSpellPulse = new THREE.RingGeometry(0.35, 0.52, 32);
+    this.geoSpellBeam = new THREE.CylinderGeometry(0.07, 0.18, 1.4, 8, 1, true);
+    this.geoShieldBubble = new THREE.SphereGeometry(1.15, 16, 12);
+    this.geoTimeGlyph = new THREE.TorusGeometry(1.0, 0.045, 8, 32);
+    this.geoSpellStar = new THREE.TetrahedronGeometry(0.11, 0);
+
     // Pre-allocated Vortex Shared Materials
     const lavaPBR = TextureGenerator.createLavaTexturePBR();
     const lavaTex = (lavaPBR && (lavaPBR.diffuseMap || lavaPBR.diffuseTex)) || null;
@@ -236,6 +260,469 @@ export class ParticleSystem {
       transparent: true,
       opacity: 0.75
     });
+
+    this.matSpellLight = new THREE.MeshBasicMaterial({ color: 0xffd700, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
+    this.matSpellFrost = new THREE.MeshStandardMaterial({ color: 0xdffbff, emissive: 0x00e5ff, emissiveIntensity: 2.4, transparent: true, opacity: 0.72, side: THREE.DoubleSide });
+    this.matSpellChrono = new THREE.MeshBasicMaterial({ color: 0xbf5af2, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false });
+    this.matSpellFire = new THREE.MeshBasicMaterial({ color: 0xff5722, transparent: true, opacity: 0.84, side: THREE.DoubleSide, depthWrite: false });
+    this.matSoul = new THREE.MeshBasicMaterial({ color: 0x9333ea, transparent: true, opacity: 0.9 });
+    this.matChronoGold = new THREE.MeshBasicMaterial({ color: 0xffd700, wireframe: true });
+    this.matGateGold = new THREE.MeshBasicMaterial({ color: 0xffd700 });
+
+    // Keep a small resident light pool.  Unlike the old single shared vortex
+    // light, simultaneous co-op fields now retain their own illumination.
+    this.vortexLightsPool = [this.vortexLight];
+    for (let i = 1; i < 4; i++) {
+      const light = new THREE.PointLight(0xff5722, 0, 24);
+      this.scene.add(light);
+      this.vortexLightsPool.push(light);
+    }
+
+    this._setupTransientPools();
+  }
+
+  _setupTransientPools() {
+    // Meshes remain in the scene graph but invisible.  Reusing them avoids the
+    // add/remove/compile churn that used to happen during dense spell bursts.
+    for (let i = 0; i < 512; i++) {
+      const mesh = new THREE.Mesh(this.geoBurstDodeca, this.trailWhiteMat);
+      mesh.visible = false;
+      mesh.castShadow = false;
+      mesh.receiveShadow = false;
+      mesh.userData._vfxPoolEntry = { mesh, active: false };
+      this.scene.add(mesh);
+      this.particleMeshPool.push(mesh.userData._vfxPoolEntry);
+    }
+
+    for (let i = 0; i < 16; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      });
+      const mesh = new THREE.Mesh(this.geoShockwaveRing, mat);
+      mesh.visible = false;
+      mesh.rotation.x = -Math.PI / 2;
+      this.scene.add(mesh);
+      this.shockwavePool.push({ mesh, active: false });
+    }
+
+    // A 1px placeholder keeps every pooled SpriteMaterial on the same shader
+    // variant before the first combat text arrives.
+    const pixel = new Uint8Array([255, 255, 255, 255]);
+    this.textPlaceholderTexture = new THREE.DataTexture(pixel, 1, 1, THREE.RGBAFormat);
+    this.textPlaceholderTexture.needsUpdate = true;
+    for (let i = 0; i < 24; i++) {
+      const material = new THREE.SpriteMaterial({
+        map: this.textPlaceholderTexture,
+        depthTest: false,
+        depthWrite: false,
+        transparent: true,
+        opacity: 0
+      });
+      const sprite = new THREE.Sprite(material);
+      sprite.visible = false;
+      sprite.userData._vfxPoolEntry = { sprite, active: false };
+      this.scene.add(sprite);
+      this.floatingTextPool.push(sprite.userData._vfxPoolEntry);
+    }
+
+    // Four concurrent co-op casters is the supported room size.  Keeping one
+    // resident entry per possible caster prevents a second player from
+    // expanding the pool during an ultimate cast.
+    for (const type of Object.keys(this.vortexPool)) {
+      for (let i = 0; i < 4; i++) this.vortexPool[type].push(this._createVortexPoolEntry(type));
+    }
+    for (const type of Object.keys(this.spellEffectPool)) {
+      for (let i = 0; i < 4; i++) this.spellEffectPool[type].push(this._createSpellEffectEntry(type));
+    }
+  }
+
+  setQualityProfile(profile = 'balanced') {
+    this.qualityProfile = ['performance', 'balanced', 'ultra'].includes(profile) ? profile : 'balanced';
+  }
+
+  setReducedMotion(enabled = false) {
+    this.reducedMotion = Boolean(enabled);
+  }
+
+  getParticleBudget() {
+    if (this.qualityProfile === 'performance') return 260;
+    if (this.qualityProfile === 'ultra') return 900;
+    return 560;
+  }
+
+  _acquireParticleMesh(geometry, material) {
+    const budget = this.getParticleBudget();
+    if (this.particles.length >= budget) {
+      this.vfxStats.droppedEffects += 1;
+      return null;
+    }
+    const entry = this.particleMeshPool.find(candidate => !candidate.active);
+    if (!entry) {
+      this.vfxStats.droppedEffects += 1;
+      return null;
+    }
+    entry.active = true;
+    entry.mesh.visible = true;
+    entry.mesh.geometry = geometry;
+    entry.mesh.material = material;
+    entry.mesh.scale.setScalar(1);
+    entry.mesh.rotation.set(0, 0, 0);
+    return entry.mesh;
+  }
+
+  _releaseParticleMesh(mesh) {
+    const entry = mesh?.userData?._vfxPoolEntry;
+    if (!entry) return;
+    entry.active = false;
+    mesh.visible = false;
+  }
+
+  _acquireShockwave() {
+    const entry = this.shockwavePool.find(candidate => !candidate.active);
+    if (!entry) {
+      this.vfxStats.droppedEffects += 1;
+      return null;
+    }
+    entry.active = true;
+    entry.mesh.visible = true;
+    return entry;
+  }
+
+  _releaseShockwave(entry) {
+    if (!entry) return;
+    entry.active = false;
+    entry.mesh.visible = false;
+    entry.mesh.material.opacity = 0;
+  }
+
+  _acquireFloatingText() {
+    const entry = this.floatingTextPool.find(candidate => !candidate.active);
+    if (!entry) {
+      this.vfxStats.droppedEffects += 1;
+      return null;
+    }
+    entry.active = true;
+    entry.sprite.visible = true;
+    return entry;
+  }
+
+  _releaseFloatingText(entry) {
+    if (!entry) return;
+    entry.active = false;
+    entry.sprite.visible = false;
+    entry.sprite.material.opacity = 0;
+  }
+
+  acquireVortexLight(colorHex, pos) {
+    for (const light of this.vortexLightsPool) {
+      if (!this.activeVortexLights.has(light)) {
+        this.activeVortexLights.add(light);
+        light.color.setHex(colorHex);
+        light.position.copy(pos);
+        light.intensity = 0;
+        return light;
+      }
+    }
+    return null;
+  }
+
+  releaseVortexLight(light) {
+    if (!light) return;
+    light.intensity = 0;
+    this.activeVortexLights.delete(light);
+  }
+
+  registerHeroAsset(type, model) {
+    if (!model) return false;
+    this.heroAssets[type] = model;
+    const targetTypes = {
+      fire: ['fire_tornado'],
+      frost: ['blizzard'],
+      light: ['divine_sanctuary'],
+      chrono: ['stasis_dome']
+    }[type] || [];
+    for (const targetType of targetTypes) {
+      for (const entry of this.vortexPool[targetType] || []) {
+        if (entry.heroAsset) continue;
+        const clone = model.clone(true);
+        clone.scale.setScalar(type === 'fire' ? 1.2 : 0.9);
+        clone.position.y = type === 'fire' ? 3.5 : 1.4;
+        clone.traverse(child => {
+          if (child.isMesh) {
+            child.castShadow = false;
+            child.receiveShadow = false;
+            child.frustumCulled = true;
+          }
+        });
+        entry.group.add(clone);
+        entry.heroAsset = clone;
+      }
+    }
+    return true;
+  }
+
+  _createVortexPoolEntry(type) {
+    const group = new THREE.Group();
+    group.visible = false;
+    group.frustumCulled = true;
+    const entry = { type, group, active: false, position: new THREE.Vector3(), light: null };
+
+    if (type === 'fire_tornado') {
+      const groundRune = new THREE.Mesh(this.geoVortexRuneRing, this.matVortexRune);
+      groundRune.rotation.x = -Math.PI / 2;
+      const vortexGroup = new THREE.Group();
+      const funnel = new THREE.Mesh(this.geoVortexFunnel, this.matVortexFunnel);
+      funnel.position.y = 3.75;
+      vortexGroup.add(funnel);
+      const helixRibbons = [];
+      for (let r = 0; r < 3; r++) {
+        const ribbon = new THREE.Mesh(this.geoVortexRibbons[r], r % 2 === 0 ? this.matVortexRibbon1 : this.matVortexRibbon2);
+        ribbon.position.y = 1.5 + r * 2.0;
+        ribbon.rotation.x = Math.PI / 2.5;
+        ribbon.rotation.z = (r * Math.PI * 2) / 3;
+        vortexGroup.add(ribbon);
+        helixRibbons.push(ribbon);
+      }
+      const core = new THREE.Mesh(this.geoVortexCore, this.matVortexCore);
+      core.position.y = 3.5;
+      vortexGroup.add(core);
+      group.add(groundRune, vortexGroup);
+      Object.assign(entry, { groundRune, vortexGroup, funnel, core, helixRibbons });
+    } else if (type === 'divine_sanctuary') {
+      const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeDivine);
+      const seal = new THREE.Mesh(this.geoDomeRuneRing, this.matSealDivine);
+      seal.rotation.x = -Math.PI / 2;
+      group.add(dome, seal);
+      Object.assign(entry, { dome, seal });
+    } else if (type === 'blizzard') {
+      const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeFrost);
+      const rune = new THREE.Mesh(this.geoDomeRuneRing, this.matRuneFrost);
+      rune.rotation.x = -Math.PI / 2;
+      const spire = new THREE.Mesh(this.geoIceSpire, this.matSpireFrost);
+      spire.position.y = 2.1;
+      group.add(dome, rune, spire);
+      Object.assign(entry, { dome, rune, spire });
+    } else if (type === 'stasis_dome') {
+      const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeStasis);
+      const gear = new THREE.Mesh(this.geoDomeRuneRing, this.matGearStasis);
+      gear.rotation.x = -Math.PI / 2;
+      group.add(dome, gear);
+      Object.assign(entry, { dome, gear });
+    }
+
+    this.scene.add(group);
+    return entry;
+  }
+
+  _acquireVortexEntry(type) {
+    const pool = this.vortexPool[type] || [];
+    const entry = pool.find(candidate => !candidate.active);
+    if (!entry) {
+      this.vfxStats.droppedEffects += 1;
+      return null;
+    }
+    entry.active = true;
+    entry.group.visible = true;
+    entry.group.scale.set(1, 1, 1);
+    entry.group.rotation.set(0, 0, 0);
+    return entry;
+  }
+
+  _releaseVortexEntry(entry) {
+    if (!entry) return;
+    entry.active = false;
+    entry.group.visible = false;
+    entry.group.rotation.set(0, 0, 0);
+    entry.group.scale.set(1, 1, 1);
+    this.releaseVortexLight(entry.light);
+    entry.light = null;
+  }
+
+  _createSpellEffectEntry(type) {
+    const group = new THREE.Group();
+    group.visible = false;
+    group.frustumCulled = true;
+    const entry = { type, group, active: false, position: new THREE.Vector3(), target: new THREE.Vector3() };
+
+    if (type === 'heal_beam') {
+      const beam = new THREE.Mesh(this.geoSpellBeam, this.matSpellLight.clone());
+      const pulse = new THREE.Mesh(this.geoSpellPulse, this.matSpellLight.clone());
+      pulse.rotation.x = -Math.PI / 2;
+      const stars = [];
+      for (let i = 0; i < 4; i++) {
+        const star = new THREE.Mesh(this.geoSpellStar, this.matSpellLight.clone());
+        stars.push(star);
+        group.add(star);
+      }
+      group.add(beam, pulse);
+      Object.assign(entry, { beam, pulse, stars });
+    } else if (type === 'cleansing_wave') {
+      const wave = new THREE.Mesh(this.geoSpellPulse, this.matSpellLight.clone());
+      const inner = new THREE.Mesh(this.geoSpellPulse, this.matSpellLight.clone());
+      wave.rotation.x = -Math.PI / 2;
+      inner.rotation.x = -Math.PI / 2;
+      const stars = [];
+      for (let i = 0; i < 6; i++) {
+        const star = new THREE.Mesh(this.geoSpellStar, this.matSpellLight.clone());
+        stars.push(star);
+        group.add(star);
+      }
+      group.add(wave, inner);
+      Object.assign(entry, { wave, inner, stars });
+    } else if (type === 'glacial_bulwark') {
+      const bubble = new THREE.Mesh(this.geoShieldBubble, this.matSpellFrost.clone());
+      const ring = new THREE.Mesh(this.geoSpellPulse, this.matFrostRuneRing.clone());
+      ring.rotation.x = -Math.PI / 2;
+      group.add(bubble, ring);
+      Object.assign(entry, { bubble, ring });
+    } else if (type === 'temporal_rewind') {
+      const outer = new THREE.Mesh(this.geoTimeGlyph, this.matSpellChrono.clone());
+      const inner = new THREE.Mesh(this.geoTimeGlyph, this.matSpellLight.clone());
+      outer.rotation.x = Math.PI / 2;
+      inner.rotation.x = Math.PI / 2;
+      group.add(outer, inner);
+      Object.assign(entry, { outer, inner });
+    } else if (type === 'time_dilation') {
+      const outer = new THREE.Mesh(this.geoTimeGlyph, this.matSpellChrono.clone());
+      const inner = new THREE.Mesh(this.geoSpellPulse, this.matSpellChrono.clone());
+      outer.rotation.x = Math.PI / 2;
+      inner.rotation.x = -Math.PI / 2;
+      group.add(outer, inner);
+      Object.assign(entry, { outer, inner });
+    }
+
+    this.scene.add(group);
+    return entry;
+  }
+
+  _acquireSpellEffect(type) {
+    const pool = this.spellEffectPool[type] || [];
+    const entry = pool.find(candidate => !candidate.active);
+    if (!entry) {
+      this.vfxStats.droppedEffects += 1;
+      return null;
+    }
+    entry.active = true;
+    entry.group.visible = true;
+    entry.group.rotation.set(0, 0, 0);
+    entry.group.scale.set(1, 1, 1);
+    return entry;
+  }
+
+  _releaseSpellEffect(entry) {
+    if (!entry) return;
+    entry.active = false;
+    entry.group.visible = false;
+    entry.group.rotation.set(0, 0, 0);
+    entry.group.scale.set(1, 1, 1);
+    entry.group.traverse(child => {
+      if (child.material?.opacity !== undefined) child.material.opacity = 0.8;
+    });
+  }
+
+  _setBeamBetween(beam, origin, target) {
+    const dx = target.x - origin.x;
+    const dy = target.y - origin.y;
+    const dz = target.z - origin.z;
+    const distance = Math.max(0.25, Math.hypot(dx, dy, dz));
+    beam.position.set(0, distance * 0.5, 0);
+    beam.scale.set(1, distance / 1.4, 1);
+    if (!this._beamAxis) this._beamAxis = new THREE.Vector3(0, 1, 0);
+    if (!this._beamDirection) this._beamDirection = new THREE.Vector3();
+    this._beamDirection.set(dx / distance, dy / distance, dz / distance);
+    beam.quaternion.setFromUnitVectors(this._beamAxis, this._beamDirection);
+    return distance;
+  }
+
+  spawnHealingBeam(origin, target = origin, duration = 0.8, element = 'light') {
+    const entry = this._acquireSpellEffect('heal_beam');
+    if (!entry) return null;
+    entry.group.position.copy(origin);
+    entry.position.copy(origin);
+    entry.target.copy(target);
+    entry.life = duration;
+    entry.maxLife = duration;
+    entry.beam.material.color.setHex(element === 'chrono' ? 0xbf5af2 : 0xffd700);
+    entry.pulse.material.color.setHex(element === 'chrono' ? 0xbf5af2 : 0xffd700);
+    entry.pulse.position.set(target.x - origin.x, target.y - origin.y, target.z - origin.z);
+    this._setBeamBetween(entry.beam, origin, target);
+    entry.stars.forEach((star, idx) => {
+      const t = (idx + 1) / (entry.stars.length + 1);
+      star.position.set((target.x - origin.x) * t, (target.y - origin.y) * t, (target.z - origin.z) * t);
+      star.scale.setScalar(0.7);
+    });
+    this.spellEffects.push(entry);
+    return entry;
+  }
+
+  spawnCleansingWave(pos, duration = 1.0) {
+    const entry = this._acquireSpellEffect('cleansing_wave');
+    if (!entry) return null;
+    entry.group.position.set(pos.x, 0.06, pos.z);
+    entry.position.copy(pos);
+    entry.life = duration;
+    entry.maxLife = duration;
+    entry.wave.scale.setScalar(0.25);
+    entry.inner.scale.setScalar(0.15);
+    entry.wave.material.opacity = 0.95;
+    entry.inner.material.opacity = 0.65;
+    entry.stars.forEach((star, idx) => {
+      const angle = (idx / entry.stars.length) * Math.PI * 2;
+      star.position.set(Math.cos(angle) * 0.8, 0.35, Math.sin(angle) * 0.8);
+      star.scale.setScalar(0.8);
+    });
+    this.spellEffects.push(entry);
+    return entry;
+  }
+
+  spawnGlacialBulwark(pos, duration = 5.0) {
+    const entry = this._acquireSpellEffect('glacial_bulwark');
+    if (!entry) return null;
+    entry.group.position.set(pos.x, 1.0, pos.z);
+    entry.position.copy(pos);
+    entry.life = duration;
+    entry.maxLife = duration;
+    entry.bubble.scale.setScalar(1.55);
+    entry.ring.scale.setScalar(1.6);
+    entry.bubble.material.opacity = 0.32;
+    entry.ring.material.opacity = 0.8;
+    this.spellEffects.push(entry);
+    return entry;
+  }
+
+  spawnTemporalRewind(pos, duration = 1.2) {
+    const entry = this._acquireSpellEffect('temporal_rewind');
+    if (!entry) return null;
+    entry.group.position.set(pos.x, 1.0, pos.z);
+    entry.position.copy(pos);
+    entry.life = duration;
+    entry.maxLife = duration;
+    entry.outer.scale.setScalar(1.5);
+    entry.inner.scale.setScalar(0.9);
+    entry.outer.material.opacity = 0.85;
+    entry.inner.material.opacity = 0.75;
+    this.spellEffects.push(entry);
+    return entry;
+  }
+
+  spawnTimeDilation(pos, radius = 5.5, duration = 3.0) {
+    const entry = this._acquireSpellEffect('time_dilation');
+    if (!entry) return null;
+    entry.group.position.set(pos.x, 0.08, pos.z);
+    entry.position.copy(pos);
+    entry.life = duration;
+    entry.maxLife = duration;
+    entry.radius = radius;
+    entry.outer.scale.setScalar(radius);
+    entry.inner.scale.setScalar(radius * 0.72);
+    entry.outer.material.opacity = 0.75;
+    entry.inner.material.opacity = 0.48;
+    this.spellEffects.push(entry);
+    return entry;
   }
 
   acquireProjectileLight(colorHex, pos) {
@@ -317,7 +804,7 @@ export class ParticleSystem {
     } else if (element === 'frost') {
       if (spellType === 'skill1') {
         // Ice Lance: Faceted crystalline spear with base frost rune disc & orbiting ice shards
-        const lance = new THREE.Mesh(this.geoLanceHighPoly, this.matFrostCrystal);
+        const lance = new THREE.Mesh(this.geoIceLance, this.matFrostCrystal);
         lance.quaternion.copy(rotQuat);
         group.add(lance);
 
@@ -402,22 +889,20 @@ export class ParticleSystem {
    * Spawns an expanding ground / air shockwave ring
    */
   spawnImpactShockwave(pos, color = 0xff5722, maxRadius = 3.5, duration = 0.45) {
-    const ringGeo = new THREE.RingGeometry(0.2, 0.6, 32);
-    const ringMat = new THREE.MeshBasicMaterial({
-      color,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.85,
-      depthWrite: false
-    });
-    const ring = new THREE.Mesh(ringGeo, ringMat);
+    const pooled = this._acquireShockwave();
+    if (!pooled) return null;
+    const ring = pooled.mesh;
+    ring.material.color.setHex(color);
+    ring.material.opacity = 0.85;
     ring.position.copy(pos);
     ring.position.y = Math.max(0.1, pos.y);
     ring.rotation.x = -Math.PI / 2;
+    ring.scale.set(1, 1, 1);
     this.scene.add(ring);
 
     this.shockwaves.push({
       mesh: ring,
+      poolEntry: pooled,
       radius: 0.4,
       maxRadius,
       duration,
@@ -432,61 +917,37 @@ export class ParticleSystem {
    * 3 counter-rotating spiral flame ribbons, white-hot plasma eye, and swirling ember helix!
    */
   spawnFireTornado(groundPos, duration = 5.0, tickDamage = 32, radius = 5.5) {
-    const group = new THREE.Group();
+    const entry = this._acquireVortexEntry('fire_tornado');
+    if (!entry) return null;
+    const group = entry.group;
     group.position.copy(groundPos);
     group.position.y = 0.05;
-
-    // 1. Swirling Molten Scorch Rune Base on Ground with Pre-allocated Lava PBR Mesh
-    const groundRune = new THREE.Mesh(this.geoVortexRuneRing, this.matVortexRune);
-    groundRune.rotation.x = -Math.PI / 2;
-    group.add(groundRune);
-
-    // 2. Multi-tier spinning fire vortex funnel
-    const vortexGroup = new THREE.Group();
-
-    // Outer spiral fire funnel with pre-allocated geometry and material
-    const funnel = new THREE.Mesh(this.geoVortexFunnel, this.matVortexFunnel);
-    funnel.position.y = 3.75;
-    vortexGroup.add(funnel);
-
-    // 3 Helical Flame Spiral Ribbons swirling around the funnel
-    const helixRibbons = [];
-    for (let r = 0; r < 3; r++) {
-      const ribbon = new THREE.Mesh(this.geoVortexRibbons[r] || this.geoVortexRibbons[0], r % 2 === 0 ? this.matVortexRibbon1 : this.matVortexRibbon2);
-      ribbon.position.y = 1.5 + r * 2.0;
-      ribbon.rotation.x = Math.PI / 2.5;
-      ribbon.rotation.z = (r * Math.PI * 2) / 3;
-      vortexGroup.add(ribbon);
-      helixRibbons.push(ribbon);
+    entry.position.copy(groundPos);
+    entry.groundRune.rotation.z = 0;
+    entry.vortexGroup.rotation.set(0, 0, 0);
+    entry.vortexGroup.scale.set(1, 1, 1);
+    entry.funnel.material.opacity = 0.82;
+    entry.core.material.opacity = 0.88;
+    entry.helixRibbons.forEach((ribbon, idx) => {
+      ribbon.rotation.z = (idx * Math.PI * 2) / 3;
+      ribbon.material.opacity = 0.9;
+    });
+    const light = this.acquireVortexLight(0xff5722, groundPos);
+    if (light) {
+      light.position.y += 3.5;
+      light.intensity = this.reducedMotion ? 2.6 : 4.8;
     }
-
-    // Inner blinding plasma core column
-    const core = new THREE.Mesh(this.geoVortexCore, this.matVortexCore);
-    core.position.y = 3.5;
-    vortexGroup.add(core);
-
-    group.add(vortexGroup);
-
-    // Modulate persistent vortex light (zero scene additions or shader recompilations)
-    if (this.vortexLight) {
-      this.vortexLight.color.setHex(0xff5722);
-      this.vortexLight.position.copy(groundPos);
-      this.vortexLight.position.y += 3.5;
-      this.vortexLight.intensity = 4.8;
-    }
-
-    this.scene.add(group);
-
     this.vortices.push({
       type: 'fire_tornado',
       group,
-      vortexGroup,
-      funnel,
-      core,
-      helixRibbons,
-      light: this.vortexLight,
-      groundRune,
-      position: groundPos.clone(),
+      vortexGroup: entry.vortexGroup,
+      funnel: entry.funnel,
+      core: entry.core,
+      helixRibbons: entry.helixRibbons,
+      light,
+      groundRune: entry.groundRune,
+      poolEntry: entry,
+      position: entry.position,
       life: duration,
       maxLife: duration,
       radius,
@@ -500,33 +961,26 @@ export class ParticleSystem {
    * Spawns Divine Sanctuary Golden Cathedral Dome
    */
   spawnDivineSanctuary(groundPos, duration = 6.0, radius = 6.0) {
-    const group = new THREE.Group();
+    const entry = this._acquireVortexEntry('divine_sanctuary');
+    if (!entry) return null;
+    const group = entry.group;
     group.position.copy(groundPos);
     group.position.y = 0.05;
-
-    // Glowing Cathedral Dome using pre-allocated half-sphere
-    const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeDivine);
-    group.add(dome);
-
-    // Ground celestial seal
-    const seal = new THREE.Mesh(this.geoDomeRuneRing, this.matSealDivine);
-    seal.rotation.x = -Math.PI / 2;
-    group.add(seal);
-
-    if (this.vortexLight) {
-      this.vortexLight.color.setHex(0xffd700);
-      this.vortexLight.position.copy(groundPos);
-      this.vortexLight.position.y += 2.0;
-      this.vortexLight.intensity = 3.8;
-    }
-
-    this.scene.add(group);
+    entry.position.copy(groundPos);
+    entry.seal.rotation.z = 0;
+    entry.dome.material.opacity = 0.38;
+    entry.seal.material.opacity = 0.75;
+    const light = this.acquireVortexLight(0xffd700, groundPos);
+    if (light) { light.position.y += 2.0; light.intensity = this.reducedMotion ? 2.0 : 3.8; }
 
     this.vortices.push({
       type: 'divine_sanctuary',
       group,
-      light: this.vortexLight,
-      position: groundPos.clone(),
+      dome: entry.dome,
+      seal: entry.seal,
+      light,
+      poolEntry: entry,
+      position: entry.position,
       life: duration,
       maxLife: duration,
       radius,
@@ -539,38 +993,28 @@ export class ParticleSystem {
    * Spawns Cryomancer Glacial Blizzard Zone
    */
   spawnBlizzardZone(groundPos, duration = 6.0, radius = 7.0, tickDamage = 28) {
-    const group = new THREE.Group();
+    const entry = this._acquireVortexEntry('blizzard');
+    if (!entry) return null;
+    const group = entry.group;
     group.position.copy(groundPos);
     group.position.y = 0.05;
-
-    // Glowing Frost Dome
-    const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeFrost);
-    group.add(dome);
-
-    // Ground Runic Frost Ring
-    const rune = new THREE.Mesh(this.geoDomeRuneRing, this.matRuneFrost);
-    rune.rotation.x = -Math.PI / 2;
-    group.add(rune);
-
-    // Central Ice Spire
-    const spire = new THREE.Mesh(this.geoIceSpire, this.matSpireFrost);
-    spire.position.y = 2.1;
-    group.add(spire);
-
-    if (this.vortexLight) {
-      this.vortexLight.color.setHex(0x00e5ff);
-      this.vortexLight.position.copy(groundPos);
-      this.vortexLight.position.y += 2.0;
-      this.vortexLight.intensity = 3.6;
-    }
-
-    this.scene.add(group);
+    entry.position.copy(groundPos);
+    entry.rune.rotation.z = 0;
+    entry.dome.material.opacity = 0.35;
+    entry.rune.material.opacity = 0.75;
+    entry.spire.scale.set(1, 1, 1);
+    const light = this.acquireVortexLight(0x00e5ff, groundPos);
+    if (light) { light.position.y += 2.0; light.intensity = this.reducedMotion ? 1.8 : 3.6; }
 
     this.vortices.push({
       type: 'blizzard',
       group,
-      light: this.vortexLight,
-      position: groundPos.clone(),
+      dome: entry.dome,
+      rune: entry.rune,
+      spire: entry.spire,
+      light,
+      poolEntry: entry,
+      position: entry.position,
       life: duration,
       maxLife: duration,
       radius,
@@ -584,33 +1028,26 @@ export class ParticleSystem {
    * Spawns Chronomancer Temporal Stasis Dome
    */
   spawnTemporalStasisDome(groundPos, duration = 5.0, radius = 6.5, tickDamage = 35) {
-    const group = new THREE.Group();
+    const entry = this._acquireVortexEntry('stasis_dome');
+    if (!entry) return null;
+    const group = entry.group;
     group.position.copy(groundPos);
     group.position.y = 0.05;
-
-    // Violet Temporal Dome
-    const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeStasis);
-    group.add(dome);
-
-    // Chronometer Gear Ring on Ground
-    const gear = new THREE.Mesh(this.geoDomeRuneRing, this.matGearStasis);
-    gear.rotation.x = -Math.PI / 2;
-    group.add(gear);
-
-    if (this.vortexLight) {
-      this.vortexLight.color.setHex(0xbf5af2);
-      this.vortexLight.position.copy(groundPos);
-      this.vortexLight.position.y += 2.0;
-      this.vortexLight.intensity = 3.6;
-    }
-
-    this.scene.add(group);
+    entry.position.copy(groundPos);
+    entry.gear.rotation.z = 0;
+    entry.dome.material.opacity = 0.38;
+    entry.gear.material.opacity = 0.75;
+    const light = this.acquireVortexLight(0xbf5af2, groundPos);
+    if (light) { light.position.y += 2.0; light.intensity = this.reducedMotion ? 1.8 : 3.6; }
 
     this.vortices.push({
       type: 'stasis_dome',
       group,
-      light: this.vortexLight,
-      position: groundPos.clone(),
+      dome: entry.dome,
+      gear: entry.gear,
+      light,
+      poolEntry: entry,
+      position: entry.position,
       life: duration,
       maxLife: duration,
       radius,
@@ -688,26 +1125,7 @@ export class ParticleSystem {
    * Spawns Expanding Astral Nova Celestial Shockwave
    */
   spawnAstralNova(centerPos, maxRadius = 18.0, duration = 2.8) {
-    const geo = new THREE.RingGeometry(0.5, 1.2, 48);
-    const mat = new THREE.MeshBasicMaterial({
-      color: 0xba68c8,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.95
-    });
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.copy(centerPos);
-    mesh.position.y = 0.2;
-    mesh.rotation.x = -Math.PI / 2;
-    this.scene.add(mesh);
-
-    this.shockwaves.push({
-      mesh,
-      life: duration,
-      maxLife: duration,
-      maxRadius,
-      color: 0xba68c8
-    });
+    this.spawnImpactShockwave(centerPos, 0xba68c8, maxRadius, duration);
 
     this.spawnBurst(centerPos, 'chrono', 48);
   }
@@ -779,9 +1197,9 @@ export class ParticleSystem {
     this.spawnImpactShockwave(pos, color, 3.6, 0.45);
 
     // Safety particle pool cap to prevent frame drops in intense combat
-    while (this.particles.length > 80) {
+    while (this.particles.length > Math.max(24, this.getParticleBudget() - count)) {
       const old = this.particles.shift();
-      if (old && old.mesh) this.scene.remove(old.mesh);
+      if (old && old.mesh) this._releaseParticleMesh(old.mesh);
     }
 
     const geo1 = this.geoBurstDodeca;
@@ -791,7 +1209,8 @@ export class ParticleSystem {
 
     for (let i = 0; i < count; i++) {
       const isSecondary = i % 3 === 0;
-      const p = new THREE.Mesh(i % 2 === 0 ? geo1 : geo2, isSecondary ? mat2 : mat1);
+      const p = this._acquireParticleMesh(i % 2 === 0 ? geo1 : geo2, isSecondary ? mat2 : mat1);
+      if (!p) break;
       p.position.copy(pos);
 
       const theta = Math.random() * Math.PI * 2;
@@ -822,11 +1241,14 @@ export class ParticleSystem {
   spawnSoulDissolution(pos, color = 0x9333ea, count = 24) {
     this.spawnImpactShockwave(pos, color, 3.2, 0.65);
 
-    const geo = new THREE.OctahedronGeometry(0.13, 0);
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9 });
+    const geo = this.geoBurstOcta;
+    const mat = this.matSoul;
+    mat.color.setHex(color);
+    mat.opacity = 0.9;
 
     for (let i = 0; i < count; i++) {
-      const p = new THREE.Mesh(geo, mat);
+      const p = this._acquireParticleMesh(geo, mat);
+      if (!p) break;
       p.position.copy(pos);
       p.position.y += Math.random() * 0.8;
 
@@ -838,7 +1260,6 @@ export class ParticleSystem {
         Math.sin(theta) * radius
       );
 
-      this.scene.add(p);
       this.particles.push({
         mesh: p,
         velocity: vel,
@@ -876,15 +1297,19 @@ export class ParticleSystem {
       this.textTextureCache.set(cacheKey, texture);
     }
 
-    const spriteMat = new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true });
-    const sprite = new THREE.Sprite(spriteMat);
+    const entry = this._acquireFloatingText();
+    if (!entry) return;
+    const sprite = entry.sprite;
+    sprite.material.map = texture;
+    sprite.material.needsUpdate = true;
+    sprite.material.opacity = 1;
     sprite.position.copy(pos);
     sprite.position.y += 1.8;
     sprite.scale.set(2.4, 1.2, 1);
-    this.scene.add(sprite);
 
     this.floatingTexts.push({
       sprite,
+      poolEntry: entry,
       life: 0.85,
       maxLife: 0.85
     });
@@ -897,18 +1322,19 @@ export class ParticleSystem {
     this.spawnImpactShockwave(pos, 0xffd700, 4.2, 0.75);
     this.spawnImpactShockwave(pos, color, 2.8, 0.55);
 
-    const geo = new THREE.OctahedronGeometry(0.12, 0);
-    const chronoMat = new THREE.MeshBasicMaterial({ color: 0xffd700, wireframe: true });
-    const violetMat = new THREE.MeshBasicMaterial({ color });
+    const geo = this.geoBurstOcta;
+    const chronoMat = this.matChronoGold;
+    const violetMat = this.matSpellChrono;
+    violetMat.color.setHex(color);
 
     for (let i = 0; i < 36; i++) {
       const angle = (i / 36) * Math.PI * 2;
       const speed = 2.5 + Math.random() * 4.5;
       const upward = 1.5 + Math.random() * 3.5;
-      const mesh = new THREE.Mesh(geo, i % 2 === 0 ? chronoMat : violetMat);
+      const mesh = this._acquireParticleMesh(geo, i % 2 === 0 ? chronoMat : violetMat);
+      if (!mesh) break;
       mesh.position.copy(pos);
       mesh.position.y += 1.0;
-      this.scene.add(mesh);
 
       this.particles.push({
         mesh,
@@ -932,18 +1358,17 @@ export class ParticleSystem {
     this.spawnImpactShockwave(pos, 0xffd700, 6.0, 0.9);
     this.spawnImpactShockwave(pos, 0x00e5ff, 4.5, 0.7);
 
-    const geo = new THREE.TetrahedronGeometry(0.16, 0);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xffd700 });
+    const geo = this.geoSpellStar;
+    const mat = this.matGateGold;
 
     for (let i = 0; i < 42; i++) {
-      const mesh = new THREE.Mesh(geo, mat);
+      const mesh = this._acquireParticleMesh(geo, mat);
+      if (!mesh) break;
       mesh.position.set(
         pos.x + (Math.random() - 0.5) * 4.5,
         pos.y + Math.random() * 4.0,
         pos.z + (Math.random() - 0.5) * 1.5
       );
-      this.scene.add(mesh);
-
       this.particles.push({
         mesh,
         velocity: new THREE.Vector3(
@@ -1023,9 +1448,9 @@ export class ParticleSystem {
     const mat = this.muzzleSparkMaterials[element] || this.muzzleSparkMaterials.fire;
 
     for (let s = 0; s < 8; s++) {
-      const spark = new THREE.Mesh(this.geoMuzzleSpark, mat);
+      const spark = this._acquireParticleMesh(this.geoMuzzleSpark, mat);
+      if (!spark) break;
       spark.position.copy(origin);
-      this.scene.add(spark);
 
       this.particles.push({
         mesh: spark,
@@ -1092,18 +1517,17 @@ export class ParticleSystem {
 
       // Emit trailing spark showers using pre-allocated geometries & materials
       p.trailTimer = (p.trailTimer || 0) + deltaTime;
-      if (p.trailTimer > 0.035) {
+      if (!this.reducedMotion && p.trailTimer > 0.035) {
         p.trailTimer = 0;
         const trailMat = this.trailMats[p.element] || this.trailMats.fire;
 
         for (let t = 0; t < 2; t++) {
-          const trailPart = new THREE.Mesh(this.geoTrailOcta, t === 1 ? this.trailWhiteMat : trailMat);
+          const trailPart = this._acquireParticleMesh(this.geoTrailOcta, t === 1 ? this.trailWhiteMat : trailMat);
+          if (!trailPart) break;
           trailPart.position.copy(p.mesh.position);
           trailPart.position.x += (Math.random() - 0.5) * 0.15;
           trailPart.position.y += (Math.random() - 0.5) * 0.15;
           trailPart.position.z += (Math.random() - 0.5) * 0.15;
-          this.scene.add(trailPart);
-
           this.particles.push({
             mesh: trailPart,
             velocity: new THREE.Vector3(
@@ -1145,8 +1569,54 @@ export class ParticleSystem {
       sw.mesh.material.opacity = sw.initialOpacity * (sw.life / sw.duration);
 
       if (sw.life <= 0) {
-        this.scene.remove(sw.mesh);
+        this._releaseShockwave(sw.poolEntry);
         this.shockwaves.splice(i, 1);
+      }
+    }
+
+    // 2b. Update pooled support/defensive spell layers.
+    for (let i = this.spellEffects.length - 1; i >= 0; i--) {
+      const effect = this.spellEffects[i];
+      effect.life -= deltaTime;
+      const progress = Math.max(0, 1 - effect.life / effect.maxLife);
+      const fade = Math.min(1, effect.life / Math.max(0.001, effect.maxLife));
+      if (effect.type === 'heal_beam') {
+        effect.beam.material.opacity = (this.reducedMotion ? 0.55 : 0.9) * fade;
+        effect.pulse.scale.setScalar(0.8 + progress * 1.8);
+        effect.pulse.material.opacity = 0.95 * fade;
+        effect.stars.forEach((star, idx) => {
+          const phase = (progress * 5 + idx * 0.7) % 1;
+          star.scale.setScalar(0.55 + (1 - phase) * 0.65);
+          star.rotation.y += deltaTime * 5;
+        });
+      } else if (effect.type === 'cleansing_wave') {
+        effect.wave.scale.setScalar(0.25 + progress * 4.0);
+        effect.inner.scale.setScalar(0.15 + progress * 2.8);
+        effect.wave.material.opacity = 0.95 * fade;
+        effect.inner.material.opacity = 0.65 * fade;
+        effect.group.rotation.y += deltaTime * 1.2;
+      } else if (effect.type === 'glacial_bulwark') {
+        const pulse = 1 + Math.sin((1 - progress) * 18) * (this.reducedMotion ? 0.03 : 0.08);
+        effect.bubble.scale.setScalar(1.55 * pulse);
+        effect.ring.rotation.z += deltaTime * 2.2;
+        effect.bubble.material.opacity = 0.32 * Math.min(1, fade * 3);
+        effect.ring.material.opacity = 0.8 * Math.min(1, fade * 3);
+      } else if (effect.type === 'temporal_rewind') {
+        effect.outer.rotation.z -= deltaTime * 5.5;
+        effect.inner.rotation.z += deltaTime * 8;
+        effect.outer.scale.setScalar(1.5 + progress * 0.8);
+        effect.inner.scale.setScalar(0.9 + progress * 0.6);
+        effect.outer.material.opacity = 0.85 * fade;
+        effect.inner.material.opacity = 0.75 * fade;
+      } else if (effect.type === 'time_dilation') {
+        effect.outer.rotation.z += deltaTime * 1.2;
+        effect.inner.rotation.z -= deltaTime * 2.4;
+        effect.outer.material.opacity = 0.75 * fade;
+        effect.inner.material.opacity = 0.48 * fade;
+      }
+      if (effect.life <= 0) {
+        this._releaseSpellEffect(effect);
+        this.spellEffects.splice(i, 1);
       }
     }
 
@@ -1180,9 +1650,19 @@ export class ParticleSystem {
       }
 
       if (v.life <= 0) {
-        this.spawnBurst(v.position, v.type === 'fire_tornado' ? 'fire' : 'light', 32);
-        if (v.light) v.light.intensity = 0;
-        this.scene.remove(v.group);
+        const endElement = {
+          fire_tornado: 'fire',
+          blizzard: 'frost',
+          stasis_dome: 'chrono',
+          divine_sanctuary: 'light',
+          chrono_vortex: 'chrono'
+        }[v.type] || 'light';
+        this.spawnBurst(v.position, endElement, 32);
+        if (v.poolEntry) this._releaseVortexEntry(v.poolEntry);
+        else {
+          if (v.light) v.light.intensity = 0;
+          this.scene.remove(v.group);
+        }
         this.vortices.splice(i, 1);
       }
     }
@@ -1210,7 +1690,7 @@ export class ParticleSystem {
       }
 
       if (part.life <= 0) {
-        this.scene.remove(part.mesh);
+        this._releaseParticleMesh(part.mesh);
         this.particles.splice(i, 1);
       }
     }
@@ -1223,7 +1703,7 @@ export class ParticleSystem {
       ft.sprite.material.opacity = Math.max(0, ft.life / ft.maxLife);
 
       if (ft.life <= 0) {
-        this.scene.remove(ft.sprite);
+        this._releaseFloatingText(ft.poolEntry);
         this.floatingTexts.splice(i, 1);
       }
     }
@@ -1324,6 +1804,13 @@ export class ParticleSystem {
       this.spawnBlizzardZone(dummyOrigin, 0.05);
       this.spawnTemporalStasisDome(dummyOrigin, 0.05);
 
+      // Pre-warm support and defensive spell shader variants as well.
+      this.spawnHealingBeam(dummyOrigin, dummyOrigin, 0.05, 'light');
+      this.spawnCleansingWave(dummyOrigin, 0.05);
+      this.spawnGlacialBulwark(dummyOrigin, 0.05);
+      this.spawnTemporalRewind(dummyOrigin, 0.05);
+      this.spawnTimeDilation(dummyOrigin, 2.0, 0.05);
+
       // 5. Force WebGL driver to compile every material shader & bind all textures in GPU VRAM
       renderer.compile(this.scene, camera);
 
@@ -1339,18 +1826,32 @@ export class ParticleSystem {
       for (let i = this.particles.length - 1; i >= 0; i--) {
         const part = this.particles[i];
         if (part.mesh.position.y < -9000) {
-          this.scene.remove(part.mesh);
+          this._releaseParticleMesh(part.mesh);
           this.particles.splice(i, 1);
+        }
+      }
+      for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+        const sw = this.shockwaves[i];
+        if (sw.mesh.position.y < -9000) {
+          this._releaseShockwave(sw.poolEntry);
+          this.shockwaves.splice(i, 1);
         }
       }
       for (let i = this.vortices.length - 1; i >= 0; i--) {
         const v = this.vortices[i];
         if (v.position.y < -9000) {
-          this.scene.remove(v.group);
+          this._releaseVortexEntry(v.poolEntry);
           this.vortices.splice(i, 1);
         }
       }
-      if (this.vortexLight) this.vortexLight.intensity = 0;
+      for (let i = this.spellEffects.length - 1; i >= 0; i--) {
+        const effect = this.spellEffects[i];
+        if (effect.position?.y < -9000) {
+          this._releaseSpellEffect(effect);
+          this.spellEffects.splice(i, 1);
+        }
+      }
+      this.vortexLightsPool.forEach(light => this.releaseVortexLight(light));
 
       console.log('[ParticleSystem] All spell visuals, Ultimate vortices, procedural PBR textures & WebGL pipelines pre-warmed & cached in VRAM.');
     } catch (err) {
@@ -1359,20 +1860,29 @@ export class ParticleSystem {
   }
 
   clear() {
-    for (const p of this.projectiles) this.scene.remove(p.mesh);
-    for (const sw of this.shockwaves) this.scene.remove(sw.mesh);
-    for (const v of this.vortices) this.scene.remove(v.group);
-    for (const part of this.particles) this.scene.remove(part.mesh);
-    for (const ft of this.floatingTexts) this.scene.remove(ft.sprite);
+    for (const p of this.projectiles) {
+      if (p.light) this.releaseProjectileLight(p.light);
+      this.scene.remove(p.mesh);
+    }
+    for (const sw of this.shockwaves) this._releaseShockwave(sw.poolEntry);
+    for (const v of this.vortices) {
+      if (v.poolEntry) this._releaseVortexEntry(v.poolEntry);
+      else this.scene.remove(v.group);
+    }
+    for (const part of this.particles) this._releaseParticleMesh(part.mesh);
+    for (const ft of this.floatingTexts) this._releaseFloatingText(ft.poolEntry);
     for (const c of this.physicalCoins) this.scene.remove(c.mesh);
-    if (this.vortexLight) this.vortexLight.intensity = 0;
-    if (this.decalManager) this.decalManager.clear();
+    this.vortexLightsPool.forEach(light => this.releaseVortexLight(light));
+    this.muzzleFlashLight.intensity = 0;
+    this.muzzleFlashTimer = 0;
+    for (const effect of this.spellEffects) this._releaseSpellEffect(effect);
+    if (this.decalManager) this.decalManager.destroy?.();
     this.projectiles = [];
     this.shockwaves = [];
     this.vortices = [];
     this.particles = [];
     this.floatingTexts = [];
     this.physicalCoins = [];
+    this.spellEffects = [];
   }
 }
-

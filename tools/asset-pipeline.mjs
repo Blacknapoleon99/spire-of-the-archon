@@ -13,7 +13,11 @@ function validate() {
   const failures = [];
   for (const entry of manifest.entries) {
     const runtime = path.join(root, manifest.runtimeRoot, entry.runtime);
-    if (!fs.existsSync(runtime)) { failures.push(`${entry.id}: missing ${entry.runtime}`); continue; }
+    if (!fs.existsSync(runtime)) {
+      if (entry.optional) continue;
+      failures.push(`${entry.id}: missing ${entry.runtime}`);
+      continue;
+    }
     if (entry.generatorScript && !fs.existsSync(path.join(root, entry.generatorScript))) failures.push(`${entry.id}: missing source ${entry.generatorScript}`);
     const sizeKb = fs.statSync(runtime).size / 1024;
     if (sizeKb > entry.budgetKb) failures.push(`${entry.id}: ${Math.round(sizeKb)}KB exceeds ${entry.budgetKb}KB budget`);
@@ -31,7 +35,7 @@ function report() {
   const rows = manifest.entries.map(entry => {
     const runtime = path.join(root, manifest.runtimeRoot, entry.runtime);
     const sizeKb = fs.existsSync(runtime) ? fs.statSync(runtime).size / 1024 : 0;
-    return { id: entry.id, runtime: entry.runtime, sizeKb: Math.round(sizeKb), budgetKb: entry.budgetKb, status: sizeKb <= entry.budgetKb ? 'ok' : 'over-budget' };
+    return { id: entry.id, runtime: entry.runtime, sizeKb: Math.round(sizeKb), budgetKb: entry.budgetKb, status: !fs.existsSync(runtime) && entry.optional ? 'optional-missing' : (sizeKb <= entry.budgetKb ? 'ok' : 'over-budget') };
   }).sort((a, b) => b.sizeKb - a.sizeKb);
   const totalKb = rows.reduce((sum, row) => sum + row.sizeKb, 0);
   console.log(JSON.stringify({ generatedAt: new Date().toISOString(), totalKb, optimization: manifest.optimization, assets: rows }, null, 2));

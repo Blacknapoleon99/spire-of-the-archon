@@ -10,7 +10,11 @@
     { "id": "boss_xyris", "source": "local-generator", "generatorScript": "scripts/generate_boss_xyris.py", "prompt": "void eye sentinel on a collapsing catwalk", "runtime": "boss_xyris.glb", "lod": "hero", "budgetKb": 4096 },
     { "id": "enemy_direwolf", "source": "kaykit-or-local", "generatorScript": "scripts/generate_enemy_models.py", "prompt": "astral direwolf with ink-black fur and cyan leyline scars", "runtime": "enemy_direwolf.glb", "lod": "mid", "budgetKb": 9216 },
     { "id": "enemy_golem", "source": "kaykit-or-local", "generatorScript": "scripts/generate_enemy_models.py", "prompt": "cathedral slate golem with aged brass joints", "runtime": "enemy_golem.glb", "lod": "mid", "budgetKb": 3072 },
-    { "id": "enemy_sentinel", "source": "kaykit-or-local", "generatorScript": "scripts/generate_enemy_models.py", "prompt": "arcane sentinel carved from slate with a cyan eye", "runtime": "enemy_sentinel.glb", "lod": "mid", "budgetKb": 3072 }
+    { "id": "enemy_sentinel", "source": "kaykit-or-local", "generatorScript": "scripts/generate_enemy_models.py", "prompt": "arcane sentinel carved from slate with a cyan eye", "runtime": "enemy_sentinel.glb", "lod": "mid", "budgetKb": 3072 },
+    { "id": "spell_fire_tornado_core", "source": "local-generator-optional", "prompt": "dark arcane fantasy fire tornado core", "runtime": "spell_fire_tornado_core.glb", "lod": "hero", "budgetKb": 512, "optional": true },
+    { "id": "spell_frost_crystal", "source": "local-generator-optional", "prompt": "dark arcane fantasy frost crystal spear", "runtime": "spell_frost_crystal.glb", "lod": "hero", "budgetKb": 512, "optional": true },
+    { "id": "spell_luminary_halo", "source": "local-generator-optional", "prompt": "dark arcane fantasy luminary halo", "runtime": "spell_luminary_halo.glb", "lod": "hero", "budgetKb": 512, "optional": true },
+    { "id": "spell_chrono_astrolabe", "source": "local-generator-optional", "prompt": "dark arcane fantasy chronomancer astrolabe", "runtime": "spell_chrono_astrolabe.glb", "lod": "hero", "budgetKb": 512, "optional": true }
   ],
   "motion": {
     "generator": "kimodo.cpp",
