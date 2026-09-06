@@ -147,6 +147,7 @@ export class RoomManager {
         enemies: Array.from(room.gameState.enemies.values()).filter(enemy => enemy.isAlive),
         objective: room.gameState.objective,
         puzzles: room.gameState.puzzles,
+        vaultGateOpen: Boolean(room.gameState.vaultGateOpen),
         serverTick: room.gameState.serverTick,
         resumed: true
       });
@@ -175,6 +176,7 @@ export class RoomManager {
       enemies: Array.from(room.gameState.enemies.values()).filter(enemy => enemy.isAlive),
       objective: room.gameState.objective,
       puzzles: room.gameState.puzzles,
+      vaultGateOpen: Boolean(room.gameState.vaultGateOpen),
       serverTick: room.gameState.serverTick,
       resumed: resumeFloor > 1
     });
@@ -293,6 +295,7 @@ export class RoomManager {
         enemies: Array.from(room.gameState.enemies.values()).filter(enemy => enemy.isAlive),
         objective: room.gameState.objective,
         puzzles: room.gameState.puzzles,
+        vaultGateOpen: Boolean(room.gameState.vaultGateOpen),
         serverTick: room.gameState.serverTick,
         resumed: true
       });

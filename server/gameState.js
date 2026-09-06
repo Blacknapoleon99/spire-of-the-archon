@@ -121,6 +121,7 @@ export class GameState {
     this.projectiles = [];
     this.activeHazards = [];
     this.activePuzzles = {};
+    this.vaultGateOpen = false;
 
     // Puzzles for Exploration & Climactic Boss Levels (Floors 5, 10, 15)
     this.puzzles = {
@@ -335,7 +336,8 @@ export class GameState {
       difficulty: this.difficultyId,
       serverTick: this.serverTick,
       objective: this.objective,
-      puzzles: this.puzzles
+      puzzles: this.puzzles,
+      vaultGateOpen: Boolean(this.vaultGateOpen)
     };
   }
 
@@ -344,6 +346,7 @@ export class GameState {
     // Use the bounded value for every spawn/puzzle branch below. This keeps
     // malformed resume requests from producing an empty, unwinnable floor.
     floorNumber = this.floor;
+    this.vaultGateOpen = false;
     this.resetObjective(this.floor);
     this.enemies.clear();
     this.projectiles = [];
@@ -504,6 +507,29 @@ export class GameState {
     this.rescaleEncounter();
     this.refreshObjective(true);
     this.broadcastState();
+  }
+
+  handleVaultGateOpen(requesterId) {
+    const player = this.players.get(requesterId);
+    if (!player || !player.isAlive || player.connected === false) {
+      this.io.to(requesterId).emit('action_rejected', { action: 'open_vault_gate', reason: 'player_unavailable' });
+      return false;
+    }
+    if (this.floor !== 1) {
+      this.io.to(requesterId).emit('action_rejected', { action: 'open_vault_gate', reason: 'wrong_floor' });
+      return false;
+    }
+    const distance = Math.hypot(Number(player.x) || 0, (Number(player.z) || 0) - 18.8);
+    if (distance > 5.5) {
+      this.io.to(requesterId).emit('action_rejected', { action: 'open_vault_gate', reason: 'out_of_range' });
+      return false;
+    }
+    if (!this.vaultGateOpen) {
+      this.vaultGateOpen = true;
+      this.io.to(this.roomId).emit('vault_gate_state', { floor: 1, open: true, openedBy: requesterId });
+    }
+    this.io.to(requesterId).emit('action_accepted', { action: 'open_vault_gate', open: true });
+    return true;
   }
 
   spawnEnemy(type, x, y, z, baseHealth, baseDamage, name) {

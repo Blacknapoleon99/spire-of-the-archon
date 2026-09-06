@@ -145,6 +145,7 @@ export class WebRTCNetwork {
     this.socket.on('player_disconnected', (d) => this.trigger('player_disconnected', d));
     this.socket.on('player_reconnected', (d) => this.trigger('player_reconnected', d));
     this.socket.on('game_started', (d) => this.trigger('game_started', d));
+    this.socket.on('vault_gate_state', (d) => this.trigger('vault_gate_state', d));
     this.socket.on('state_snapshot', (d) => this.trigger('state_snapshot', d));
     this.socket.on('spell_cast', (d) => this.trigger('spell_cast', d));
     this.socket.on('enemy_attack', (d) => this.trigger('enemy_attack', d));
@@ -345,6 +346,10 @@ export class WebRTCNetwork {
 
   advanceFloor() {
     this.emitSocket('advance_floor');
+  }
+
+  openVaultGate() {
+    this.emitSocket('open_vault_gate');
   }
 
   retryFloor() {

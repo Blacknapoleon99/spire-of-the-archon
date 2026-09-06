@@ -256,6 +256,12 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('open_vault_gate', () => {
+    if (!allow('interact', 4)) return;
+    const room = roomManager.getRoomBySocket(socket);
+    if (room?.gameState) room.gameState.handleVaultGateOpen(socket.id);
+  });
+
   socket.on('player_profile', (profile = {}) => {
     const room = roomManager.getRoomBySocket(socket);
     if (room?.gameState) room.gameState.applyPlayerProfile(socket.id, profile);

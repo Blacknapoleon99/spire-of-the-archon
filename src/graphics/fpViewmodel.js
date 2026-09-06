@@ -513,6 +513,20 @@ export class FPViewmodel {
         scale: object.scale.clone()
       });
     });
+    // The animated viewmodel export calls the crystal FocusCrystal while the
+    // static hero export calls it WandTip. Expose one stable runtime alias so
+    // spell origins, diagnostics, and VFX never depend on which GLB loaded.
+    if (!this.riggedParts.WandTip) {
+      const tip = model.getObjectByName('FocusCrystal') || model.getObjectByName('WandCore');
+      if (tip) {
+        this.riggedParts.WandTip = tip;
+        this.riggedPartBases.set('WandTip', {
+          position: tip.position.clone(),
+          rotation: tip.rotation.clone(),
+          scale: tip.scale.clone()
+        });
+      }
+    }
   }
 
   _setRiggedPartPose(name, positionOffset = null, rotationOffset = null) {
@@ -613,8 +627,11 @@ export class FPViewmodel {
       const manifest = typeof fetch === 'function'
         ? await fetch('/models/hero-assets.json', { cache: 'no-store' }).then(response => response.ok ? response.json() : {}).catch(() => ({}))
         : {};
+      // Prefer the authored armature export so the wand and both hands use
+      // real Idle/Walk/Cast_Basic clips. The static hero wand remains a
+      // compatible visual fallback for older local asset bundles.
       const candidates = manifest.fpWand
-        ? ['/models/fp_wand_hero.glb', '/models/fp_viewmodel_wand.glb']
+        ? ['/models/fp_viewmodel_wand.glb', '/models/fp_wand_hero.glb']
         : ['/models/fp_viewmodel_wand.glb'];
       let lastError = null;
       for (const url of candidates) {

@@ -61,6 +61,14 @@ export class PlayerEntity {
     this.castParts = {};
     this.castPartBases = new Map();
     this.worldWand = null;
+    this.worldWandMount = null;
+    this.worldWandTip = null;
+    this.worldWandHalo = null;
+    this.castRig = null;
+    this.castMixer = null;
+    this.castActions = Object.create(null);
+    this.activeCastAction = null;
+    this.castActionUsesAuthoredClip = false;
 
     // Keep the procedural wizard as an immediate fallback while the local
     // rigged character is resolved. The GLBs are preloaded during the boot
@@ -140,53 +148,227 @@ export class PlayerEntity {
     for (const name of Object.keys(this.castParts || {})) this.setCastPartPose(name);
   }
 
+  /**
+   * Attach the authored first-person hand/wand rig to a remote Pyromancer.
+   *
+   * The old implementation built a tiny cylinder wand and rotated it with a
+   * hard-coded Euler transform. That transform was authored for the camera
+   * view, not the world Hand_R socket, so remote wands appeared to point at
+   * the floor. The cast rig is aligned from its actual Hand_R transform to
+   * the avatar hand and carries the wand plus real animated arm pieces.
+   */
+  async attachAuthoredWorldWand(model) {
+    if (this.wizardClass !== 'pyromancer') return false;
+    let source;
+    try {
+      source = await assetLoader.loadGLTF('/models/fp_wand_hero.glb');
+    } catch (error) {
+      console.warn('[PlayerEntity] Authored world wand unavailable; using procedural fallback.', error?.message || error);
+      return false;
+    }
+    if (this.destroyed) return false;
+
+    const hand = model.getObjectByName('HandSocket_R') || model.getObjectByName('Hand_R') || model.getObjectByName('CastSocket') || model;
+    const mount = new THREE.Group();
+    mount.name = 'RemotePyromancerWandMount';
+    hand.add(mount);
+    const wand = source.getObjectByName('FP_WandHeroRoot') || source;
+    wand.name = 'RemotePyromancerWand';
+    const scale = 0.62;
+    wand.scale.setScalar(scale);
+    mount.add(wand);
+
+    // Use the authored grip/tip vector and the hand socket's local -Z axis.
+    // This makes the wand orientation deterministic even when the character
+    // root is rotated for the network-facing convention.
+    const grip = wand.getObjectByName('WandGrip');
+    const tipSocket = wand.getObjectByName('WandTipSocket') || wand.getObjectByName('WandTip');
+    if (grip && tipSocket) {
+      const gripPos = hand.worldToLocal(grip.getWorldPosition(new THREE.Vector3()));
+      const tipPos = hand.worldToLocal(tipSocket.getWorldPosition(new THREE.Vector3()));
+      const sourceDirection = tipPos.sub(gripPos).normalize();
+      const actorForwardWorld = new THREE.Vector3(
+        -Math.sin(this.rotationY || 0),
+        0.10,
+        -Math.cos(this.rotationY || 0)
+      ).normalize();
+      const handWorldQuat = hand.getWorldQuaternion(new THREE.Quaternion());
+      const targetDirection = actorForwardWorld.applyQuaternion(handWorldQuat.invert()).normalize();
+      mount.quaternion.setFromUnitVectors(sourceDirection, targetDirection);
+      const alignedGrip = gripPos.applyQuaternion(mount.quaternion);
+      wand.position.copy(alignedGrip.multiplyScalar(-1));
+    } else {
+      wand.position.set(0, -0.02, 0);
+    }
+    wand.updateMatrixWorld(true);
+
+    wand.traverse(object => {
+      if (!object.isMesh) return;
+      object.castShadow = true;
+      object.receiveShadow = true;
+      if (Array.isArray(object.material)) object.material.forEach(material => { if (material) material.needsUpdate = true; });
+      else if (object.material) object.material.needsUpdate = true;
+    });
+
+    const tip = wand.getObjectByName('WandTip') || wand.getObjectByName('WandCore') || tipSocket;
+    this.worldWandMount = mount;
+    this.worldWand = wand;
+    this.worldWandTip = tip;
+    if (tip) {
+      const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(0.13, 16, 12),
+        new THREE.MeshBasicMaterial({
+          color: 0xff6d28,
+          transparent: true,
+          opacity: 0.34,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        })
+      );
+      halo.name = 'RemoteWandTipHalo';
+      tip.add(halo);
+      this.worldWandHalo = halo;
+    }
+    return true;
+  }
+
+  async attachRemoteCastRig(model) {
+    if (this.wizardClass !== 'pyromancer') return false;
+
+    // Rigged hero exports already contain the remote armature and spell clips;
+    // only the authored wand needs to be mounted in this path.
+    if (this.castMixer) return this.attachAuthoredWorldWand(model);
+
+    let gltf;
+    try {
+      gltf = await assetLoader.loadGLTFRaw('/models/fp_viewmodel_wand.glb');
+    } catch (error) {
+      console.warn('[PlayerEntity] Remote cast rig unavailable; keeping avatar fallback.', error?.message || error);
+      return false;
+    }
+    if (this.destroyed) return false;
+
+    const rig = SkeletonUtils.clone(gltf.scene);
+    rig.name = 'RemotePyromancerCastRig';
+    rig.scale.setScalar(1.0);
+    model.add(rig);
+    model.updateMatrixWorld(true);
+    rig.updateMatrixWorld(true);
+
+    const sourceHand = rig.getObjectByName('Hand_R');
+    const targetHand = model.getObjectByName('HandSocket_R')
+      || model.getObjectByName('Hand_R')
+      || model.getObjectByName('CastSocket');
+    if (!sourceHand || !targetHand) {
+      model.remove(rig);
+      return false;
+    }
+
+    // Align the authored rig's hand position and orientation in model-local
+    // space. This keeps the mount correct as the character rotates or scales.
+    const modelWorldQuat = model.getWorldQuaternion(new THREE.Quaternion());
+    const targetWorldPos = targetHand.getWorldPosition(new THREE.Vector3());
+    const targetWorldQuat = targetHand.getWorldQuaternion(new THREE.Quaternion());
+    const sourceWorldPos = sourceHand.getWorldPosition(new THREE.Vector3());
+    const sourceWorldQuat = sourceHand.getWorldQuaternion(new THREE.Quaternion());
+    const targetLocalPos = model.worldToLocal(targetWorldPos.clone());
+    const sourceLocalPos = model.worldToLocal(sourceWorldPos.clone());
+    const targetLocalQuat = modelWorldQuat.clone().invert().multiply(targetWorldQuat);
+    const sourceLocalQuat = modelWorldQuat.clone().invert().multiply(sourceWorldQuat);
+    rig.quaternion.copy(targetLocalQuat.clone().multiply(sourceLocalQuat.clone().invert()));
+    rig.position.copy(targetLocalPos).sub(sourceLocalPos.applyQuaternion(rig.quaternion));
+    rig.updateMatrixWorld(true);
+
+    // The authored avatar still supplies the torso, robe and shoulders. Hide
+    // its rigid arm pieces so the animated cast rig is the only visible set.
+    model.traverse(object => {
+      if (!object.isMesh || object === rig) return;
+      const name = object.name || '';
+      if (/^(UpperArm|Bracer|Hand|Finger|RuneCuff)_[LR]/.test(name)) object.visible = false;
+    });
+
+    this.castRig = rig;
+    this.castMixer = new THREE.AnimationMixer(rig);
+    this.castActions = Object.create(null);
+    for (const clip of gltf.animations || []) {
+      this.castActions[clip.name] = this.castMixer.clipAction(clip);
+    }
+    const idle = this.castActions.Idle;
+    if (idle) {
+      idle.play();
+      this.activeCastAction = idle;
+    }
+
+    // Cast pose offsets are applied to the rig pieces after the mixer. The
+    // authored Cast_Basic clip remains a safe fallback until spell-specific
+    // clips are present in the regenerated hero export.
+    this.cacheCastParts(rig);
+    this.worldWand = rig.getObjectByName('Wand_R') || rig.getObjectByName('WandShaft') || rig;
+    this.worldWandTip = rig.getObjectByName('WandTip') || rig.getObjectByName('FocusCrystal') || null;
+    if (this.worldWandTip) {
+      const halo = new THREE.Mesh(
+        new THREE.SphereGeometry(0.13, 16, 12),
+        new THREE.MeshBasicMaterial({
+          color: 0xff6d28,
+          transparent: true,
+          opacity: 0.34,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        })
+      );
+      halo.name = 'RemoteWandTipHalo';
+      this.worldWandTip.add(halo);
+      this.worldWandHalo = halo;
+    }
+    return true;
+  }
+
   createWorldWand(model) {
     if (this.wizardClass !== 'pyromancer') return;
-    const hand = model.getObjectByName('Hand_R') || model.getObjectByName('CastSocket') || model;
-    const group = new THREE.Group();
-    group.name = 'RemotePyromancerWand';
-    group.position.set(0.02, -0.08, -0.08);
-    group.rotation.set(Math.PI * 0.28, 0, -Math.PI * 0.08);
+    const hand = model.getObjectByName('HandSocket_R') || model.getObjectByName('Hand_R') || model.getObjectByName('CastSocket') || model;
+    const mount = new THREE.Group();
+    mount.name = 'RemotePyromancerWandFallbackMount';
+    hand.add(mount);
 
-    const shaftMaterial = new THREE.MeshStandardMaterial({
-      color: 0x25100c,
-      roughness: 0.38,
-      metalness: 0.18
-    });
+    const shaftMaterial = new THREE.MeshStandardMaterial({ color: 0x25100c, roughness: 0.38, metalness: 0.18 });
     const brassMaterial = new THREE.MeshStandardMaterial({
-      color: 0xd18a2a,
-      roughness: 0.22,
-      metalness: 0.82,
-      emissive: 0x3a0e03,
-      emissiveIntensity: 0.35
+      color: 0xd18a2a, roughness: 0.22, metalness: 0.82, emissive: 0x3a0e03, emissiveIntensity: 0.35
     });
     const emberMaterial = new THREE.MeshStandardMaterial({
-      color: 0xff3d00,
-      emissive: 0xff3d00,
-      emissiveIntensity: 3.6,
-      roughness: 0.12,
-      metalness: 0.12
+      color: 0xff3d00, emissive: 0xff3d00, emissiveIntensity: 3.6, roughness: 0.12, metalness: 0.12
     });
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.032, 0.62, 12), shaftMaterial);
-    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.17, 12), brassMaterial);
-    grip.position.y = -0.19;
-    const crown = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.009, 6, 16), brassMaterial);
-    crown.position.y = 0.30;
-    const tip = new THREE.Mesh(new THREE.IcosahedronGeometry(0.064, 1), emberMaterial);
-    tip.position.y = 0.36;
-    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 8), new THREE.MeshBasicMaterial({
-      color: 0xff6d28,
-      transparent: true,
-      opacity: 0.42,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.036, 0.78, 24), shaftMaterial);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.052, 0.20, 20), brassMaterial);
+    const crown = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.010, 8, 24), brassMaterial);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 20, 14), emberMaterial);
+    shaft.position.y = 0.0;
+    grip.position.y = -0.25;
+    crown.position.y = 0.39;
+    tip.position.y = 0.48;
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.12, 16, 12), new THREE.MeshBasicMaterial({
+      color: 0xff6d28, transparent: true, opacity: 0.38, blending: THREE.AdditiveBlending, depthWrite: false
     }));
     halo.position.copy(tip.position);
-    group.add(shaft, grip, crown, tip, halo);
-    hand.add(group);
-    this.worldWand = group;
+    mount.add(shaft, grip, crown, tip, halo);
+    mount.rotation.set(-Math.PI * 0.06, 0, 0);
+    this.worldWandMount = mount;
+    this.worldWand = mount;
     this.worldWandTip = tip;
     this.worldWandHalo = halo;
+  }
+
+  playCastAction(presentation) {
+    if (!this.castMixer) return;
+    const clipName = presentation?.castClip || 'Cast_Basic';
+    const cast = this.castActions[clipName] || this.castActions.Cast_Basic;
+    this.castActionUsesAuthoredClip = Boolean(this.castActions[clipName]);
+    if (!cast) return;
+    if (this.activeCastAction && this.activeCastAction !== cast) this.activeCastAction.fadeOut(0.08);
+    cast.reset();
+    cast.setLoop(THREE.LoopOnce, 1);
+    cast.clampWhenFinished = false;
+    cast.fadeIn(0.08).play();
+    this.activeCastAction = cast;
   }
 
   updateCastPose(deltaTime) {
@@ -200,37 +382,49 @@ export class PlayerEntity {
     const right = new THREE.Vector3();
     const left = new THREE.Vector3();
 
-    if (this.castSpellId === 'ember_bolt') {
+    if (!this.castMixer || !this.castActionUsesAuthoredClip) {
+      if (this.castSpellId === 'ember_bolt') {
       this.setCastPartPose('UpperArm_R', right.set(0.012 * envelope, 0.004 * envelope, -0.02 * envelope), new THREE.Vector3(-0.18 * envelope, 0.06 * envelope, -0.30 * envelope));
       this.setCastPartPose('Bracer_R', null, new THREE.Vector3(-0.28 * envelope, 0.10 * envelope, -0.38 * envelope));
       this.setCastPartPose('Hand_R', null, new THREE.Vector3(-0.34 * envelope, 0.12 * envelope, -0.46 * envelope));
-    } else if (this.castSpellId === 'fireball') {
+      } else if (this.castSpellId === 'fireball') {
       this.setCastPartPose('UpperArm_R', right.set(0, 0.03 * envelope, -0.04 * envelope), new THREE.Vector3(-0.30 * envelope, 0.05 * envelope, -0.16 * envelope));
       this.setCastPartPose('Bracer_R', null, new THREE.Vector3(-0.44 * envelope, 0.10 * envelope, -0.24 * envelope));
       this.setCastPartPose('Hand_R', null, new THREE.Vector3(-0.52 * envelope, 0.14 * envelope, -0.30 * envelope));
       this.setCastPartPose('UpperArm_L', left.set(0, 0.04 * envelope, -0.05 * envelope), new THREE.Vector3(-0.22 * envelope, -0.08 * envelope, 0.24 * envelope));
       this.setCastPartPose('Bracer_L', null, new THREE.Vector3(-0.34 * envelope, -0.12 * envelope, 0.34 * envelope));
       this.setCastPartPose('Hand_L', null, new THREE.Vector3(-0.42 * envelope, -0.16 * envelope, 0.42 * envelope));
-    } else if (this.castSpellId === 'flame_wave') {
+      } else if (this.castSpellId === 'flame_wave') {
       this.setCastPartPose('UpperArm_R', right.set(0.05 * envelope, 0.02 * envelope, 0.02 * envelope), new THREE.Vector3(0.08 * envelope, -0.38 * envelope, -0.46 * envelope));
       this.setCastPartPose('Bracer_R', null, new THREE.Vector3(0.14 * envelope, -0.54 * envelope, -0.62 * envelope));
       this.setCastPartPose('Hand_R', null, new THREE.Vector3(0.18 * envelope, -0.64 * envelope, -0.76 * envelope));
       this.setCastPartPose('UpperArm_L', left.set(-0.05 * envelope, 0.03 * envelope, 0.03 * envelope), new THREE.Vector3(0.08 * envelope, 0.36 * envelope, 0.42 * envelope));
       this.setCastPartPose('Bracer_L', null, new THREE.Vector3(0.12 * envelope, 0.50 * envelope, 0.56 * envelope));
       this.setCastPartPose('Hand_L', null, new THREE.Vector3(0.16 * envelope, 0.60 * envelope, 0.68 * envelope));
-    } else if (this.castSpellId === 'fire_tornado') {
+      } else if (this.castSpellId === 'fire_tornado') {
       this.setCastPartPose('UpperArm_R', right.set(0.04 * sustained, 0.05 * sustained, -0.02 * sustained), new THREE.Vector3(-0.25 * sustained, -0.16 * sustained, -0.22 * sustained));
       this.setCastPartPose('Bracer_R', null, new THREE.Vector3(-0.38 * sustained, -0.26 * sustained, -0.34 * sustained));
       this.setCastPartPose('Hand_R', null, new THREE.Vector3(-0.48 * sustained, -0.32 * sustained, -0.42 * sustained));
       this.setCastPartPose('UpperArm_L', left.set(-0.04 * sustained, 0.06 * sustained, -0.02 * sustained), new THREE.Vector3(-0.24 * sustained, 0.16 * sustained, -0.18 * sustained));
       this.setCastPartPose('Bracer_L', null, new THREE.Vector3(-0.36 * sustained, 0.26 * sustained, -0.29 * sustained));
       this.setCastPartPose('Hand_L', null, new THREE.Vector3(-0.44 * sustained, 0.34 * sustained, -0.36 * sustained));
+      }
     }
 
-    if (this.worldWand) {
-      this.worldWand.rotation.z += deltaTime * (this.castSpellId === 'fire_tornado' ? 3.8 : 1.2);
-      const pulse = 1 + envelope * 0.35;
+    if (this.worldWand && !this.castMixer) {
+      const pulse = 1 + envelope * 0.06;
       this.worldWand.scale.setScalar(pulse);
+    }
+    if (this.castMixer && !this.castActionUsesAuthoredClip && this.castRig) {
+      // Give the generic authored clip a small spell-specific accent until
+      // the regenerated hero exports carry dedicated spell clips.
+      const accent = this.castSpellId === 'fireball' ? 0.18
+        : this.castSpellId === 'flame_wave' ? -0.28
+          : this.castSpellId === 'fire_tornado' ? 0.42 : 0.08;
+      const hand = this.castRig.getObjectByName('Hand_R');
+      const left = this.castRig.getObjectByName('Hand_L');
+      if (hand) hand.rotation.z += accent * envelope;
+      if (left) left.rotation.z -= accent * envelope * 0.6;
     }
     if (this.worldWandHalo) this.worldWandHalo.scale.setScalar(1 + envelope * 0.55);
 
@@ -238,8 +432,15 @@ export class PlayerEntity {
       this.castAnimationTime = -1;
       this.castAnimationDuration = 0;
       this.restoreCastParts();
-      if (this.worldWand) this.worldWand.scale.setScalar(1);
+      if (this.worldWand && !this.castMixer) this.worldWand.scale.setScalar(1);
       if (this.worldWandHalo) this.worldWandHalo.scale.setScalar(1);
+      this.castActionUsesAuthoredClip = false;
+      const idle = this.castActions?.Idle;
+      if (this.castMixer && idle) {
+        if (this.activeCastAction && this.activeCastAction !== idle) this.activeCastAction.fadeOut(0.08);
+        idle.reset().fadeIn(0.10).play();
+        this.activeCastAction = idle;
+      }
     }
   }
 
@@ -254,7 +455,7 @@ export class PlayerEntity {
       let loadedUrl = urls[urls.length - 1];
       for (const url of urls) {
         try {
-          source = await assetLoader.loadGLTF(url);
+          source = await assetLoader.loadGLTFRaw(url);
           loadedUrl = url;
           break;
         } catch {
@@ -264,7 +465,7 @@ export class PlayerEntity {
       }
       if (!source) throw new Error(`No avatar candidate loaded: ${urls.join(', ')}`);
       if (this.destroyed) return;
-      const model = SkeletonUtils.clone(source);
+      const model = SkeletonUtils.clone(source.scene);
       model.name = `PlayerRig_${this.wizardClass}`;
       model.userData.assetUrl = loadedUrl;
       model.scale.setScalar(1.0);
@@ -300,7 +501,16 @@ export class PlayerEntity {
       });
 
       this.cacheCastParts(model);
-      this.createWorldWand(model);
+      this.castMixer = new THREE.AnimationMixer(model);
+      this.castActions = Object.create(null);
+      for (const clip of source.animations || []) this.castActions[clip.name] = this.castMixer.clipAction(clip);
+      const idle = this.castActions.Idle;
+      if (idle) {
+        idle.play();
+        this.activeCastAction = idle;
+      }
+      const castRigAttached = await this.attachRemoteCastRig(model);
+      if (!castRigAttached) this.createWorldWand(model);
 
       this.modelRoot = model;
       this.hasRiggedModel = true;
@@ -532,6 +742,15 @@ export class PlayerEntity {
       const yawOffset = Number(this.modelRoot.userData.visualYawOffset) || 0;
       const currentYaw = this.modelRoot.rotation.y - yawOffset;
       this.modelRoot.rotation.y = yawOffset + THREE.MathUtils.lerp(currentYaw, this.rotationY, Math.min(1.0, 14 * deltaTime));
+      if (this.castMixer) {
+        const locomotion = this.castActions?.[this.isMoving ? 'Walk' : 'Idle'];
+        if (!this.isCasting && locomotion && this.activeCastAction !== locomotion) {
+          if (this.activeCastAction) this.activeCastAction.fadeOut(0.12);
+          locomotion.reset().fadeIn(0.14).play();
+          this.activeCastAction = locomotion;
+        }
+        this.castMixer.update(deltaTime);
+      }
       // Small procedural breathing keeps static generated GLBs alive without
       // invoking incompatible embedded animation tracks on older exports.
       const bob = Math.sin(performance.now() * 0.003 + this.id.length) * (this.isMoving ? 0.035 : 0.018);
@@ -560,6 +779,7 @@ export class PlayerEntity {
     this.castAnimationTime = 0;
     this.castAnimationDuration = Math.max(0.22, this.castPresentation.duration || 0.35);
     this.castTimer = this.castAnimationDuration;
+    this.playCastAction(this.castPresentation);
   }
 
   resurrect(pos = null) {

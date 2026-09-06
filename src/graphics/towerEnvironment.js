@@ -28,10 +28,15 @@ export class TowerEnvironment {
     this.destructibles = [];
     this.debris = [];
     this.exitPortal = null;
+    this.vaultGate = null;
+    this.vaultGateCollider = null;
+    this.vaultChestMesh = null;
     this.lavaUniforms = null;
     this.nebulaUniforms = null;
     this.floorCache = new Map();
     this.isFloorsPreloaded = false;
+    this.authoredPropsSource = null;
+    this.authoredHeroPropsGroup = null;
   }
 
   clear() {
@@ -60,6 +65,7 @@ export class TowerEnvironment {
     this.animatedProps = [];
     this.destructibles = [];
     this.debris = [];
+    this.authoredHeroPropsGroup = null;
     this.exitPortal = null;
     this.lavaUniforms = null;
     this.nebulaUniforms = null;
@@ -108,6 +114,9 @@ export class TowerEnvironment {
         animatedProps: [...this.animatedProps],
         destructibles: [...this.destructibles],
         exitPortal: this.exitPortal,
+        vaultGate: this.vaultGate,
+        vaultGateCollider: this.vaultGateCollider,
+        vaultChestMesh: this.vaultChestMesh,
         lavaUniforms: this.lavaUniforms,
         nebulaUniforms: this.nebulaUniforms
       });
@@ -155,8 +164,78 @@ export class TowerEnvironment {
     this.animatedProps = [...cached.animatedProps];
     this.destructibles = [...cached.destructibles];
     this.exitPortal = cached.exitPortal;
+    this.vaultGate = cached.vaultGate || null;
+    this.vaultGateCollider = cached.vaultGateCollider || null;
+    this.vaultChestMesh = cached.vaultChestMesh || null;
     this.lavaUniforms = cached.lavaUniforms;
     this.nebulaUniforms = cached.nebulaUniforms;
+    this.mountAuthoredHeroProps();
+  }
+
+  /** Load the shared high-detail prop kit without blocking the first frame. */
+  preloadAuthoredProps() {
+    if (this.authoredPropsSource) return Promise.resolve(this.authoredPropsSource);
+    return assetLoader.loadGLTF('/models/props.glb')
+      .then(source => {
+        this.authoredPropsSource = source;
+        this.mountAuthoredHeroProps();
+        return source;
+      })
+      .catch(error => {
+        console.warn('[TowerEnvironment] Optional authored prop kit unavailable:', error?.message || error);
+        return null;
+      });
+  }
+
+  mountAuthoredHeroProps() {
+    if (this.currentFloor !== 1 || !this.authoredPropsSource || this.authoredHeroPropsGroup) return;
+    const parent = this.roomGroup.getObjectByName('AwakeningVault') || this.roomGroup;
+    const kit = this.authoredPropsSource;
+    const group = new THREE.Group();
+    group.name = 'AuthoredHeroProps_Floor1';
+
+    const addSet = (names, target, sourceOrigin, scale = 1, rotationY = 0) => {
+      const set = new THREE.Group();
+      set.position.set(target.x, target.y || 0, target.z);
+      set.rotation.y = rotationY;
+      set.scale.setScalar(scale);
+      const origin = new THREE.Vector3(sourceOrigin.x || 0, sourceOrigin.y || 0, sourceOrigin.z || 0);
+      names.forEach(name => {
+        const sourceObject = kit.getObjectByName(name);
+        if (!sourceObject) return;
+        const clone = sourceObject.clone();
+        clone.position.sub(origin);
+        clone.traverse(object => {
+          if (!object.isMesh) return;
+          object.castShadow = true;
+          object.receiveShadow = true;
+          object.frustumCulled = true;
+        });
+        set.add(clone);
+      });
+      group.add(set);
+      return set;
+    };
+
+    // Replace the close-camera procedural chest with the authored iron/wood
+    // kit. The interaction object remains unchanged and keeps its collider.
+    addSet(['PROP_Chest_Body', 'PROP_Chest_Iron', 'PROP_Chest_Lid'],
+      { x: -5.8, z: 33.2 }, { x: 2.4, y: 0.24, z: 0 }, 1.0, 0.45);
+    if (this.vaultChestMesh) this.vaultChestMesh.visible = false;
+
+    // High-detail braziers frame the escape gate and provide a readable visual
+    // landmark from the starting cot.
+    addSet(['PROP_Brazier_Bowl', 'PROP_Brazier_Coals'],
+      { x: -2.6, z: 18.6 }, { x: 7.9, y: 0, z: 0 }, 0.72, 0);
+    addSet(['PROP_Brazier_Bowl', 'PROP_Brazier_Coals'],
+      { x: 2.6, z: 18.6 }, { x: 7.9, y: 0, z: 0 }, 0.72, 0);
+    addSet(['PROP_Lantern_Base', 'PROP_Lantern_Frame', 'PROP_Lantern_Glass', 'PROP_Lantern_Flame'],
+      { x: -4.8, y: 1.15, z: 27.0 }, { x: 6.9, y: 0, z: 0 }, 0.58, 0);
+    addSet(['PROP_Lantern_Base', 'PROP_Lantern_Frame', 'PROP_Lantern_Glass', 'PROP_Lantern_Flame'],
+      { x: 4.8, y: 1.15, z: 27.0 }, { x: 6.9, y: 0, z: 0 }, 0.58, Math.PI);
+
+    parent.add(group);
+    this.authoredHeroPropsGroup = group;
   }
 
   buildFloor(floorNumber) {
@@ -333,7 +412,7 @@ export class TowerEnvironment {
       x: 0,
       z: 0,
       radius: 3.2,
-      prompt: "Read Ancient Scribe's Lectern [E]"
+      prompt: "Read Ancient Scribe's Lectern [F]"
     });
 
     // Grand Scribe Alistair (Voiced 3D Quest Giver)
@@ -348,7 +427,7 @@ export class TowerEnvironment {
       x: 0,
       z: 1.5,
       radius: 3.2,
-      prompt: 'Speak with Grand Scribe Alistair [E]'
+      prompt: 'Speak with Grand Scribe Alistair [F]'
     });
 
     // Malakor the Escaped Convict - Contraband Smuggler
@@ -364,7 +443,7 @@ export class TowerEnvironment {
       x: -13.5,
       z: -10.5,
       radius: 3.5,
-      prompt: 'Speak with Malakor the Escaped Convict [E]'
+      prompt: 'Speak with Malakor the Escaped Convict [F]'
     });
     this.animatedProps.push({ type: 'convict_npc', mesh: malakorMesh });
 
@@ -378,7 +457,7 @@ export class TowerEnvironment {
       x: 0,
       z: -4,
       radius: 3.5,
-      prompt: 'Decipher Riddle Monolith [E]'
+      prompt: 'Decipher Riddle Monolith [F]'
     });
 
     // High-Detail Recessed Bookshelves & Wrought-Iron Torches
@@ -446,7 +525,7 @@ export class TowerEnvironment {
         x: cfg.x,
         z: cfg.z,
         radius: 2.8,
-        prompt: `Rotate Light Prism #${cfg.id} [E]`
+        prompt: `Rotate Light Prism #${cfg.id} [F]`
       });
     });
 
@@ -718,7 +797,7 @@ export class TowerEnvironment {
       x: 0,
       z: 18.8,
       radius: 3.5,
-      prompt: 'Open Vault Runegate to Archives [E]'
+      prompt: 'Open Vault Runegate to Archives [F]'
     });
 
     // Animate the gate lock rotation in updateProps
@@ -733,7 +812,7 @@ export class TowerEnvironment {
     this.createMagicBookStation(
       'book_combat',
       'The Grimoire of Combative Arts',
-      'Read Grimoire of Combat [E]',
+      'Read Grimoire of Combat [F]',
       -4.8,
       27.0,
       0xff5722, // Fiery Flame Orb
@@ -744,7 +823,7 @@ export class TowerEnvironment {
     this.createMagicBookStation(
       'book_spire',
       'Chronicle of the Spire & The Great Escape',
-      'Read Chronicle of the Spire [E]',
+      'Read Chronicle of the Spire [F]',
       -2.0,
       23.8,
       0xffd700, // Golden Celestial Orb
@@ -755,7 +834,7 @@ export class TowerEnvironment {
     this.createMagicBookStation(
       'book_systems',
       'Codex of Arcane Systems & Progression',
-      'Read Codex of Arcane Systems [E]',
+      'Read Codex of Arcane Systems [F]',
       2.0,
       23.8,
       0x4caf50, // Emerald Systems Orb
@@ -766,7 +845,7 @@ export class TowerEnvironment {
     this.createMagicBookStation(
       'book_chrono',
       'Manual of Chronomancy & Reverse Time',
-      'Read Manual of Chronomancy [E]',
+      'Read Manual of Chronomancy [F]',
       4.8,
       27.0,
       0xba68c8, // Violet Chrono Orb
@@ -802,7 +881,7 @@ export class TowerEnvironment {
       x: -5.8,
       z: 33.2,
       radius: 2.6,
-      prompt: 'Open Stash Chest [E]'
+      prompt: 'Open Stash Chest [F]'
     });
 
     // 13. Glowing Arcane Crystals growing along walls
@@ -943,6 +1022,10 @@ export class TowerEnvironment {
     if (this.vaultGateCollider) {
       const idx = this.colliders.indexOf(this.vaultGateCollider);
       if (idx !== -1) this.colliders.splice(idx, 1);
+      const cached = this.floorCache.get(this.currentFloor);
+      if (cached?.colliders) {
+        cached.colliders = cached.colliders.filter(collider => collider !== this.vaultGateCollider);
+      }
     }
 
     // Animate / hide gate bars
@@ -953,6 +1036,12 @@ export class TowerEnvironment {
     }
     if (this.vaultGate.lock) this.vaultGate.lock.visible = false;
     if (this.vaultGate.core) this.vaultGate.core.visible = false;
+    const gateInteractableIndex = this.interactables.findIndex(item => item.id === 'vault_runegate');
+    if (gateInteractableIndex !== -1) this.interactables.splice(gateInteractableIndex, 1);
+    const cached = this.floorCache.get(this.currentFloor);
+    if (cached?.interactables) {
+      cached.interactables = cached.interactables.filter(item => item.id !== 'vault_runegate');
+    }
 
     // Spawn particle dissolve
     if (particleSystem) {
@@ -1180,7 +1269,7 @@ export class TowerEnvironment {
       x: -18,
       z: 28,
       radius: 4.0,
-      prompt: 'Consult Alchemist Ignatius [E]'
+      prompt: 'Consult Alchemist Ignatius [F]'
     });
 
     // Anvils & Furnaces
@@ -1245,7 +1334,7 @@ export class TowerEnvironment {
       x: 0,
       z: 18,
       radius: 4.0,
-      prompt: 'Decipher Crucible Harmonic Matrix [E]'
+      prompt: 'Decipher Crucible Harmonic Matrix [F]'
     });
 
     // Exit Door placed in the North Gatehouse
@@ -1343,7 +1432,7 @@ export class TowerEnvironment {
         x: k.x,
         z: k.z,
         radius: 3.5,
-        prompt: `Disrupt ${k.id.toUpperCase()} Keystone [E]`
+        prompt: `Disrupt ${k.id.toUpperCase()} Keystone [F]`
       });
     });
 
@@ -1469,7 +1558,7 @@ export class TowerEnvironment {
       x: 0,
       z: 8,
       radius: 3.5,
-      prompt: "Decipher Archon's Paradox [E]"
+      prompt: "Decipher Archon's Paradox [F]"
     });
   }
 

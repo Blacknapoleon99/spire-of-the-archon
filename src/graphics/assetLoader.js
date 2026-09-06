@@ -310,7 +310,12 @@ export class AssetLoader {
     return fetch('/models/hero-assets.json', { cache: 'no-store' })
       .then(response => response.ok ? response.json() : {})
       .catch(() => ({}))
-      .then(manifest => manifest?.fpWand ? this.loadGLTFRaw('/models/fp_wand_hero.glb') : this.loadGLTFRaw(fallback))
+      .then(manifest => manifest?.fpWand
+        ? Promise.allSettled([
+          this.loadGLTFRaw(fallback),
+          this.loadGLTFRaw('/models/fp_wand_hero.glb')
+        ])
+        : this.loadGLTFRaw(fallback))
       .catch(err => {
         console.warn('[AssetLoader] Viewmodel wand preload notice:', err);
         return null;

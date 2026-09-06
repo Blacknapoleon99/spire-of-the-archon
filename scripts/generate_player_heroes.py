@@ -140,6 +140,126 @@ def parent_all(root, pieces):
             piece['hero_part'] = True
 
 
+def create_hero_armature(scene, root, pieces):
+    """Create a lightweight rigid-part armature for remote cast animation.
+
+    The original hero exports were attractive PBR pieces but every arm mesh
+    was a sibling of the torso, so the browser could only translate pieces
+    independently. A small authored armature keeps the existing readable
+    silhouette while making shoulders, elbows, wrists and fingers animate as
+    one coherent character. Meshes are rigid-parented to bones intentionally:
+    this keeps the GLBs compact and works well with the stylized armour layers.
+    """
+    arm_data = bpy.data.armatures.new('HeroArmature')
+    rig = bpy.data.objects.new('HeroArmature', arm_data)
+    scene.collection.objects.link(rig)
+    rig.parent = root
+    rig['asset_contract'] = 'spire-player-v5-rigged'
+    arm_data.display_type = 'BBONE'
+
+    bpy.context.view_layer.objects.active = rig
+    rig.select_set(True)
+    bpy.ops.object.mode_set(mode='EDIT')
+
+    bones = {}
+
+    def bone(name, head, tail, parent=None):
+        b = arm_data.edit_bones.new(name)
+        b.head = head
+        b.tail = tail
+        if parent:
+            b.parent = bones[parent]
+            b.use_connect = False
+        bones[name] = b
+        return b
+
+    bone('Root', (0, 0, -1.05), (0, 0, 0.10))
+    bone('Spine', (0, 0, 0.10), (0, 0, 0.72), 'Root')
+    bone('Head', (0, 0, 0.72), (0, 0, 1.30), 'Spine')
+    for side, label in ((-1, 'L'), (1, 'R')):
+        bone(f'UpperArm_{label}', (side * 0.43, 0.0, 0.54), (side * 0.49, 0.0, 0.27), 'Spine')
+        bone(f'ForeArm_{label}', (side * 0.49, 0.0, 0.27), (side * 0.50, -0.03, -0.05), f'UpperArm_{label}')
+        bone(f'Hand_{label}', (side * 0.50, -0.03, -0.05), (side * 0.50, -0.035, -0.22), f'ForeArm_{label}')
+        bone(f'Finger_{label}', (side * 0.50, -0.035, -0.20), (side * 0.50, -0.10, -0.30), f'Hand_{label}')
+
+    bpy.ops.object.mode_set(mode='POSE')
+    for pose_bone in rig.pose.bones:
+        pose_bone.rotation_mode = 'XYZ'
+    bpy.ops.object.mode_set(mode='OBJECT')
+
+    part_to_bone = {
+        'Shoulder_L': 'UpperArm_L', 'UpperArm_L': 'UpperArm_L', 'Bracer_L': 'ForeArm_L',
+        'Hand_L': 'Hand_L', 'Finger_L': 'Finger_L', 'RuneCuff_L': 'ForeArm_L',
+        'Shoulder_R': 'UpperArm_R', 'UpperArm_R': 'UpperArm_R', 'Bracer_R': 'ForeArm_R',
+        'Hand_R': 'Hand_R', 'Finger_R': 'Finger_R', 'RuneCuff_R': 'ForeArm_R',
+    }
+    for piece in pieces:
+        if not piece or piece.type not in {'MESH', 'EMPTY'}:
+            continue
+        target = 'Root'
+        for prefix, bone_name in part_to_bone.items():
+            if piece.name.startswith(prefix):
+                target = bone_name
+                break
+        world = piece.matrix_world.copy()
+        piece.parent = rig
+        piece.parent_type = 'BONE'
+        piece.parent_bone = target
+        piece.matrix_world = world
+
+    def action(name, frames):
+        act = bpy.data.actions.new(name=name)
+        rig.animation_data_create()
+        rig.animation_data.action = act
+        for frame, pose in frames:
+            for bone_name, rotation in pose.items():
+                pose_bone = rig.pose.bones.get(bone_name)
+                if not pose_bone:
+                    continue
+                pose_bone.rotation_mode = 'XYZ'
+                pose_bone.rotation_euler = rotation
+                pose_bone.keyframe_insert(data_path='rotation_euler', frame=frame)
+        return act
+
+    zero = {
+        'UpperArm_L': (0, 0, 0), 'ForeArm_L': (0, 0, 0), 'Hand_L': (0, 0, 0),
+        'UpperArm_R': (0, 0, 0), 'ForeArm_R': (0, 0, 0), 'Hand_R': (0, 0, 0)
+    }
+    action('Idle', [(1, zero), (30, {**zero, 'Hand_R': (0.03, 0.0, -0.02)}), (60, zero)])
+    action('Walk', [
+        (1, zero),
+        (9, {**zero, 'UpperArm_L': (0.06, 0.02, 0.0), 'UpperArm_R': (-0.06, -0.02, 0.0)}),
+        (17, zero),
+        (25, {**zero, 'UpperArm_L': (-0.06, -0.02, 0.0), 'UpperArm_R': (0.06, 0.02, 0.0)}),
+        (32, zero)
+    ])
+    action('Cast_Ember', [
+        (1, zero), (5, {**zero, 'UpperArm_R': (-0.22, 0.04, -0.16), 'ForeArm_R': (-0.20, 0.06, -0.22)}),
+        (11, {**zero, 'UpperArm_R': (-0.36, 0.08, -0.22), 'ForeArm_R': (-0.34, 0.10, -0.36), 'Hand_R': (-0.18, 0.0, -0.08)}),
+        (20, zero)
+    ])
+    action('Cast_Fireball', [
+        (1, zero),
+        (7, {**zero, 'UpperArm_R': (-0.26, 0.10, -0.12), 'ForeArm_R': (-0.30, 0.08, -0.28), 'UpperArm_L': (-0.18, -0.08, 0.18), 'ForeArm_L': (-0.16, -0.06, 0.22)}),
+        (16, {**zero, 'UpperArm_R': (-0.44, 0.14, -0.20), 'ForeArm_R': (-0.42, 0.12, -0.38), 'UpperArm_L': (-0.34, -0.12, 0.30), 'ForeArm_L': (-0.30, -0.10, 0.34)}),
+        (28, zero)
+    ])
+    action('Cast_FlameWave', [
+        (1, zero),
+        (8, {**zero, 'UpperArm_R': (0.10, -0.34, -0.42), 'ForeArm_R': (0.12, -0.40, -0.52), 'UpperArm_L': (0.08, 0.30, 0.38), 'ForeArm_L': (0.10, 0.36, 0.46)}),
+        (18, {**zero, 'UpperArm_R': (0.24, -0.48, -0.56), 'ForeArm_R': (0.16, -0.54, -0.68), 'UpperArm_L': (0.18, 0.42, 0.50), 'ForeArm_L': (0.14, 0.48, 0.58)}),
+        (30, zero)
+    ])
+    action('Cast_Tornado', [
+        (1, zero),
+        (12, {**zero, 'UpperArm_R': (-0.32, -0.16, -0.20), 'ForeArm_R': (-0.34, -0.18, -0.30), 'UpperArm_L': (-0.30, 0.16, -0.18), 'ForeArm_L': (-0.32, 0.18, -0.26)}),
+        (26, {**zero, 'UpperArm_R': (-0.46, -0.24, -0.28), 'ForeArm_R': (-0.40, -0.26, -0.38), 'UpperArm_L': (-0.42, 0.22, -0.24), 'ForeArm_L': (-0.38, 0.24, -0.34)}),
+        (44, zero)
+    ])
+    rig.animation_data.action = bpy.data.actions.get('Idle')
+    return rig
+
+
 def class_ornaments(hero_id, colors, mats):
     """Return distinctive silhouette pieces for each school of magic."""
     glow, trim, metal = mats['glow'], mats['trim'], mats['metal']
@@ -205,7 +325,7 @@ def class_ornaments(hero_id, colors, mats):
 def build_hero(hero_id, colors):
     clear_scene()
     scene = bpy.context.scene
-    scene['asset_contract'] = 'spire-player-v3-authored'
+    scene['asset_contract'] = 'spire-player-v5-rigged'
     robe = pbr_material(f'{hero_id}_Robe', colors['robe'], 'cloth', roughness=0.66, texture_size=512, seed=colors['seed'])
     trim = pbr_material(f'{hero_id}_Trim', colors['trim'], 'cloth', metallic=0.24, roughness=0.30,
                         emission=colors['glow'], emission_strength=1.8, texture_size=512, seed=colors['seed'] + 1)
@@ -225,7 +345,7 @@ def build_hero(hero_id, colors):
     root = bpy.data.objects.new(f'Player_{hero_id}_Root', None)
     scene.collection.objects.link(root)
     root['hero_class'] = hero_id
-    root['asset_contract'] = 'spire-player-v3-authored'
+    root['asset_contract'] = 'spire-player-v5-rigged'
     root['front_axis'] = '-Y_blender_to_-Z_runtime'
     pieces = []
 
@@ -282,18 +402,21 @@ def build_hero(hero_id, colors):
     ]
     pieces += class_ornaments(hero_id, colors, mats)
     parent_all(root, pieces)
+    rig = create_hero_armature(scene, root, pieces)
 
     for name, location, purpose in (
-        ('Hand_L', (-0.50, -0.035, -0.14), 'left_hand_cast_socket'),
-        ('Hand_R', (0.50, -0.035, -0.14), 'right_hand_cast_socket'),
+        ('HandSocket_L', (-0.50, -0.035, -0.14), 'left_hand_cast_socket'),
+        ('HandSocket_R', (0.50, -0.035, -0.14), 'right_hand_cast_socket'),
         ('CastSocket', (0, -0.34, 0.48), 'center_spell_origin'),
         ('HeadSocket', (0, 0, 1.32), 'head_fx_socket'),
     ):
         socket = add_socket(scene, name, location, 0.075, purpose)
-        socket.parent = root
+        socket.parent = rig
+        socket.parent_type = 'BONE'
+        socket.parent_bone = 'Hand_L' if name == 'HandSocket_L' else 'Hand_R' if name == 'HandSocket_R' else 'Spine' if name == 'CastSocket' else 'Head'
 
     out = os.path.join(OUT_DIR, f'player_{hero_id}.glb')
-    export_selected(out, root=root)
+    export_selected(out, root=root, animations=True)
 
     try:
         with open(HERO_MANIFEST, 'r', encoding='utf-8') as handle:
@@ -304,7 +427,18 @@ def build_hero(hero_id, colors):
     if hero_id not in players:
         players.append(hero_id)
     manifest['generator'] = 'scripts/generate_player_heroes.py'
-    manifest['version'] = 'spire-player-v4-pbr-rig-ready'
+    manifest.setdefault('assets', {})[hero_id] = {
+        'url': f'/models/player_{hero_id}.glb',
+        'lod': 'hero',
+        'textureSet': 'pbr-2k-packed',
+        'rig': 'HeroArmature',
+        'handSocket': 'HandSocket_R',
+        'castSocket': 'CastSocket',
+        'socketAxes': {'wandForward': '-Z', 'up': '+Y'},
+        'animations': ['Idle', 'Walk', 'Cast_Ember', 'Cast_Fireball', 'Cast_FlameWave', 'Cast_Tornado'],
+        'sockets': ['HandSocket_L', 'HandSocket_R', 'CastSocket', 'HeadSocket']
+    }
+    manifest['version'] = 'spire-player-v5-rigged'
     with open(HERO_MANIFEST, 'w', encoding='utf-8') as handle:
         json.dump(manifest, handle, indent=2)
         handle.write('\n')

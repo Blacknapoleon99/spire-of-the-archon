@@ -59,6 +59,7 @@ export class NetworkClient {
     });
     this.socket.on('error_message', (data) => this.trigger('error_message', data));
     this.socket.on('game_started', (data) => this.trigger('game_started', data));
+    this.socket.on('vault_gate_state', (data) => this.trigger('vault_gate_state', data));
 
     // Gameplay sync
     this.socket.on('state_snapshot', (data) => this.trigger('state_snapshot', data));
@@ -152,6 +153,10 @@ export class NetworkClient {
 
   advanceFloor() {
     this.socket.emit('advance_floor');
+  }
+
+  openVaultGate() {
+    if (this.isConnected) this.socket.emit('open_vault_gate');
   }
 
   sendChat(message) {

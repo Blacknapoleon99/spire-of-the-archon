@@ -11,20 +11,50 @@
       "url": "/models/player_pyromancer.glb",
       "lod": "hero",
       "textureSet": "pbr-2k-packed",
+      "rig": "HeroArmature",
+      "handSocket": "HandSocket_R",
+      "castSocket": "CastSocket",
+      "socketAxes": {
+        "wandForward": "-Z",
+        "up": "+Y"
+      },
+      "animations": [
+        "Idle",
+        "Walk",
+        "Cast_Ember",
+        "Cast_Fireball",
+        "Cast_FlameWave",
+        "Cast_Tornado"
+      ],
       "sockets": [
-        "Hand_L",
-        "Hand_R",
+        "HandSocket_L",
+        "HandSocket_R",
         "CastSocket",
         "HeadSocket"
       ]
     },
     "cryomancer": {
-      "url": "/models/player_sunsteel_vanguard.glb",
+      "url": "/models/player_cryomancer.glb",
       "lod": "hero",
       "textureSet": "pbr-2k-packed",
+      "rig": "HeroArmature",
+      "handSocket": "HandSocket_R",
+      "castSocket": "CastSocket",
+      "socketAxes": {
+        "wandForward": "-Z",
+        "up": "+Y"
+      },
+      "animations": [
+        "Idle",
+        "Walk",
+        "Cast_Ember",
+        "Cast_Fireball",
+        "Cast_FlameWave",
+        "Cast_Tornado"
+      ],
       "sockets": [
-        "Hand_L",
-        "Hand_R",
+        "HandSocket_L",
+        "HandSocket_R",
         "CastSocket",
         "HeadSocket"
       ]
@@ -33,9 +63,24 @@
       "url": "/models/player_luminary.glb",
       "lod": "hero",
       "textureSet": "pbr-2k-packed",
+      "rig": "HeroArmature",
+      "handSocket": "HandSocket_R",
+      "castSocket": "CastSocket",
+      "socketAxes": {
+        "wandForward": "-Z",
+        "up": "+Y"
+      },
+      "animations": [
+        "Idle",
+        "Walk",
+        "Cast_Ember",
+        "Cast_Fireball",
+        "Cast_FlameWave",
+        "Cast_Tornado"
+      ],
       "sockets": [
-        "Hand_L",
-        "Hand_R",
+        "HandSocket_L",
+        "HandSocket_R",
         "CastSocket",
         "HeadSocket"
       ]
@@ -44,9 +89,24 @@
       "url": "/models/player_chronomancer.glb",
       "lod": "hero",
       "textureSet": "pbr-2k-packed",
+      "rig": "HeroArmature",
+      "handSocket": "HandSocket_R",
+      "castSocket": "CastSocket",
+      "socketAxes": {
+        "wandForward": "-Z",
+        "up": "+Y"
+      },
+      "animations": [
+        "Idle",
+        "Walk",
+        "Cast_Ember",
+        "Cast_Fireball",
+        "Cast_FlameWave",
+        "Cast_Tornado"
+      ],
       "sockets": [
-        "Hand_L",
-        "Hand_R",
+        "HandSocket_L",
+        "HandSocket_R",
         "CastSocket",
         "HeadSocket"
       ]
@@ -61,6 +121,6 @@
     }
   },
   "note": "Generated PBR hero meshes are enabled when present; the shipped GLB/procedural fallback remains available if a file is absent.",
-  "generator": "scripts/generate_fp_wand_hero.py",
-  "version": "spire-fp-wand-v4-pbr-rig-ready"
+  "generator": "scripts/generate_player_heroes.py",
+  "version": "spire-player-v5-rigged"
 }

@@ -246,6 +246,7 @@ class GameApp {
     Promise.allSettled([
       assetLoader.preloadFloor1(),
       assetLoader.preloadViewmodelWand(),
+      this.tower.preloadAuthoredProps?.(),
       animationPackManager.loadPack(),
       this.spellVfx.preloadHeroAssets().then(() => this.spellVfx.warmup(this.engineScene.renderer, this.engineScene.camera)),
       Promise.resolve()
@@ -803,6 +804,11 @@ class GameApp {
       if (data?.complete) this.ui.showStoryMessage(`Objective complete: ${data.label}`);
     });
 
+    onlineNetwork.on('vault_gate_state', (data) => {
+      if (!data?.open || (data.floor && data.floor !== this.currentFloor)) return;
+      if (this.tower?.openVaultGate) this.tower.openVaultGate(this.particles);
+    });
+
     onlineNetwork.on('action_rejected', (data) => {
       if (data?.reason === 'objective_incomplete' && data.objective) {
         this.questManager.setServerObjective(data.objective);
@@ -831,6 +837,10 @@ class GameApp {
         this.ui.showStoryMessage(messages[data.reason] || 'The talent cannot be unlocked yet.');
       } else if (data?.action === 'crucible_interact' || data?.action === 'rotate_prism' || data?.action === 'keystone_activate') {
         this.ui.showStoryMessage(data.reason === 'out_of_range' ? 'Move closer to interact with the puzzle.' : 'The puzzle rejects that action.');
+      } else if (data?.action === 'open_vault_gate') {
+        this.ui.showStoryMessage(data.reason === 'out_of_range'
+          ? 'Move closer to the Vault Runegate and press F.'
+          : 'The Vault Runegate is not available here.');
       }
     });
 
@@ -907,6 +917,7 @@ class GameApp {
         };
       }
       this.applyPuzzleSnapshot(data.puzzles);
+      if (data.vaultGateOpen && this.tower?.openVaultGate) this.tower.openVaultGate();
 
       const playersList = data.players || [];
       // Keep the server snapshot live, but place a hard UI/input gate before
@@ -1004,6 +1015,7 @@ class GameApp {
       if (data?.floor && data.floor !== this.currentFloor) return;
       if (data.objective) this.questManager.setServerObjective(data.objective);
       this.applyPuzzleSnapshot(data.puzzles);
+      if (data.vaultGateOpen && this.tower?.openVaultGate) this.tower.openVaultGate();
 
       const snapshotLocalId = resolveLocalPlayerId(data.players, onlineNetwork.socket?.id, onlineNetwork.localPlayerId);
       data.players.forEach(pData => {
@@ -2036,8 +2048,7 @@ class GameApp {
       if (this.tower.openVaultGate(this.particles)) {
         soundEngine.playGateOpen();
         this.ui.showStoryMessage('✨ The Arcane Runegate dissolves into starlight! Enter the Forbidden Archives.');
-        const idx = this.tower.interactables.findIndex(i => i.id === 'vault_runegate');
-        if (idx !== -1) this.tower.interactables.splice(idx, 1);
+        onlineNetwork.openVaultGate?.();
       }
       return;
     }
