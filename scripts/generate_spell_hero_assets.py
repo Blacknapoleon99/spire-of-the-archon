@@ -232,17 +232,17 @@ def build_frost():
     root = bpy.data.objects.new('FrostCrystalHeroRoot', None)
     scene.collection.objects.link(root)
     ice = pbr_material('Frost_Crystal', (0.10, 0.55, 0.95), 'crystal', metallic=0.08, roughness=0.08,
-                       emission=(0.18, 0.75, 1.0), emission_strength=8.0, texture_size=256, seed=40)
+                       emission=(0.18, 0.75, 1.0), emission_strength=0.65, texture_size=512, seed=40)
     ice_hot = pbr_material('Frost_EdgeGlow', (0.52, 0.92, 1.0), 'crystal', metallic=0.05, roughness=0.06,
-                           emission=(0.35, 0.9, 1.0), emission_strength=14.0, texture_size=128, seed=41)
-    rune = pbr_material('Frost_Rune', (0.03, 0.50, 0.90), 'crystal', emission=(0.1, 0.8, 1.0), emission_strength=16, texture_size=128, seed=42)
+                           emission=(0.35, 0.9, 1.0), emission_strength=1.8, texture_size=256, seed=41)
+    rune = pbr_material('Frost_Rune', (0.03, 0.50, 0.90), 'crystal', emission=(0.1, 0.8, 1.0), emission_strength=2, texture_size=256, seed=42)
     pieces = [torus('FrostRuneBase', 0.56, 0.025, (0, 0, -0.58), rune, rotation=(0, 0, 0), segments=72)]
     for index in range(7):
         angle = index * math.tau / 7
         radius = 0.14 + (index % 3) * 0.10
         pieces.append(cone(f'IceShard_{index}', 0.18, 0.008, 1.2 + (index % 3) * 0.3,
                            (math.cos(angle) * radius, math.sin(angle) * radius, 0.05 + (index % 2) * 0.10),
-                           ice_hot if index % 3 == 0 else ice, vertices=6,
+                           ice_hot if index % 3 == 0 else ice, vertices=12,
                            rotation=(math.sin(angle) * 0.32, -math.cos(angle) * 0.24, angle)))
     pieces.append(sphere('FrostCore', (0, 0, 0.02), (0.26, 0.26, 0.38), ice_hot))
     for piece in pieces:
@@ -255,10 +255,10 @@ def build_light():
     scene = bpy.context.scene
     root = bpy.data.objects.new('LuminaryHaloHeroRoot', None)
     scene.collection.objects.link(root)
-    gold = pbr_material('Luminary_Gold', (0.82, 0.44, 0.06), 'metal', metallic=0.92, roughness=0.17, texture_size=256, seed=50)
+    gold = pbr_material('Luminary_Gold', (0.82, 0.44, 0.06), 'metal', metallic=0.92, roughness=0.24, texture_size=512, seed=50)
     light = pbr_material('Luminary_Core', (1.0, 0.66, 0.10), 'crystal', metallic=0.1, roughness=0.10,
-                         emission=(1.0, 0.72, 0.22), emission_strength=15, texture_size=256, seed=51)
-    ivory = pbr_material('Luminary_Rays', (1.0, 0.92, 0.52), 'crystal', emission=(1.0, 0.84, 0.34), emission_strength=12, texture_size=128, seed=52)
+                         emission=(1.0, 0.72, 0.22), emission_strength=2.2, texture_size=256, seed=51)
+    ivory = pbr_material('Luminary_Rays', (1.0, 0.92, 0.52), 'crystal', emission=(1.0, 0.84, 0.34), emission_strength=1.4, texture_size=256, seed=52)
     pieces = [sphere('SolarCore', (0, 0, 0), (0.32, 0.32, 0.32), light)]
     pieces += [
         torus('Halo_Outer', 0.62, 0.024, (0, 0, 0), gold, rotation=(math.pi / 2, 0, 0), segments=80),
@@ -280,10 +280,10 @@ def build_chrono():
     scene = bpy.context.scene
     root = bpy.data.objects.new('ChronoAstrolabeHeroRoot', None)
     scene.collection.objects.link(root)
-    brass = pbr_material('Chrono_Brass', (0.48, 0.24, 0.06), 'metal', metallic=0.96, roughness=0.19, texture_size=256, seed=60)
+    brass = pbr_material('Chrono_Brass', (0.48, 0.24, 0.06), 'metal', metallic=0.96, roughness=0.26, texture_size=512, seed=60)
     violet = pbr_material('Chrono_Violet', (0.34, 0.035, 0.72), 'crystal', metallic=0.18, roughness=0.12,
-                          emission=(0.62, 0.08, 1.0), emission_strength=12, texture_size=256, seed=61)
-    cyan = pbr_material('Chrono_Cyan', (0.12, 0.62, 0.95), 'crystal', emission=(0.18, 0.76, 1.0), emission_strength=10, texture_size=128, seed=62)
+                          emission=(0.62, 0.08, 1.0), emission_strength=1.8, texture_size=256, seed=61)
+    cyan = pbr_material('Chrono_Cyan', (0.12, 0.62, 0.95), 'crystal', emission=(0.18, 0.76, 1.0), emission_strength=1.5, texture_size=256, seed=62)
     pieces = [sphere('ChronoCore', (0, 0, 0), (0.24, 0.24, 0.24), violet)]
     pieces += [
         torus('Astrolabe_Ring_X', 0.58, 0.024, (0, 0, 0), brass, rotation=(math.pi / 2, 0, 0), segments=80),

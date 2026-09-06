@@ -17,6 +17,12 @@ export class ChunkLoader {
     this.residentFloors = new Set([1]);
     this.maxResidentFloors = 3;
     this.audioCache = new Map();
+    this.backgroundQueue = [];
+    this.backgroundQueued = new Set();
+    this.backgroundPromises = new Map();
+    this.backgroundActive = false;
+    this.backgroundStreamingEnabled = false;
+    this.streamStats = { queued: 0, completed: 0, failed: 0, lastFloor: null };
   }
 
   /**
@@ -65,12 +71,16 @@ export class ChunkLoader {
     const promise = Promise.allSettled(urls.map(url => assetLoader.loadGLTF(url)))
       .then(results => {
         const rejected = results.filter(result => result.status === 'rejected');
-        if (rejected.length) this.floorErrors.set(floor, rejected.map(result => result.reason?.message || 'asset load failed'));
-        this.loadedFloors.add(floor);
+        if (rejected.length) {
+          this.floorErrors.set(floor, rejected.map(result => result.reason?.message || 'asset load failed'));
+        } else {
+          this.floorErrors.delete(floor);
+          this.loadedFloors.add(floor);
+        }
         this.residentFloors.add(floor);
         this.evictDistantFloors(floor);
         if (options.onComplete) options.onComplete({ floor, loaded: urls.length - rejected.length, total: urls.length });
-        return { floor, ready: true, loaded: urls.length - rejected.length, total: urls.length, errors: this.floorErrors.get(floor) || [] };
+        return { floor, ready: rejected.length === 0, loaded: urls.length - rejected.length, total: urls.length, errors: this.floorErrors.get(floor) || [] };
       })
       .catch(error => {
         this.floorErrors.set(floor, [error.message]);
@@ -79,6 +89,62 @@ export class ChunkLoader {
       .finally(() => this.loadingFloors.delete(floor));
     this.loadingFloors.set(floor, promise);
     return promise;
+  }
+
+  /** Queue non-critical floor work until the playable frame is stable. */
+  scheduleBackgroundPreload(floorNumber, { priority = 0, delayMs = 900, onComplete = null } = {}) {
+    const floor = Number(floorNumber);
+    if (!Number.isFinite(floor) || floor < 1 || floor > 15) return Promise.resolve({ floor, ready: false });
+    if (this.loadedFloors.has(floor)) return Promise.resolve({ floor, ready: true, cached: true });
+    if (this.backgroundPromises.has(floor)) return this.backgroundPromises.get(floor);
+    const existing = this.backgroundQueue.find(item => item.floor === floor);
+    if (existing) return existing.promise;
+
+    let resolveQueued;
+    let rejectQueued;
+    const promise = new Promise((resolve, reject) => { resolveQueued = resolve; rejectQueued = reject; });
+    this.backgroundQueue.push({ floor, priority: Number(priority) || 0, delayMs: Math.max(0, Number(delayMs) || 0), onComplete, promise, resolveQueued, rejectQueued });
+    this.backgroundQueue.sort((a, b) => b.priority - a.priority);
+    this.backgroundQueued.add(floor);
+    this.backgroundPromises.set(floor, promise);
+    this.streamStats.queued += 1;
+    if (this.backgroundStreamingEnabled) this.pumpBackgroundPreload();
+    return promise;
+  }
+
+  startBackgroundPreload() {
+    this.backgroundStreamingEnabled = true;
+    this.pumpBackgroundPreload();
+  }
+
+  pumpBackgroundPreload() {
+    if (!this.backgroundStreamingEnabled || this.backgroundActive || !this.backgroundQueue.length) return;
+    const item = this.backgroundQueue.shift();
+    this.backgroundQueued.delete(item.floor);
+    this.backgroundActive = true;
+    const run = () => this.preloadFloor(item.floor, { onComplete: item.onComplete })
+      .then(result => {
+        this.streamStats.completed += result.ready ? 1 : 0;
+        this.streamStats.failed += result.ready ? 0 : 1;
+        this.streamStats.lastFloor = item.floor;
+        item.resolveQueued(result);
+        return result;
+      })
+      .catch(error => {
+        this.streamStats.failed += 1;
+        item.rejectQueued(error);
+      })
+      .finally(() => {
+        this.backgroundPromises.delete(item.floor);
+        this.backgroundActive = false;
+        this.pumpBackgroundPreload();
+      });
+    const begin = () => {
+      if (typeof requestIdleCallback === 'function') requestIdleCallback(run, { timeout: 2500 });
+      else run();
+    };
+    if (item.delayMs > 0) setTimeout(begin, item.delayMs);
+    else begin();
   }
 
   evictDistantFloors(activeFloor) {
@@ -107,11 +173,6 @@ export class ChunkLoader {
       loading: this.loadingFloors.has(floor),
       errors: this.floorErrors.get(floor) || []
     };
-  }
-
-  startBackgroundPreload() {
-    // Deprecated: No background loading allowed during active gameplay.
-    // The caller chooses current + next floor so loading work stays bounded.
   }
 
   isFloorReady(floorNumber) {

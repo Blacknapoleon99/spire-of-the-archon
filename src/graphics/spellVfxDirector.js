@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { getSpellVfxProfile, hashVfxSeed } from './spellVfxProfiles.js';
 import { assetLoader } from './assetLoader.js';
+import { ADVANCED_BY_ID } from '../shared/spellMastery.js';
 
 /**
  * Routes every player spell through one visual contract.  The director keeps
@@ -12,6 +13,7 @@ export class SpellVfxDirector {
     this.scene = scene;
     this.particles = particleSystem;
     this.engineScene = engineScene;
+    this.particles.camera = engineScene?.camera || null;
     this.qualityProfile = 'balanced';
     this.reducedMotion = false;
     this.castSequence = 0;
@@ -37,7 +39,7 @@ export class SpellVfxDirector {
   }
 
   warmup(renderer, camera) {
-    this.particles.warmupSpellVisuals(renderer, camera);
+    return this.particles.warmupSpellVisuals(renderer, camera);
   }
 
   preloadHeroAssets() {
@@ -104,7 +106,25 @@ export class SpellVfxDirector {
     if (source === 'local') this.stats.localCasts += 1;
     else this.stats.remoteCasts += 1;
 
-    if (profile.kind === 'field') {
+    const advanced = ADVANCED_BY_ID[spellId];
+    const vortexCount = this.particles.vortices.length;
+    if (advanced && ['field','ward','heal','wave'].includes(advanced.kind)) {
+      const ground=target || new THREE.Vector3(origin.x,0,origin.z);
+      const color={fire:0xff6826,frost:0x8ddfff,light:0xffdf88,chrono:0xb38bff}[advanced.element];
+      if (advanced.kind === 'field') {
+        if (element === 'fire') this.particles.spawnFireTornado(ground,advanced.duration,0,advanced.aoeRadius);
+        else if(element === 'frost') this.particles.spawnBlizzardZone(ground,advanced.duration,advanced.aoeRadius,0);
+        else if(element === 'light') this.particles.spawnDivineSanctuary(ground,advanced.duration,advanced.aoeRadius);
+        else this.particles.spawnTemporalStasisDome(ground,advanced.duration,advanced.aoeRadius,0);
+      } else if(advanced.kind === 'ward') {
+        const effect=this.particles.spawnGlacialBulwark(ground,advanced.duration);
+        if(effect) { effect.bubble.material.color.setHex(color); effect.bubble.material.emissive?.setHex(color); effect.ring.material.color.setHex(color); }
+      } else {
+        const effect=this.particles.spawnCleansingWave(ground,0.9);
+        if(effect) { effect.wave.material.color.setHex(color); effect.inner.material.color.setHex(color); }
+        this.particles.spawnBurst(ground,element,reduced?8:16);
+      }
+    } else if (profile.kind === 'field') {
       if (spellId === 'fire_tornado') {
         const ground = target || worldImpact?.point || this._groundTarget(origin, safeDirection, 10);
         this.particles.spawnFireTornado(ground, duration || profile.duration, damage || 32, profile.radius);
@@ -153,11 +173,24 @@ export class SpellVfxDirector {
         element,
         24,
         Number.isFinite(travelDistance) ? Math.max(0.5, travelDistance) : 35,
-        worldImpact
+        worldImpact,
+        {
+          offset: source === 'local' && this.engineScene?.camera ? new THREE.Vector3(0.38, -0.32, -0.85).applyQuaternion(this.engineScene.camera.quaternion) : null,
+          kind: advanced?.kind || profile.cast,
+          rank: advanced?.rank || 1,
+          visualOnly: Boolean(advanced) || source !== 'local'
+        }
       );
-      this.particles.spawnMuzzleFlash(origin, safeDirection, element);
+      // Keep the brief flash at the wand side and suppress it against a close
+      // wall; the gameplay origin above stays on the crosshair ray.
+      if (source !== 'local' || !worldImpact || travelDistance > 1.2) {
+        const flash = source === 'local' && this.engineScene?.camera
+          ? origin.clone().add(new THREE.Vector3(0.38, -0.32, -0.85).applyQuaternion(this.engineScene.camera.quaternion)) : origin;
+        this.particles.spawnMuzzleFlash(flash, safeDirection, element);
+      }
     }
 
+    for (let i=vortexCount;i<this.particles.vortices.length;i++) this.particles.vortices[i].visualOnly=true;
     this.particles.vfxStats.casts += 1;
     this.stats.dropped = this.particles.vfxStats.droppedEffects;
     this.stats.lastCastMs = typeof performance !== 'undefined' ? performance.now() - started : 0;

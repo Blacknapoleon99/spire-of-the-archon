@@ -25,8 +25,9 @@ with sync_playwright() as playwright:
     host_glb = []
     guest_glb = []
     logs = []
-    host.on('response', lambda response: host_glb.append(response.url) if response.url.endswith('.glb') else None)
-    guest.on('response', lambda response: guest_glb.append(response.url) if response.url.endswith('.glb') else None)
+    # Runtime model URLs carry a deployment cache-busting query string.
+    host.on('response', lambda response: host_glb.append(response.url) if '.glb' in response.url else None)
+    guest.on('response', lambda response: guest_glb.append(response.url) if '.glb' in response.url else None)
     host.on('console', lambda message: logs.append(f'host:{message.type}:{message.text}'))
     guest.on('console', lambda message: logs.append(f'guest:{message.type}:{message.text}'))
 
@@ -67,10 +68,12 @@ with sync_playwright() as playwright:
     print({'room': room_code, 'hostGlb': host_glb, 'guestGlb': guest_glb,
            'hostVisuals': host_visuals, 'guestVisuals': guest_visuals,
            'logs': [line for line in logs if 'AssetLoader' in line or 'PlayerEntity' in line or 'Draco' in line]})
-    assert any('player_cryomancer.glb' in url for url in host_glb)
+    # Cryomancer now prefers the authored Sunsteel Vanguard tank rig, while
+    # the original cryomancer GLB remains a supported fallback.
+    assert any(('player_sunsteel_vanguard.glb' in url) or ('player_cryomancer.glb' in url) for url in host_glb)
     assert any('player_pyromancer.glb' in url for url in guest_glb)
     assert any(item['classId'] == 'cryomancer' and item['hasRiggedModel'] and item['rootVisible'] and item['visualVisible']
-               and item['assetUrl'] and item['assetUrl'].endswith('player_cryomancer.glb') for item in host_visuals)
+               and item['assetUrl'] and (item['assetUrl'].endswith('player_sunsteel_vanguard.glb') or item['assetUrl'].endswith('player_cryomancer.glb')) for item in host_visuals)
     assert any(item['classId'] == 'pyromancer' and item['hasRiggedModel'] and item['rootVisible'] and item['visualVisible']
                and item['assetUrl'] and item['assetUrl'].endswith('player_pyromancer.glb') for item in guest_visuals)
     browser.close()

@@ -1,13 +1,27 @@
 /**
- * Client-only visual contract for the sixteen live class spells.  Gameplay
+ * Client-only visual contract for the starting kits and mastery spells. Gameplay
  * truth stays in shared/combatRules.js; these profiles only describe how a
  * cast should be staged and how much render budget it may consume.
  */
+import { ADVANCED_BY_ID } from '../shared/spellMastery.js';
+import { FIRE_TORNADO_CONFIG } from '../shared/combatRules.js';
 export const SPELL_VFX_PROFILES = Object.freeze({
+  ...Object.fromEntries(Object.values(ADVANCED_BY_ID).map(s => [s.id, { family:s.element, kind:s.kind, cast:s.kind, cost:s.rank+2, radius:s.aoeRadius, duration:s.duration || 1 }])),
   ember_bolt: { family: 'fire', kind: 'projectile', cast: 'ember', cost: 1 },
   fireball: { family: 'fire', kind: 'projectile', cast: 'fireball', cost: 3 },
   flame_wave: { family: 'fire', kind: 'projectile', cast: 'wave', cost: 4 },
-  fire_tornado: { family: 'fire', kind: 'field', cast: 'tornado', cost: 8, radius: 5.5, duration: 5 },
+  fire_tornado: {
+    family: FIRE_TORNADO_CONFIG.element,
+    kind: 'field',
+    cast: 'tornado',
+    cost: 8,
+    radius: FIRE_TORNADO_CONFIG.aoeRadius,
+    duration: FIRE_TORNADO_CONFIG.duration,
+    cooldown: FIRE_TORNADO_CONFIG.cooldown,
+    suctionRadius: FIRE_TORNADO_CONFIG.suctionRadius,
+    suctionSpeed: FIRE_TORNADO_CONFIG.suctionSpeed,
+    bossSuctionMultiplier: FIRE_TORNADO_CONFIG.suctionBossMultiplier
+  },
 
   frost_shard: { family: 'frost', kind: 'projectile', cast: 'shard', cost: 1 },
   ice_lance: { family: 'frost', kind: 'projectile', cast: 'lance', cost: 3 },

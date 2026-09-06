@@ -1,6 +1,9 @@
 import * as THREE from 'three';
 import { TextureGenerator } from './textureGenerator.js';
 import { DecalManager } from './shaders/impactDecals.js';
+import { createFireVolume } from './shaders/fireVolume.js';
+import { softParticleTexture } from './softParticle.js';
+import { arcaneSurface, arcaneTime } from './shaders/arcaneSurface.js';
 
 const AIR_IMPACT_NORMAL = Object.freeze({ x: 0, y: 0, z: 0 });
 
@@ -11,6 +14,7 @@ export class ParticleSystem {
   constructor(scene) {
     this.scene = scene;
     this.projectiles = [];
+    this.fireballVolumePool = Array.from({ length: 24 }, () => createFireVolume('fireball'));
     this.particles = [];
     this.shockwaves = [];
     this.floatingTexts = [];
@@ -60,6 +64,10 @@ export class ParticleSystem {
     this.geoChronoRing = new THREE.TorusGeometry(0.55, 0.04, 8, 20);
     this.geoMuzzleSpark = new THREE.TetrahedronGeometry(0.08, 0);
     this.geoTrailOcta = new THREE.OctahedronGeometry(0.075, 0);
+    this.geoSoftSpark = new THREE.PlaneGeometry(0.24, 0.24);
+    this.softTrailMats = Object.fromEntries(Object.entries({fire:0xff8c28,frost:0x9bdfff,light:0xffe8a3,chrono:0xb89aff,white:0xffffff}).map(([key,color]) => [key, new THREE.MeshBasicMaterial({
+      color, map:softParticleTexture(), transparent:true, blending:THREE.AdditiveBlending, depthWrite:false
+    })]));
     this.geoBurstDodeca = new THREE.DodecahedronGeometry(0.14, 0);
     this.geoBurstOcta = new THREE.OctahedronGeometry(0.16, 0);
     this.geoShockwaveRing = new THREE.RingGeometry(0.2, 0.6, 24);
@@ -261,14 +269,28 @@ export class ParticleSystem {
       this._createVortexHelixGeometry(0.35, 2.2, 5.7, 2.15, 72, 0.045, Math.PI),
       this._createVortexHelixGeometry(0.75, 2.75, 6.7, 1.45, 72, 0.04, Math.PI * 1.5)
     ];
+    // Thin, curved wind lanes give the broad volume a readable high-speed
+    // silhouette from the side. They are shared by every pooled tornado and
+    // use one small TubeGeometry each instead of per-cast trail meshes.
+    this.geoVortexWindStripes = [
+      this._createVortexWindStripeGeometry(0.48, 2.30, 6.25, 1.22, 56, 0.045, 0.0, 0.16),
+      this._createVortexWindStripeGeometry(0.62, 2.58, 6.55, 1.48, 56, 0.052, Math.PI * 0.52, 0.22),
+      this._createVortexWindStripeGeometry(0.36, 2.18, 5.90, 1.72, 56, 0.038, Math.PI, -0.14),
+      this._createVortexWindStripeGeometry(0.72, 2.70, 6.72, 1.34, 56, 0.048, Math.PI * 1.48, 0.18),
+      this._createVortexWindStripeGeometry(0.56, 2.42, 6.05, 1.92, 56, 0.034, Math.PI * 1.88, -0.20)
+    ];
     this.geoVortexFlameCore = new THREE.SphereGeometry(1.0, 32, 20);
     this.geoVortexFlameCard = new THREE.PlaneGeometry(0.82, 4.9, 1, 12);
-    this.geoVortexEmbers = this._createVortexEmberGeometry(72, 2.75, 6.5);
+    // Both point clouds are fixed-size and generated once. Keeping particles
+    // in the tapered radius avoids the unbounded spray that used to read as
+    // noise outside the tornado's readable silhouette.
+    this.geoVortexEmbers = this._createVortexEmberGeometry(112, 2.62, 6.75);
+    this.geoVortexWindDust = this._createVortexEmberGeometry(56, 3.05, 6.1, true);
     // A narrow annulus reads as a rune boundary. The previous 0.3→5.5 ring
     // was effectively a glowing floor disk that overwhelmed the actual fire.
-    this.geoVortexRuneRing = new THREE.RingGeometry(4.65, 5.5, 64);
+    this.geoVortexRuneRing = new THREE.RingGeometry(5.35, 5.5, 96);
     this.geoDomeHalf = new THREE.SphereGeometry(6.5, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2);
-    this.geoDomeRuneRing = new THREE.RingGeometry(0.3, 6.5, 32);
+    this.geoDomeRuneRing = new THREE.RingGeometry(6.3, 6.5, 96);
     this.geoIceSpire = new THREE.ConeGeometry(0.5, 4.2, 6);
     this.geoIceShardSpire = new THREE.ConeGeometry(0.28, 2.2, 5);
 
@@ -293,66 +315,6 @@ export class ParticleSystem {
       blending: THREE.AdditiveBlending,
       depthWrite: false
     });
-    this.matVortexVolume = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uOpacity: { value: 0.42 },
-        uColorHot: { value: new THREE.Color(0xff8a00) },
-        uColorDeep: { value: new THREE.Color(0x7b1200) }
-      },
-      vertexShader: `
-        uniform float uTime;
-        varying vec3 vLocal;
-        void main() {
-          vLocal = position;
-          vec3 p = position;
-          float h = clamp((position.y + 2.9) / 5.8, 0.0, 1.0);
-          float wind = sin(uTime * 2.4 + position.y * 1.6) * (0.035 + h * 0.12);
-          p.x += wind + sin(uTime * 1.6 + position.y * 3.1) * h * 0.045;
-          p.z += cos(uTime * 1.9 + position.y * 2.4) * h * 0.045;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float uTime;
-        uniform float uOpacity;
-        uniform vec3 uColorHot;
-        uniform vec3 uColorDeep;
-        varying vec3 vLocal;
-
-        float hash31(vec3 p) {
-          p = fract(p * 0.1031);
-          p += dot(p, p.yzx + 33.33);
-          return fract((p.x + p.y) * p.z);
-        }
-        float noise3(vec3 p) {
-          vec3 i = floor(p);
-          vec3 f = fract(p);
-          f = f * f * (3.0 - 2.0 * f);
-          return mix(mix(mix(hash31(i), hash31(i + vec3(1,0,0)), f.x),
-                         mix(hash31(i + vec3(0,1,0)), hash31(i + vec3(1,1,0)), f.x), f.y),
-                     mix(mix(hash31(i + vec3(0,0,1)), hash31(i + vec3(1,0,1)), f.x),
-                         mix(hash31(i + vec3(0,1,1)), hash31(i + vec3(1,1,1)), f.x), f.y), f.z);
-        }
-        void main() {
-          float h = clamp((vLocal.y + 2.9) / 5.8, 0.0, 1.0);
-          float bodyRadius = mix(0.28, 1.45, h);
-          float radial = length(vLocal.xz) / max(0.001, bodyRadius);
-          float edge = 1.0 - smoothstep(0.45, 1.04, radial);
-          float n = noise3(vLocal * vec3(2.0, 1.25, 2.0) + vec3(0.0, uTime * 1.8, 0.0));
-          float n2 = noise3(vLocal * vec3(4.8, 2.1, 4.8) - vec3(uTime * 0.7, uTime * 1.2, 0.0));
-          float flame = smoothstep(0.25, 0.78, n * 0.72 + n2 * 0.38);
-          float taper = smoothstep(0.02, 0.16, h) * (1.0 - smoothstep(0.9, 1.0, h) * 0.35);
-          vec3 color = mix(uColorDeep, uColorHot, clamp(flame + (1.0 - radial) * 0.4, 0.0, 1.0));
-          float alpha = edge * flame * taper * uOpacity;
-          gl_FragColor = vec4(color, alpha);
-        }
-      `,
-      transparent: true,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide
-    });
     this.matVortexCore = new THREE.MeshBasicMaterial({
       color: 0xffa000,
       side: THREE.DoubleSide,
@@ -376,8 +338,11 @@ export class ParticleSystem {
     this.matVortexHelixFire = new THREE.MeshBasicMaterial({ color: 0xff5a00, side: THREE.DoubleSide, transparent: true, opacity: 0.82, blending: THREE.AdditiveBlending, depthWrite: false });
     this.matVortexHelixHot = new THREE.MeshBasicMaterial({ color: 0xffd54f, side: THREE.DoubleSide, transparent: true, opacity: 0.76, blending: THREE.AdditiveBlending, depthWrite: false });
     this.matVortexWind = new THREE.MeshBasicMaterial({ color: 0xffc107, side: THREE.DoubleSide, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexWindStripe = new THREE.MeshBasicMaterial({ color: 0xffd27a, side: THREE.DoubleSide, transparent: true, opacity: 0.66, blending: THREE.AdditiveBlending, depthWrite: false });
+    this.matVortexWindStripeHot = new THREE.MeshBasicMaterial({ color: 0xffffc2, side: THREE.DoubleSide, transparent: true, opacity: 0.78, blending: THREE.AdditiveBlending, depthWrite: false });
     this.matVortexFlameCore = new THREE.MeshBasicMaterial({ color: 0xff6d00, transparent: true, opacity: 0.12, blending: THREE.AdditiveBlending, depthWrite: false });
-    this.matVortexEmbers = new THREE.PointsMaterial({ color: 0xffd54f, size: 0.085, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+    this.matVortexEmbers = new THREE.PointsMaterial({ map:softParticleTexture(), color: 0xffb64f, size: 0.13, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
+    this.matVortexWindDust = new THREE.PointsMaterial({ map:softParticleTexture(), color: 0xff8a32, size: 0.075, transparent: true, opacity: 0.38, blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
     this.matVortexFlameCard = new THREE.ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
@@ -505,14 +470,33 @@ export class ParticleSystem {
     return new THREE.TubeGeometry(curve, segments, tubeRadius, 6, false);
   }
 
-  _createVortexEmberGeometry(count, radius, height) {
+  _createVortexWindStripeGeometry(baseRadius, topRadius, height, turns, segments, tubeRadius, phase = 0, lean = 0) {
+    const points = [];
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const angle = phase + t * turns * Math.PI * 2 + Math.sin(t * Math.PI * 2 + phase) * 0.08;
+      const radius = THREE.MathUtils.lerp(baseRadius, topRadius, t);
+      const wave = Math.sin(t * Math.PI * 2.0 + phase * 0.7) * 0.07;
+      const sideLean = Math.sin(t * Math.PI) * lean;
+      points.push(new THREE.Vector3(
+        Math.cos(angle) * (radius + wave) + Math.cos(angle + Math.PI * 0.5) * sideLean,
+        0.14 + t * height,
+        Math.sin(angle) * (radius + wave) + Math.sin(angle + Math.PI * 0.5) * sideLean
+      ));
+    }
+    const curve = new THREE.CatmullRomCurve3(points);
+    return new THREE.TubeGeometry(curve, segments, tubeRadius, 5, false);
+  }
+
+  _createVortexEmberGeometry(count, radius, height, outerBias = false) {
     const positions = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       // Deterministic distribution keeps asset warmup and replay captures
       // stable while still giving the column a natural turbulent profile.
       const t = (i * 0.61803398875) % 1;
       const angle = t * Math.PI * 2 * 7.0 + (i % 5) * 0.37;
-      const radial = 0.18 + ((i * 17) % 101) / 100 * radius * (0.35 + t * 0.65);
+      const spread = outerBias ? 0.56 + t * 0.34 : 0.24 + t * 0.68;
+      const radial = 0.12 + ((i * 17) % 101) / 100 * radius * spread;
       positions[i * 3] = Math.cos(angle) * radial;
       positions[i * 3 + 1] = 0.18 + t * height;
       positions[i * 3 + 2] = Math.sin(angle) * radial;
@@ -720,6 +704,9 @@ export class ParticleSystem {
           });
         });
         entry.group.add(clone);
+        // Opaque Blender cones/cables cannot represent gaseous fire. Retain
+        // the source for tools, but render the density field for this family.
+        if (type === 'fire') clone.visible = false;
         entry.heroAsset = clone;
         // The authored 3D volume becomes the primary fire silhouette. Keep
         // only the ground rune, pooled embers, lighting, and burst fallback;
@@ -745,8 +732,7 @@ export class ParticleSystem {
       const groundRune = new THREE.Mesh(this.geoVortexRuneRing, this.matVortexRune);
       groundRune.rotation.x = -Math.PI / 2;
       const vortexGroup = new THREE.Group();
-      const volume = new THREE.Mesh(this.geoVortexVolume, this.matVortexVolume.clone());
-      volume.position.y = 2.9;
+      const volume = createFireVolume();
       vortexGroup.add(volume);
       const funnel = new THREE.Mesh(this.geoVortexFunnel, this.matVortexFunnel);
       funnel.position.y = 3.42;
@@ -770,6 +756,18 @@ export class ParticleSystem {
         strand.rotation.y = (idx * Math.PI * 2) / this.geoVortexHelixes.length;
         vortexGroup.add(strand);
         flameHelixes.push(strand);
+      });
+
+      const windStripes = [];
+      this.geoVortexWindStripes.forEach((geometry, idx) => {
+        const stripe = new THREE.Mesh(
+          geometry,
+          idx % 3 === 1 ? this.matVortexWindStripeHot : this.matVortexWindStripe
+        );
+        stripe.rotation.y = (idx * Math.PI * 2) / this.geoVortexWindStripes.length;
+        stripe.renderOrder = 2;
+        vortexGroup.add(stripe);
+        windStripes.push(stripe);
       });
 
       const windRings = [];
@@ -806,18 +804,24 @@ export class ParticleSystem {
 
       const emberCloud = new THREE.Points(this.geoVortexEmbers, this.matVortexEmbers);
       emberCloud.position.y = 0.1;
+      emberCloud.renderOrder = 3;
       vortexGroup.add(emberCloud);
+      const windDust = new THREE.Points(this.geoVortexWindDust, this.matVortexWindDust);
+      windDust.position.y = 0.06;
+      windDust.renderOrder = 1;
+      vortexGroup.add(windDust);
 
       group.add(groundRune, vortexGroup);
-      Object.assign(entry, { groundRune, vortexGroup, volume, funnel, core, helixRibbons, flameHelixes, windRings, flameCore, flameCards, emberCloud });
+      [funnel, core, ...helixRibbons, ...flameHelixes, ...windRings, flameCore, ...flameCards].forEach(part => { part.visible = false; });
+      Object.assign(entry, { groundRune, vortexGroup, volume, funnel, core, helixRibbons, flameHelixes, windRings, windStripes, flameCore, flameCards, emberCloud, windDust });
     } else if (type === 'divine_sanctuary') {
-      const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeDivine);
+      const dome = new THREE.Mesh(this.geoDomeHalf, arcaneSurface(this.matDomeDivine));
       const seal = new THREE.Mesh(this.geoDomeRuneRing, this.matSealDivine);
       seal.rotation.x = -Math.PI / 2;
       group.add(dome, seal);
       Object.assign(entry, { dome, seal });
     } else if (type === 'blizzard') {
-      const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeFrost);
+      const dome = new THREE.Mesh(this.geoDomeHalf, arcaneSurface(this.matDomeFrost));
       const rune = new THREE.Mesh(this.geoDomeRuneRing, this.matRuneFrost);
       rune.rotation.x = -Math.PI / 2;
       const spire = new THREE.Mesh(this.geoIceSpire, this.matSpireFrost);
@@ -825,7 +829,7 @@ export class ParticleSystem {
       group.add(dome, rune, spire);
       Object.assign(entry, { dome, rune, spire });
     } else if (type === 'stasis_dome') {
-      const dome = new THREE.Mesh(this.geoDomeHalf, this.matDomeStasis);
+      const dome = new THREE.Mesh(this.geoDomeHalf, arcaneSurface(this.matDomeStasis));
       const gear = new THREE.Mesh(this.geoDomeRuneRing, this.matGearStasis);
       gear.rotation.x = -Math.PI / 2;
       group.add(dome, gear);
@@ -864,6 +868,10 @@ export class ParticleSystem {
       strand.rotation.set(0, (idx * Math.PI * 2) / entry.flameHelixes.length, 0);
       strand.scale.set(1, 1, 1);
     });
+    entry.windStripes?.forEach((stripe, idx) => {
+      stripe.rotation.set(0, (idx * Math.PI * 2) / entry.windStripes.length, 0);
+      stripe.scale.set(1, 1, 1);
+    });
     entry.windRings?.forEach((ring, idx) => {
       ring.rotation.set(Math.PI / 2, 0, idx * 0.7);
       ring.scale.y = 1;
@@ -873,7 +881,14 @@ export class ParticleSystem {
       card.rotation.set(0, (idx / entry.flameCards.length) * Math.PI * 2 + Math.PI / 2, 0);
       card.material.uniforms.uTime.value = 0;
     });
-    if (entry.emberCloud) entry.emberCloud.rotation.set(0, 0, 0);
+    if (entry.emberCloud) {
+      entry.emberCloud.rotation.set(0, 0, 0);
+      entry.emberCloud.position.y = 0.1;
+    }
+    if (entry.windDust) {
+      entry.windDust.rotation.set(0, 0, 0);
+      entry.windDust.position.y = 0.06;
+    }
     this.releaseVortexLight(entry.light);
     entry.light = null;
   }
@@ -910,7 +925,7 @@ export class ParticleSystem {
       group.add(wave, inner);
       Object.assign(entry, { wave, inner, stars });
     } else if (type === 'glacial_bulwark') {
-      const bubble = new THREE.Mesh(this.geoShieldBubble, this.matSpellFrost.clone());
+      const bubble = new THREE.Mesh(this.geoShieldBubble, arcaneSurface(this.matSpellFrost.clone()));
       const ring = new THREE.Mesh(this.geoSpellPulse, this.matFrostRuneRing.clone());
       ring.rotation.x = -Math.PI / 2;
       group.add(bubble, ring);
@@ -1002,6 +1017,8 @@ export class ParticleSystem {
     entry.position.copy(pos);
     entry.life = duration;
     entry.maxLife = duration;
+    entry.wave.material.color.setHex(0xffd700);
+    entry.inner.material.color.setHex(0xffd700);
     entry.wave.scale.setScalar(0.25);
     entry.inner.scale.setScalar(0.15);
     entry.wave.material.opacity = 0.95;
@@ -1022,6 +1039,9 @@ export class ParticleSystem {
     entry.position.copy(pos);
     entry.life = duration;
     entry.maxLife = duration;
+    entry.bubble.material.color.setHex(0x8ddfff);
+    entry.bubble.material.emissive?.setHex(0x247bd0);
+    entry.ring.material.color.setHex(0x8ddfff);
     entry.bubble.scale.setScalar(1.55);
     entry.ring.scale.setScalar(1.6);
     entry.bubble.material.opacity = 0.32;
@@ -1084,7 +1104,7 @@ export class ParticleSystem {
   /**
    * Spawns an animated magical projectile with unique 3D geometries per spell (zero dynamic allocations)
    */
-  spawnProjectile(origin, direction, spellType, element, speed = 24, maxDist = 35, worldImpact = null) {
+  spawnProjectile(origin, direction, spellType, element, speed = 24, maxDist = 35, worldImpact = null, presentation = null) {
     const group = new THREE.Group();
     group.position.copy(origin);
 
@@ -1094,84 +1114,25 @@ export class ParticleSystem {
     let lightColor = this.elementColors[element] || 0xff5722;
 
     if (element === 'fire') {
-      if (spellType === 'skill1') {
-        // Fireball: a layered 3D molten shell, animated flame cards, dual
-        // coronal rings, and orbiting plasma embers.  The shell is deliberately
-        // separate from the optional generated GLB so the fallback remains
-        // visually complete on every device.
-        const shell = new THREE.Mesh(this.geoFireballShell, this.matFireballShell);
-        group.add(shell);
-
-        const core = new THREE.Mesh(this.geoCoreHighPoly, this.matFirePlasmaCore);
-        core.scale.setScalar(0.72);
-        group.add(core);
-
-        const ringOuter = new THREE.Mesh(this.geoAstrolabeOuter, this.matFireRuneRing);
-        ringOuter.rotation.x = Math.PI / 2;
-        group.add(ringOuter);
-
-        const ringInner = new THREE.Mesh(this.geoAstrolabeInner, this.matFireRuneRing);
-        ringInner.rotation.y = Math.PI / 2;
-        group.add(ringInner);
-
-        const orbiters = [];
-        for (let o = 0; o < 4; o++) {
-          const orb = new THREE.Mesh(this.geoBurstOcta, this.matFirePlasmaCore);
-          group.add(orb);
-          orbiters.push(orb);
-        }
-
-        const flameCards = [];
-        for (let c = 0; c < 4; c++) {
-          const cardMaterial = this.matFireballFlameCard.clone();
-          cardMaterial.uniforms.uPhase.value = c * Math.PI * 0.5;
-          const card = new THREE.Mesh(this.geoFireballFlameCard, cardMaterial);
-          const angle = c * Math.PI * 0.5;
-          card.position.set(Math.cos(angle) * 0.26, 0.05, Math.sin(angle) * 0.26);
-          card.rotation.y = angle;
-          card.scale.set(0.72, 0.92 + (c % 2) * 0.12, 1);
-          group.add(card);
-          flameCards.push(card);
-        }
-
-        const heroAsset = this.heroAssets.fireball?.clone?.(true) || null;
-        if (heroAsset) {
-          heroAsset.name = 'FireballHeroAsset';
-          heroAsset.scale.setScalar(0.95);
-          heroAsset.traverse(child => {
-            if (child.isMesh) {
-              child.castShadow = false;
-              child.receiveShadow = false;
-              child.frustumCulled = true;
-            }
-          });
-          group.add(heroAsset);
-        }
-        group.userData = { ringOuter, ringInner, orbiters, flameCards, shell, heroAsset, orbitRadius: 0.72 };
-      } else if (spellType === 'skill2') {
-        // Flame Wave: Tiered crescent magma wave with forward thermal crest
-        const wave = new THREE.Mesh(this.geoFlameWave, this.matFireWave);
-        wave.quaternion.copy(rotQuat);
-        wave.rotation.z = Math.PI / 2;
-        group.add(wave);
-
-        const crest = new THREE.Mesh(this.geoAstrolabeInner, this.matFireRuneRing);
-        crest.quaternion.copy(rotQuat);
-        group.add(crest);
-        group.userData = { ringOuter: crest };
+      const fireVolume = this.fireballVolumePool.find(volume => !volume.userData.active);
+      if (fireVolume) {
+        fireVolume.userData.active = true;
+        fireVolume.material.uniforms.uTime.value = 0;
+        fireVolume.scale.set(1, 1, 1);
+        fireVolume.quaternion.identity();
+        if (presentation?.kind === 'lance') {
+          fireVolume.scale.set(0.6, 1.9, 0.6);
+          fireVolume.quaternion.copy(rotQuat);
+        } else if (presentation?.kind === 'wave' || (!presentation?.kind && spellType === 'skill2')) fireVolume.scale.set(2.4, 0.6, 0.55);
+        else if (presentation?.kind === 'burst') fireVolume.scale.setScalar(1.15 + (presentation.rank || 1)*0.08);
+        group.add(fireVolume);
+        group.userData = { fireVolume };
       } else {
-        // Basic Ember Bolt: High-energy plasma teardrop with spinning flame spiral knot
-        const bolt = new THREE.Mesh(this.geoEmberBolt, this.matFirePlasmaCore);
-        bolt.quaternion.copy(rotQuat);
-        group.add(bolt);
-
-        const spiral = new THREE.Mesh(this.geoEmberSpiral, this.matFireRuneRing);
-        spiral.quaternion.copy(rotQuat);
-        group.add(spiral);
-        group.userData = { spiral };
+        // Preserve the projectile and its collision even if all volumes are busy.
+        group.add(new THREE.Mesh(this.geoSparkSphere, this.matFirePlasmaCore));
       }
     } else if (element === 'frost') {
-      if (spellType === 'skill1') {
+      if (presentation?.kind === 'lance' || (!presentation?.kind && spellType === 'skill1')) {
         // Ice Lance: Faceted crystalline spear with base frost rune disc & orbiting ice shards
         const lance = new THREE.Mesh(this.geoIceLance, this.matFrostCrystal);
         lance.quaternion.copy(rotQuat);
@@ -1236,12 +1197,26 @@ export class ParticleSystem {
       group.userData = { ringOuter, ringInner, dial };
     }
 
+    // Visual size is independent of the swept collision path, which still
+    // begins at the eye and cannot skip a wall in front of the wand.
+    const visual = new THREE.Group();
+    visual.name = 'ProjectileVisual';
+    for (const child of [...group.children]) visual.add(child);
+    const visualScale = spellType === 'basic' ? 0.22 : spellType === 'skill2' ? 0.42 : 0.3;
+    visual.scale.setScalar(visualScale);
+    const launchOffset = presentation?.offset?.clone() || new THREE.Vector3();
+    visual.position.copy(launchOffset);
+    if (presentation) visual.visible = false; // Reveal after leaving the eye exclusion zone.
+    group.add(visual);
     const pooledLight = this.acquireProjectileLight(lightColor, group.position);
 
     this.scene.add(group);
 
     this.projectiles.push({
       mesh: group,
+      visual,
+      visualScale,
+      launchOffset,
       light: pooledLight,
       baseIntensity: 3.2,
       direction: normDir,
@@ -1250,6 +1225,7 @@ export class ParticleSystem {
       maxDist,
       element,
       spellType,
+      visualOnly: presentation?.visualOnly || false,
       worldImpact,
       collisionRadius: spellType === 'skill1' ? 0.52 : (spellType === 'skill2' ? 0.38 : 0.22),
       previousPosition: group.position.clone(),
@@ -1300,8 +1276,8 @@ export class ParticleSystem {
 
   /**
    * Spawns an animated 5-Second Infernal Fire Tornado
-   * Multi-stage swirling flame vortex with real PBR lava/fire textures,
-   * 3 counter-rotating spiral flame ribbons, white-hot plasma eye, and swirling ember helix!
+   * Multi-stage swirling flame vortex with a single density volume, pooled
+   * curved wind lanes, bounded ember/dust clouds, and a grounded rune.
    */
   spawnFireTornado(groundPos, duration = 5.0, tickDamage = 32, radius = 5.5) {
     const entry = this._acquireVortexEntry('fire_tornado');
@@ -1321,6 +1297,10 @@ export class ParticleSystem {
       strand.rotation.y = (idx * Math.PI * 2) / entry.flameHelixes.length;
       strand.scale.set(1, 1, 1);
     });
+    entry.windStripes?.forEach((stripe, idx) => {
+      stripe.rotation.set(0, (idx * Math.PI * 2) / entry.windStripes.length, 0);
+      stripe.scale.set(1, 1, 1);
+    });
     entry.windRings?.forEach((ring, idx) => {
       ring.rotation.z = idx * 0.7;
       ring.scale.y = 1;
@@ -1330,7 +1310,14 @@ export class ParticleSystem {
       card.rotation.set(0, (idx / entry.flameCards.length) * Math.PI * 2 + Math.PI / 2, 0);
       card.material.uniforms.uTime.value = 0;
     });
-    if (entry.emberCloud) entry.emberCloud.rotation.set(0, 0, 0);
+    if (entry.emberCloud) {
+      entry.emberCloud.rotation.set(0, 0, 0);
+      entry.emberCloud.position.y = 0.1;
+    }
+    if (entry.windDust) {
+      entry.windDust.rotation.set(0, 0, 0);
+      entry.windDust.position.y = 0.06;
+    }
     const light = this.acquireVortexLight(0xff5722, groundPos);
     if (light) {
       light.position.y += 3.5;
@@ -1346,9 +1333,11 @@ export class ParticleSystem {
       helixRibbons: entry.helixRibbons,
       flameHelixes: entry.flameHelixes,
       windRings: entry.windRings,
+      windStripes: entry.windStripes,
       flameCore: entry.flameCore,
       flameCards: entry.flameCards,
       emberCloud: entry.emberCloud,
+      windDust: entry.windDust,
       heroAsset: entry.heroAsset,
       visualScale,
       light,
@@ -1609,10 +1598,10 @@ export class ParticleSystem {
       if (old && old.mesh) this._releaseParticleMesh(old.mesh);
     }
 
-    const geo1 = this.geoBurstDodeca;
-    const geo2 = this.geoBurstOcta;
-    const mat1 = this.trailMats[element] || this.trailMats.fire;
-    const mat2 = this.trailWhiteMat;
+    const geo1 = this.geoSoftSpark;
+    const geo2 = this.geoSoftSpark;
+    const mat1 = this.softTrailMats[element] || this.softTrailMats.fire;
+    const mat2 = this.softTrailMats.white;
 
     for (let i = 0; i < count; i++) {
       const isSecondary = i % 3 === 0;
@@ -1847,17 +1836,18 @@ export class ParticleSystem {
     // Modulate persistent light without mutating scene graph
     this.muzzleFlashLight.color.setHex(col);
     this.muzzleFlashLight.position.copy(origin);
-    this.muzzleFlashLight.intensity = 4.5;
+    this.muzzleFlashLight.intensity = 1.4;
     this.muzzleFlashTimer = 0.085;
 
     // Radiating spark burst along direction using shared geo & mat
     const normDir = direction ? direction.clone().normalize() : new THREE.Vector3(0, 0, -1);
-    const mat = this.muzzleSparkMaterials[element] || this.muzzleSparkMaterials.fire;
+    const mat = this.softTrailMats[element] || this.softTrailMats.fire;
 
-    for (let s = 0; s < 8; s++) {
-      const spark = this._acquireParticleMesh(this.geoMuzzleSpark, mat);
+    for (let s = 0; s < 4; s++) {
+      const spark = this._acquireParticleMesh(this.geoSoftSpark, mat);
       if (!spark) break;
       spark.position.copy(origin);
+      if (this.camera) spark.quaternion.copy(this.camera.quaternion);
 
       this.particles.push({
         mesh: spark,
@@ -1877,6 +1867,7 @@ export class ParticleSystem {
    * Main Frame Tick for Particles, Projectiles, Shockwaves, Physical Coins, and Vortexes
    */
   update(deltaTime, onProjectileHit = null, onVortexTick = null, playerPos = null) {
+    arcaneTime.value += Math.min(deltaTime, 0.1);
     // 0. Tick Persistent Muzzle Flash Light
     if (this.muzzleFlashTimer > 0) {
       this.muzzleFlashTimer -= deltaTime;
@@ -1892,6 +1883,16 @@ export class ParticleSystem {
       const moveStep = p.speed * deltaTime;
       p.mesh.position.addScaledVector(p.direction, moveStep);
       p.distanceTraveled += moveStep;
+      const launchBlend = Math.max(0, 1 - p.distanceTraveled / 3.0);
+      p.visual?.position.copy(p.launchOffset).multiplyScalar(launchBlend);
+      if (p.mesh.userData.fireVolume) p.mesh.userData.fireVolume.material.uniforms.uTime.value += deltaTime;
+      // A remote player's projectile can also pass directly through this
+      // camera. Hide its surface near the eye without changing collisions.
+      if (p.visual && this.camera) {
+        const distance = this.camera.position.distanceTo(p.mesh.position);
+        p.visual.visible = distance > 0.65;
+        p.visual.scale.setScalar(p.visualScale * THREE.MathUtils.smoothstep(distance, 0.65, 1.8));
+      }
 
       // Update pooled light position and pulse
       if (p.light) {
@@ -1937,10 +1938,10 @@ export class ParticleSystem {
       p.trailTimer = (p.trailTimer || 0) + deltaTime;
       if (!this.reducedMotion && p.trailTimer > 0.035) {
         p.trailTimer = 0;
-        const trailMat = this.trailMats[p.element] || this.trailMats.fire;
+        const trailMat = this.softTrailMats[p.element] || this.softTrailMats.fire;
 
         for (let t = 0; t < 2; t++) {
-          const trailPart = this._acquireParticleMesh(this.geoTrailOcta, t === 1 ? this.trailWhiteMat : trailMat);
+          const trailPart = this._acquireParticleMesh(this.geoSoftSpark, t === 1 ? this.softTrailMats.white : trailMat);
           if (!trailPart) break;
           trailPart.position.copy(p.mesh.position);
           trailPart.position.x += (Math.random() - 0.5) * 0.15;
@@ -1966,8 +1967,7 @@ export class ParticleSystem {
         const impactPoint = collision.point || collision.position;
         if (impactPoint) p.mesh.position.copy(impactPoint);
         this.spawnSurfaceImpact(p.mesh.position, p.element, collision === true ? AIR_IMPACT_NORMAL : (collision.normal || null));
-        if (p.light) this.releaseProjectileLight(p.light);
-        this.scene.remove(p.mesh);
+        this._releaseProjectile(p);
         this.projectiles.splice(i, 1);
         continue;
       }
@@ -1975,8 +1975,7 @@ export class ParticleSystem {
       if (p.distanceTraveled >= p.maxDist) {
         if (p.worldImpact?.point) p.mesh.position.set(p.worldImpact.point.x, p.worldImpact.point.y, p.worldImpact.point.z);
         this.spawnSurfaceImpact(p.mesh.position, p.element, p.worldImpact?.normal || null);
-        if (p.light) this.releaseProjectileLight(p.light);
-        this.scene.remove(p.mesh);
+        this._releaseProjectile(p);
         this.projectiles.splice(i, 1);
       }
     }
@@ -2049,7 +2048,7 @@ export class ParticleSystem {
 
       // Spin the funnel vortex fast
       if (v.vortexGroup) {
-        v.vortexGroup.rotation.y += deltaTime * 9.5;
+        v.vortexGroup.rotation.y += deltaTime * 1.15;
         const pulse = 1.0 + Math.sin(v.life * 12) * 0.08;
         const baseScale = v.visualScale || 1;
         v.vortexGroup.scale.y = baseScale * pulse;
@@ -2075,8 +2074,8 @@ export class ParticleSystem {
       if (v.volume) {
         const fireTime = v.maxLife - v.life;
         v.volume.material.uniforms.uTime.value = fireTime;
-        v.volume.material.uniforms.uOpacity.value = this.qualityProfile === 'ultra' ? 0.52 : this.qualityProfile === 'performance' ? 0.24 : 0.42;
-        v.volume.rotation.y -= deltaTime * 1.4;
+        v.volume.material.uniforms.uOpacity.value = Math.min(1, fireTime / 0.28, v.life / 0.65);
+        v.volume.material.uniforms.uSteps.value = this.qualityProfile === 'ultra' ? 56 : this.qualityProfile === 'performance' ? 24 : 40;
       }
       if (v.helixRibbons) {
         v.helixRibbons.forEach((rib, idx) => {
@@ -2089,6 +2088,17 @@ export class ParticleSystem {
           strand.rotation.y += deltaTime * (idx % 2 === 0 ? 5.5 : -7.0);
           const flare = 1.0 + Math.sin(v.life * (7.5 + idx) + idx * 1.7) * 0.12;
           strand.scale.set(flare, 0.96 + Math.sin(v.life * 9 + idx) * 0.06, flare);
+        });
+      }
+      if (v.windStripes) {
+        // Local stripe spin is deliberately faster than the parent yaw. The
+        // alternating signs make the lanes read as high wind, while their
+        // pooled geometry keeps the update allocation-free.
+        v.windStripes.forEach((stripe, idx) => {
+          stripe.rotation.y += deltaTime * (idx % 2 === 0 ? 5.8 : -7.2);
+          stripe.rotation.z = Math.sin((v.maxLife - v.life) * 2.2 + idx * 1.3) * 0.035;
+          const stripePulse = 0.94 + Math.sin(v.life * (8.5 + idx * 0.4) + idx) * 0.09;
+          stripe.scale.set(stripePulse, 0.98 + Math.sin(v.life * 6.0 + idx) * 0.035, stripePulse);
         });
       }
       if (v.windRings) {
@@ -2115,7 +2125,14 @@ export class ParticleSystem {
       }
       if (v.emberCloud) {
         v.emberCloud.rotation.y -= deltaTime * 4.2;
-        v.emberCloud.rotation.x += deltaTime * 0.45;
+        // Keep the ember column upright; tilting it inverted the inner plume.
+        v.emberCloud.rotation.x = 0;
+        v.emberCloud.position.y = 0.1 + Math.sin((v.maxLife - v.life) * 3.2) * 0.035;
+      }
+      if (v.windDust) {
+        v.windDust.rotation.y += deltaTime * 2.65;
+        v.windDust.rotation.x = 0;
+        v.windDust.position.y = 0.06 + Math.sin((v.maxLife - v.life) * 2.1 + 1.4) * 0.045;
       }
       if (v.groundRune) {
         v.groundRune.rotation.z -= deltaTime * 3.5;
@@ -2165,8 +2182,14 @@ export class ParticleSystem {
       }
 
       part.mesh.scale.setScalar(Math.max(0.01, part.life / part.maxLife));
+      if (part.mesh.geometry === this.geoSoftSpark && this.camera) {
+        part.mesh.quaternion.copy(this.camera.quaternion);
+        // No full-screen sparks as the player crosses an impact cloud.
+        const near = THREE.MathUtils.smoothstep(this.camera.position.distanceTo(part.mesh.position), 0.4, 1.4);
+        part.mesh.scale.multiplyScalar(near);
+      }
 
-      if (part.rotSpeed) {
+      if (part.rotSpeed && part.mesh.geometry !== this.geoSoftSpark) {
         part.mesh.rotation.x += part.rotSpeed.x * deltaTime;
         part.mesh.rotation.y += part.rotSpeed.y * deltaTime;
       }
@@ -2255,9 +2278,9 @@ export class ParticleSystem {
 
   /**
    * Pre-instantiates all spell models, procedural PBR textures & materials,
-   * and compiles all WebGL shaders upfront during loading to guarantee 0ms combat stutter.
+   * and prepares shader programs during loading, before controls are exposed.
    */
-  warmupSpellVisuals(renderer, camera) {
+  async warmupSpellVisuals(renderer, camera) {
     if (!renderer || !camera) return;
     try {
       const dummyOrigin = new THREE.Vector3(0, -9999, 0);
@@ -2294,14 +2317,14 @@ export class ParticleSystem {
       this.spawnTimeDilation(dummyOrigin, 2.0, 0.05);
 
       // 5. Force WebGL driver to compile every material shader & bind all textures in GPU VRAM
-      renderer.compile(this.scene, camera);
+      if (renderer.compileAsync) await renderer.compileAsync(this.scene, camera);
+      else renderer.compile(this.scene, camera);
 
       // 6. Clean up dummy warmup entities
       for (let i = this.projectiles.length - 1; i >= 0; i--) {
         const p = this.projectiles[i];
         if (p.mesh.position.y < -9000) {
-          if (p.light) this.releaseProjectileLight(p.light);
-          this.scene.remove(p.mesh);
+          this._releaseProjectile(p);
           this.projectiles.splice(i, 1);
         }
       }
@@ -2341,10 +2364,19 @@ export class ParticleSystem {
     }
   }
 
+  _releaseProjectile(p) {
+    const volume = p.mesh.userData.fireVolume;
+    if (volume) {
+      volume.userData.active = false;
+      volume.removeFromParent();
+    }
+    if (p.light) this.releaseProjectileLight(p.light);
+    this.scene.remove(p.mesh);
+  }
+
   clear() {
     for (const p of this.projectiles) {
-      if (p.light) this.releaseProjectileLight(p.light);
-      this.scene.remove(p.mesh);
+      this._releaseProjectile(p);
     }
     for (const sw of this.shockwaves) this._releaseShockwave(sw.poolEntry);
     for (const v of this.vortices) {

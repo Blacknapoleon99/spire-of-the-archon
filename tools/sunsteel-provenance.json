@@ -1,0 +1,16 @@
+{
+  "conceptAssetId": 446,
+  "projectId": "1787909743082",
+  "conceptName": "sunsteel_vanguard_concept_transparent",
+  "conceptSource": "http://localhost:3001/assets/images/1788212502165-787442632.png",
+  "generator": "Local Trellis2 workflow 14",
+  "successfulPromptId": "b6c0d653-768c-4fdd-8b50-8998d63c9eb9",
+  "preprocessCorrection": "Reference is RGB despite its transparent name; enabled local background removal before Trellis.",
+  "preservedSource": "D:/ComfyUI/output/3DGenStudio_00012_.glb",
+  "runtime": "public/models/player_sunsteel_vanguard.glb",
+  "runtimeTriangles": 45000,
+  "textureResolution": 2048,
+  "geometryCompression": "Draco level 6",
+  "textureCompression": "JPEG quality 92; albedo and metallic-roughness maps",
+  "animationStatus": "Static mesh; uses existing avatar breathing/cast sway, not a full skeletal animation set."
+}

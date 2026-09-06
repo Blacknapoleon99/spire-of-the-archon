@@ -3,6 +3,7 @@
   "policy": "source-and-runtime",
   "runtimeRoot": "public/models",
   "entries": [
+    { "id": "player_sunsteel_vanguard", "source": "local-trellis2-concept-446", "generatorScript": "scripts/prepare_sunsteel_vanguard.py", "prompt": "User-supplied Sunsteel Vanguard silver and gold plate-armored tank concept", "runtime": "player_sunsteel_vanguard.glb", "lod": "hero", "budgetKb": 4096 },
     { "id": "fp_viewmodel_wand", "source": "local-generator", "generatorScript": "scripts/generate_fp_viewmodel.py", "prompt": "etched brass wand with four leyline channels", "runtime": "fp_viewmodel_wand.glb", "lod": "hero", "budgetKb": 2048 },
     { "id": "fp_wand_hero", "source": "local-generator-optional", "generatorScript": "scripts/generate_fp_wand_hero.py", "prompt": "hero first-person dark-fantasy archmage wand with visible armored hands and glowing elemental crystal", "runtime": "fp_wand_hero.glb", "lod": "hero", "budgetKb": 3072, "optional": true },
     { "id": "player_pyromancer", "source": "local-generator-optional", "generatorScript": "scripts/generate_player_heroes.py", "prompt": "high-detail dark-fantasy pyromancer hero with readable face, layered ember robes, brass ward plates, and fire emissive accents", "runtime": "player_pyromancer.glb", "lod": "hero", "budgetKb": 4096, "optional": true },

@@ -59,6 +59,9 @@ export class EnemyEntity {
       this.glbScale = 1.1;
     }
 
+    // Keep light counts stable as fallback actors load, die, or despawn.
+    // Their emissive surfaces still glow; transient spell lighting is pooled.
+    this.mesh.traverse(object => { if (object.isLight) object.visible = false; });
     this.mesh.position.copy(this.position);
     this.scene.add(this.mesh);
 
@@ -69,7 +72,7 @@ export class EnemyEntity {
       yOffset: 0
     });
 
-    this.animator.init().then(() => {
+    this.ready = this.animator.init().then(() => {
       this.animator.onReady((anim) => {
         if (this.destroyed) {
           anim.dispose();
@@ -125,11 +128,14 @@ export class EnemyEntity {
   }
 
   sync(data) {
+    const healthChanged = this.health !== data.health
+      || (data.maxHealth !== undefined && this.maxHealth !== data.maxHealth);
     this.health = data.health;
+    if (data.maxHealth !== undefined) this.maxHealth = data.maxHealth;
     this.targetPos.set(data.x, data.y || 0, data.z);
     this.state = data.state;
     this.isAlive = data.isAlive;
-    this.updateHpBar();
+    if (healthChanged) this.updateHpBar();
   }
 
   update(deltaTime, animController) {
@@ -139,7 +145,7 @@ export class EnemyEntity {
       return;
     }
 
-    this.position.lerp(this.targetPos, 12 * deltaTime);
+    this.position.lerp(this.targetPos, 1 - Math.exp(-12 * deltaTime));
 
     // Face movement direction if moving (zero-allocation)
     const dx = this.targetPos.x - this.position.x;

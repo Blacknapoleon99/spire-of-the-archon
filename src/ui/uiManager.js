@@ -1,4 +1,4 @@
-import { CLASS_SPELLS } from '../systems/spells.js';
+import { CLASS_SPELLS, getEquippedSpells } from '../systems/spells.js';
 import { TALENT_TREES } from '../systems/talents.js';
 import { soundEngine } from '../engine/audio.js';
 import { voiceEngine } from '../engine/voiceNarration.js';
@@ -22,6 +22,13 @@ export class UIManager {
     this.isEscapeOpen = false;
     this.isSettingsOpen = false;
     this.deathTimerInterval = null;
+    // A session is considered playable only after the server snapshot, actor
+    // assets, first-person kit, and the first GPU compile/render have settled.
+    // Keep this state in the UI as well as GameApp so a late HUD update cannot
+    // accidentally reveal controls while the world is still being prepared.
+    this._sessionLoadingActive = false;
+    this._sessionLoadingRetry = null;
+    this._sessionHudReady = false;
 
     // Settings (persisted in localStorage)
     this.settings = this.loadSettings();
@@ -70,6 +77,7 @@ export class UIManager {
     this.loadingStatusText = document.getElementById('loading-status-text');
     this.loadingTip = document.getElementById('loading-tip');
     this.initLoadingEmbersCanvas();
+    this.initSessionLoadingOverlay();
 
     // Voice Chat HUD
     this.voiceHudIndicator = document.getElementById('voice-hud-indicator');
@@ -335,6 +343,12 @@ export class UIManager {
     });
 
     const handleAscendStart = async () => {
+      // Start the session veil at the user's intent boundary. GameApp will
+      // replace this waiting copy with measured scene/entity/GPU milestones
+      // as soon as the server emits game_started.
+      this.beginSessionLoading({ floor: this.resumeFloor || 1 });
+      this.setSessionLoadingStage('Waiting for the covenant relay', 3,
+        'The ascent request is in flight. Controls unlock after the first playable frame.');
       soundEngine.playFireball();
       if (this.btnStartGame) this.btnStartGame.textContent = 'ASCENDING... 🔮';
       if (this.btnQuickAscend) this.btnQuickAscend.textContent = 'ASCENDING... 🔮';
@@ -647,6 +661,179 @@ export class UIManager {
 
   onReducedVfxChange(callback) { this._onReducedVfxChange = callback; }
 
+  /**
+   * Create the in-session loading gate without coupling it to the boot screen.
+   * The lobby and initial cinematic loading screen have different lifecycles;
+   * reusing either one here made it possible for a late HUD update to punch
+   * through while avatars or the first-person kit were still uploading.
+   */
+  initSessionLoadingOverlay() {
+    if (typeof document === 'undefined' || !document.body) return;
+    const existing = document.getElementById('session-loading-overlay');
+    if (existing) {
+      this.sessionLoadingOverlay = existing;
+      this.sessionLoadingStatus = existing.querySelector('[data-session-loading-status]');
+      this.sessionLoadingDetail = existing.querySelector('[data-session-loading-detail]');
+      this.sessionLoadingProgress = existing.querySelector('[data-session-loading-progress]');
+      this.sessionLoadingPercent = existing.querySelector('[data-session-loading-percent]');
+      this.sessionLoadingStage = existing.querySelector('[data-session-loading-stage]');
+      this.sessionLoadingRetry = existing.querySelector('[data-session-loading-retry]');
+      this.sessionLoadingProgressbar = existing.querySelector('[role="progressbar"]');
+      this.sessionLoadingRetry?.addEventListener('click', () => this.retrySessionLoading());
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'session-loading-overlay';
+    overlay.className = 'session-loading-overlay hidden';
+    overlay.setAttribute('role', 'status');
+    overlay.setAttribute('aria-live', 'polite');
+    overlay.setAttribute('aria-busy', 'false');
+    overlay.innerHTML = `
+      <div class="session-loading-panel" role="dialog" aria-modal="true" aria-labelledby="session-loading-title">
+        <div class="session-loading-kicker">COVENANT HANDSHAKE <span aria-hidden="true">//</span> ACTIVE SPIRE</div>
+        <div class="session-loading-sigil" aria-hidden="true"><span>+</span></div>
+        <h2 id="session-loading-title">Attuning your ascent</h2>
+        <p class="session-loading-status" data-session-loading-status>Waiting for the covenant relay...</p>
+        <div class="session-loading-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Session loading progress">
+          <span data-session-loading-progress></span>
+        </div>
+        <div class="session-loading-meta">
+          <span data-session-loading-stage>SESSION / HOLDING</span>
+          <span data-session-loading-percent>0%</span>
+        </div>
+        <p class="session-loading-detail" data-session-loading-detail>Controls unlock after the scene and its first frame are ready.</p>
+        <button type="button" class="session-loading-retry hidden" data-session-loading-retry>Retry loading</button>
+        <button type="button" class="session-loading-retry hidden" data-session-loading-reload>Reload page</button>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    this.sessionLoadingOverlay = overlay;
+    this.sessionLoadingStatus = overlay.querySelector('[data-session-loading-status]');
+    this.sessionLoadingDetail = overlay.querySelector('[data-session-loading-detail]');
+    this.sessionLoadingProgress = overlay.querySelector('[data-session-loading-progress]');
+    this.sessionLoadingPercent = overlay.querySelector('[data-session-loading-percent]');
+    this.sessionLoadingStage = overlay.querySelector('[data-session-loading-stage]');
+    this.sessionLoadingRetry = overlay.querySelector('[data-session-loading-retry]');
+    this.sessionLoadingProgressbar = overlay.querySelector('[role="progressbar"]');
+    this.sessionLoadingRetry?.addEventListener('click', () => this.retrySessionLoading());
+    overlay.querySelector('[data-session-loading-reload]')?.addEventListener('click', () => window.location.reload());
+  }
+
+  /** Hide every interactive gameplay surface while a session is preparing. */
+  lockGameplayForSessionLoading() {
+    this.hud?.classList.add('hidden');
+    this.crosshair?.classList.add('hidden');
+    this.clickHint?.classList.add('hidden');
+    this.controlsModal?.classList.add('hidden');
+    this.escapeMenu?.classList.add('hidden');
+    this.settingsModal?.classList.add('hidden');
+  }
+
+  /** Reveal controls only after GameApp has completed its readiness barrier. */
+  revealGameplayAfterSessionLoading() {
+    if (!this._sessionHudReady) return;
+    this.hud?.classList.remove('hidden');
+    this.crosshair?.classList.remove('hidden');
+    this.clickHint?.classList.remove('hidden');
+  }
+
+  /**
+   * Begin the actual session gate. This is intentionally separate from the
+   * short title-screen boot so its progress reflects real scene/entity work.
+   */
+  beginSessionLoading({ floor = null, onRetry = null } = {}) {
+    if (!this.sessionLoadingOverlay) this.initSessionLoadingOverlay();
+    this._sessionLoadingActive = true;
+    this._sessionLoadingRetry = typeof onRetry === 'function' ? onRetry : this._sessionLoadingRetry;
+    this.sessionLoadingOverlay?.querySelector('[data-session-loading-reload]')?.classList.add('hidden');
+    this.sessionLoadingOverlay?.classList.remove('hidden');
+    if (this.sessionLoadingOverlay) {
+      this.sessionLoadingOverlay.dataset.state = 'loading';
+      this.sessionLoadingOverlay.setAttribute('aria-busy', 'true');
+    }
+    if (this.sessionLoadingRetry) {
+      this.sessionLoadingRetry.classList.add('hidden');
+      this.sessionLoadingRetry.disabled = false;
+    }
+    this.lockGameplayForSessionLoading();
+    this.setSessionLoadingStage('COVENANT / WAITING FOR SCENE', 0,
+      floor ? `Preparing Floor ${floor}. Controls unlock after the scene and its first frame are ready.` : null);
+  }
+
+  /** Update the visible readiness milestone. */
+  setSessionLoadingStage(stage, progress = null, detail = null) {
+    if (!this.sessionLoadingOverlay) this.initSessionLoadingOverlay();
+    if (this.sessionLoadingStage && stage) this.sessionLoadingStage.textContent = String(stage).toUpperCase();
+    if (this.sessionLoadingStatus && stage) this.sessionLoadingStatus.textContent = String(stage);
+    if (detail && this.sessionLoadingDetail) this.sessionLoadingDetail.textContent = String(detail);
+    if (progress !== null && progress !== undefined) {
+      const pct = Math.max(0, Math.min(100, Number(progress) || 0));
+      if (this.sessionLoadingProgress) this.sessionLoadingProgress.style.width = `${pct}%`;
+      if (this.sessionLoadingPercent) this.sessionLoadingPercent.textContent = `${Math.round(pct)}%`;
+      this.sessionLoadingProgressbar?.setAttribute('aria-valuenow', String(Math.round(pct)));
+    }
+  }
+
+  /** Allow GameApp to replace the retry action after constructing a session. */
+  setSessionLoadingRetry(onRetry) {
+    this._sessionLoadingRetry = typeof onRetry === 'function' ? onRetry : null;
+    if (this.sessionLoadingRetry) this.sessionLoadingRetry.disabled = !this._sessionLoadingRetry;
+  }
+
+  /** Keep the failed state visible; never silently unlock a half-ready scene. */
+  showSessionLoadingError(error, onRetry = null) {
+    if (!this.sessionLoadingOverlay) this.initSessionLoadingOverlay();
+    this._sessionLoadingActive = true;
+    this.sessionLoadingOverlay?.querySelector('[data-session-loading-reload]')?.classList.remove('hidden');
+    if (typeof onRetry === 'function') this._sessionLoadingRetry = onRetry;
+    this.lockGameplayForSessionLoading();
+    if (this.sessionLoadingOverlay) {
+      this.sessionLoadingOverlay.dataset.state = 'error';
+      this.sessionLoadingOverlay.setAttribute('aria-busy', 'false');
+    }
+    this.setSessionLoadingStage('The session could not finish loading', 0,
+      error?.message || String(error || 'The scene did not become ready.'));
+    if (this.sessionLoadingRetry) {
+      this.sessionLoadingRetry.textContent = 'Retry loading';
+      this.sessionLoadingRetry.classList.toggle('hidden', !this._sessionLoadingRetry);
+      this.sessionLoadingRetry.disabled = !this._sessionLoadingRetry;
+    }
+  }
+
+  /** Run the retry callback while preserving the blocking overlay. */
+  retrySessionLoading() {
+    if (!this._sessionLoadingRetry || this.sessionLoadingRetry?.disabled) return;
+    const retry = this._sessionLoadingRetry;
+    if (this.sessionLoadingRetry) {
+      this.sessionLoadingRetry.disabled = true;
+      this.sessionLoadingRetry.classList.add('hidden');
+    }
+    this._sessionLoadingActive = true;
+    if (this.sessionLoadingOverlay) {
+      this.sessionLoadingOverlay.dataset.state = 'loading';
+      this.sessionLoadingOverlay.setAttribute('aria-busy', 'true');
+    }
+    this.setSessionLoadingStage('Retrying the covenant handshake...', 0,
+      'The previous attempt did not produce a complete first frame.');
+    Promise.resolve().then(() => retry()).catch(error => this.showSessionLoadingError(error, retry));
+  }
+
+  /** Complete the barrier and reveal the already-configured HUD atomically. */
+  finishSessionLoading() {
+    this._sessionLoadingActive = false;
+    if (this.sessionLoadingOverlay) {
+      this.sessionLoadingOverlay.dataset.state = 'ready';
+      this.sessionLoadingOverlay.setAttribute('aria-busy', 'false');
+      this.sessionLoadingOverlay.classList.add('is-finishing');
+      window.setTimeout(() => {
+        this.sessionLoadingOverlay?.classList.add('hidden');
+        this.sessionLoadingOverlay?.classList.remove('is-finishing');
+      }, 260);
+    }
+    this.revealGameplayAfterSessionLoading();
+  }
+
   /** Loading Screen Control */
   updateLoadingProgress(pct, statusText, loreTip = null) {
     const clamped = Math.min(100, Math.max(0, pct));
@@ -922,10 +1109,16 @@ export class UIManager {
 
   startGameHUD(localPlayer) {
     this.localPlayer = localPlayer;
+    this._sessionHudReady = Boolean(localPlayer);
     this.lobbyScreen.classList.add('hidden');
-    this.hud.classList.remove('hidden');
-    this.crosshair.classList.remove('hidden');
-    this.clickHint.classList.remove('hidden');
+    // game_started can arrive before the authored actor/viewmodel and GPU
+    // compile have settled. Configure the HUD now, but keep every control
+    // surface locked until finishSessionLoading() is called by GameApp.
+    if (this._sessionLoadingActive) {
+      this.lockGameplayForSessionLoading();
+    } else {
+      this.revealGameplayAfterSessionLoading();
+    }
 
     const classConfig = CLASS_SPELLS[localPlayer.wizardClass] || CLASS_SPELLS.pyromancer;
     this.hudAvatar.textContent = classConfig.avatar;
@@ -959,7 +1152,7 @@ export class UIManager {
     }
 
     this.renderTalents(localPlayer.wizardClass);
-    soundEngine.startMusic('dungeon');
+    if (!this._sessionLoadingActive) soundEngine.startMusic('dungeon');
   }
 
   // ─────────── HUD Updates ───────────
@@ -967,6 +1160,7 @@ export class UIManager {
   updatePlayerHUD(player) {
     if (!player) return;
     this.localPlayer = player;
+    this.updateSpellLoadout(player);
 
     const hpRatio = Math.max(0, Math.min(1, player.health / player.maxHealth));
     if (this.hudHealthFill) this.hudHealthFill.style.height = `${hpRatio * 100}%`;
@@ -1171,7 +1365,7 @@ export class UIManager {
   }
 
   updateCooldowns(cdManager) {
-    const config = CLASS_SPELLS[this.selectedClass] || CLASS_SPELLS.pyromancer;
+    const config = getEquippedSpells(this.localPlayer || { wizardClass: this.selectedClass });
     this.setCooldownOverlay(this.cdBasic, cdManager.getProgress('basic', config.basic.cd));
     this.setCooldownOverlay(this.cdSkill1, cdManager.getProgress('skill1', config.skill1.cd));
     this.setCooldownOverlay(this.cdSkill2, cdManager.getProgress('skill2', config.skill2.cd));
@@ -1237,6 +1431,18 @@ export class UIManager {
     }
   }
 
+  updateSpellLoadout(player) {
+    const spells = getEquippedSpells(player);
+    const signature = [player.wizardClass, ...['skill1', 'skill2', 'ult'].map(slot => spells[slot].id)].join(':');
+    if (signature === this.loadoutSignature) return;
+    this.loadoutSignature = signature;
+    for (const [slot, icon, cost] of [['skill1',this.iconSkill1,this.costSkill1],['skill2',this.iconSkill2,this.costSkill2],['ult',this.iconUlt,this.costUlt]]) {
+      const spell=spells[slot];
+      if (icon) { icon.innerHTML=getCustomIcon(spell.id); icon.parentElement.title=`${spell.key}: ${spell.name} · ${spell.cd}s cooldown`; }
+      if (cost) cost.textContent=`${spell.mana} MP`;
+    }
+  }
+
   renderTalents(wizardClass = 'pyromancer') {
     const tree = TALENT_TREES[wizardClass] || TALENT_TREES.pyromancer;
     if (this.talentClassTitle) {
@@ -1267,7 +1473,7 @@ export class UIManager {
 
       branch.talents.forEach((talent, idx) => {
         const isUnlocked = !!this.localPlayer?.talents?.[talent.key];
-        const reqMet = !talent.requires || !!this.localPlayer?.talents?.[talent.requires];
+        const reqMet = (!talent.requires || !!this.localPlayer?.talents?.[talent.requires]) && (this.localPlayer?.level || 1) >= (talent.level || 1);
         const canUnlock = !isUnlocked && reqMet && (this.localPlayer?.talentPoints || 0) > 0;
 
         const nodeEl = document.createElement('div');
@@ -1278,7 +1484,7 @@ export class UIManager {
           <div class="node-header">
             <div class="node-icon-frame" style="border-color:${isUnlocked ? tree.themeColor : '#555'};">${iconSvg}</div>
             <div class="node-meta">
-              <span class="node-tier-tag">TIER ${talent.tier} ${talent.tier === 3 ? '★ CAPSTONE' : ''}</span>
+              <span class="node-tier-tag">TIER ${talent.tier} · LEVEL ${talent.level || 1} ${talent.tier === 6 ? 'CAPSTONE' : ''}</span>
               <h4 style="color:${isUnlocked ? '#ffffff' : '#e0e0e0'};">${talent.title}</h4>
             </div>
           </div>

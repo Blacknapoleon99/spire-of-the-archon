@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CLASS_IDS } from '../src/shared/gameData.js';
+import { sanitizeMastery } from '../src/shared/spellMastery.js';
 
 export const hashPassword = (password, salt) => new Promise((resolve, reject) => {
   crypto.scrypt(password, salt, 64, (err, derived) => err ? reject(err) : resolve(derived.toString('hex')));
@@ -151,6 +152,7 @@ export function sanitizeCampaignPayload(payload) {
       .map(([key, value]) => [String(key).slice(0, 48), Boolean(value)]));
   }
   result.talentPoints = Math.max(0, Math.min(32, Number(result.talentPoints) || 0));
+  Object.assign(result, sanitizeMastery(result.wizardClass || 'pyromancer', result.level, result.learnedSpells, result.equippedSpells));
   if (result.attributes && typeof result.attributes === 'object') {
     for (const key of ['vitality', 'arcana', 'focus', 'haste', 'mastery']) {
       result.attributes[key] = Math.max(0, Math.min(999, Number(result.attributes[key]) || 0));

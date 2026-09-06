@@ -235,6 +235,11 @@ io.on('connection', (socket) => {
       room.gameState.handleSpellCast(socket.id, spellData);
     }
   });
+  socket.on('change_mastery', (data = {}) => {
+    if (!allow('mastery', 6)) return;
+    const room = roomManager.getRoomBySocket(socket);
+    if (room && !room.gameState.changeMastery(socket.id, data)) socket.emit('action_rejected', { action: 'change_mastery', reason: 'Check level, points, learned spells and active cooldowns.' });
+  });
 
   socket.on('hit_enemy', ({ enemyId, damage, element } = {}) => {
     if (!allow('hit', 20)) return;

@@ -4,6 +4,8 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 
 /**
  * Custom Cinematic ShaderPass: Dynamic Vignette, Radial Chromatic Aberration,
@@ -57,8 +59,8 @@ export const CinematicPostShader = {
       vec3 color = vec3(r, g, b);
 
       // Smooth Radial Vignette
-      float vig = smoothstep(0.82, 0.82 - vignetteRoundness, dist * (1.0 + vignetteIntensity * 0.65));
-      color *= (0.38 + 0.62 * vig);
+      float vig = 1.0 - smoothstep(0.82 - vignetteRoundness, 0.82, dist * (1.0 + vignetteIntensity * 0.65));
+      color *= (0.72 + 0.28 * vig);
 
       // Red Damage Flash Vignette
       float totalHit = max(hitVignette, lowHealthPulse * (0.5 + 0.5 * sin(time * 6.0)));
@@ -138,7 +140,10 @@ export class EngineScene {
       ratio: Math.min(window.devicePixelRatio, this.deviceTier === 'integrated' ? 0.9 : 1.0),
       elapsed: 0,
       frames: 0,
-      frameMs: 16.7
+      frameMs: 16.7,
+      p95Ms: 16.7,
+      maxFrameMs: 16.7,
+      samples: []
     };
     this.renderer.domElement.addEventListener('webglcontextlost', event => {
       event.preventDefault();
@@ -151,6 +156,13 @@ export class EngineScene {
     this.container.appendChild(this.renderer.domElement);
 
     this.setupLighting();
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const room = new RoomEnvironment();
+    this.environmentTarget = pmrem.fromScene(room, 0.04);
+    this.scene.environment = this.environmentTarget.texture;
+    this.scene.environmentIntensity = 0.35;
+    room.dispose();
+    pmrem.dispose();
     this.setupPostProcessing();
 
     window.addEventListener('resize', () => this.onWindowResize());
@@ -161,8 +173,11 @@ export class EngineScene {
     const cores = Number(nav.hardwareConcurrency || 4);
     const memory = Number(nav.deviceMemory || 4);
     const gl = this.renderer?.getContext?.();
-    const renderer = gl?.getParameter?.(gl.RENDERER) || '';
-    if (cores <= 4 || memory <= 4 || /Intel|Mali|Adreno/i.test(renderer)) return 'integrated';
+    const debugInfo = gl?.getExtension?.('WEBGL_debug_renderer_info');
+    const renderer = (debugInfo && gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL))
+      || gl?.getParameter?.(gl.RENDERER) || '';
+    this.gpuRendererName = renderer;
+    if (cores <= 4 || memory <= 4 || /Intel|Mali|Adreno|SwiftShader|llvmpipe|software/i.test(renderer)) return 'integrated';
     if (cores >= 8 && memory >= 8) return 'discrete';
     return 'balanced';
   }
@@ -227,6 +242,8 @@ export class EngineScene {
     // 4. Output Pass for Tone Mapping & Color Space Accuracy
     this.outputPass = new OutputPass();
     this.composer.addPass(this.outputPass);
+    this.antialiasPass = new SMAAPass();
+    this.composer.addPass(this.antialiasPass);
   }
 
   setGraphicsQuality(quality = 'balanced') {
@@ -247,7 +264,8 @@ export class EngineScene {
       this.renderer.shadowMap.type = THREE.PCFShadowMap;
       if (this.bloomPass) {
         this.bloomPass.enabled = true;
-        this.bloomPass.strength = 0.85;
+        this.bloomPass.strength = 0.28;
+        this.bloomPass.threshold = 1.4;
       }
       if (this.cinematicPass) {
         this.cinematicPass.uniforms.filmGrain.value = 0.01;
@@ -260,7 +278,8 @@ export class EngineScene {
       this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
       if (this.bloomPass) {
         this.bloomPass.enabled = true;
-        this.bloomPass.strength = 1.15;
+        this.bloomPass.strength = 0.38;
+        this.bloomPass.threshold = 1.4;
       }
       if (this.cinematicPass) {
         this.cinematicPass.uniforms.filmGrain.value = 0.02;
@@ -288,16 +307,30 @@ export class EngineScene {
     this.composer?.setPixelRatio?.(safeRatio);
   }
 
-  updatePerformance(deltaTime = 0.016) {
+  updatePerformance(deltaTime = 0.016, frameMs = deltaTime * 1000) {
     const adaptive = this.adaptiveResolution;
-    if (!adaptive?.enabled || this.graphicsQuality === 'ultra') return;
+    if (!adaptive) return;
+    if (!Array.isArray(adaptive.samples)) adaptive.samples = [];
+    const sample = Math.max(0, Math.min(1000, Number(frameMs) || 0));
+    adaptive.samples.push(sample);
     adaptive.elapsed += deltaTime;
     adaptive.frames += 1;
-    if (adaptive.elapsed < 1.0) return;
+    if (adaptive.elapsed < 0.5) return;
+    const sorted = adaptive.samples.slice().sort((a, b) => a - b);
+    const p95Index = Math.max(0, Math.ceil(sorted.length * 0.95) - 1);
     adaptive.frameMs = (adaptive.elapsed * 1000) / Math.max(1, adaptive.frames);
+    adaptive.p95Ms = sorted[p95Index] ?? adaptive.frameMs;
+    adaptive.maxFrameMs = sorted[sorted.length - 1] ?? adaptive.p95Ms;
     adaptive.elapsed = 0;
     adaptive.frames = 0;
-    const desired = adaptive.frameMs > 20 ? adaptive.ratio - 0.05 : adaptive.frameMs < 14 ? adaptive.ratio + 0.025 : adaptive.ratio;
+    adaptive.samples.length = 0;
+    if (!adaptive.enabled || this.graphicsQuality === 'ultra') return;
+    // Use a p95 window rather than a mean so one long shader/upload hitch is
+    // visible in diagnostics without making every brief spike permanently
+    // lower the resolution.
+    const desired = adaptive.p95Ms > 35 ? adaptive.ratio - 0.15
+      : adaptive.p95Ms > 20 ? adaptive.ratio - 0.05
+      : adaptive.p95Ms < 14 ? adaptive.ratio + 0.01 : adaptive.ratio;
     const next = Math.max(adaptive.min, Math.min(adaptive.max, desired));
     if (Math.abs(next - adaptive.ratio) >= 0.01) {
       adaptive.ratio = next;
@@ -306,7 +339,7 @@ export class EngineScene {
   }
 
   getPerformanceInfo() {
-    return { quality: this.graphicsQuality, deviceTier: this.deviceTier, ...this.adaptiveResolution };
+    return { quality: this.graphicsQuality, deviceTier: this.deviceTier, gpu: this.gpuRendererName, ...this.adaptiveResolution };
   }
 
   /**
@@ -494,6 +527,12 @@ export class EngineScene {
       this.arcaneFill.intensity = 3.0;
       if (this.bloomPass) { this.bloomPass.strength = 2.0; this.bloomPass.threshold = 0.68; }
     }
+    // HDR fire should keep its orange strands and dark gaps. Strong bloom at
+    // sub-white thresholds hid those details on balanced/ultra hardware paths.
+    if (this.bloomPass) {
+      this.bloomPass.strength = this.graphicsQuality === 'ultra' ? 0.38 : 0.28;
+      this.bloomPass.threshold = 1.4;
+    }
   }
 
   /**
@@ -585,7 +624,7 @@ export class EngineScene {
       if (this.caSurge > 0) {
         this.caSurge = Math.max(0, this.caSurge - deltaTime * 0.02);
       }
-      this.cinematicPass.uniforms.chromaticAberration.value = 0.0014 + this.caSurge;
+      this.cinematicPass.uniforms.chromaticAberration.value = this.graphicsQuality === 'performance' ? 0 : Math.min(0.0006, this.caSurge * 0.1);
       if (this.cinematicPass.uniforms.lowHealthPulse) {
         this.cinematicPass.uniforms.lowHealthPulse.value = this.lowHealthRatio || 0.0;
       }
@@ -607,15 +646,19 @@ export class EngineScene {
     }
   }
 
-  warmupShaders() {
+  async warmupShaders() {
     if (this.renderer && this.scene && this.camera) {
       try {
-        this.renderer.compile(this.scene, this.camera);
+        if (this.renderer.compileAsync) await this.renderer.compileAsync(this.scene, this.camera);
+        else this.renderer.compile(this.scene, this.camera);
         console.log('[EngineScene] WebGL shaders pre-warmed & pre-compiled successfully.');
+        return true;
       } catch (e) {
         console.warn('[EngineScene] Shader pre-warming skipped:', e);
+        return false;
       }
     }
+    return false;
   }
 
   render() {

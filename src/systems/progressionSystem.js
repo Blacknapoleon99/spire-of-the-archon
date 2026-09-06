@@ -12,6 +12,7 @@ export class ProgressionSystem {
   }
 
   addXP(amount) {
+    if (!Number.isFinite(amount) || amount <= 0) return { leveledUp: false, newLevel: this.level, rewards: {} };
     if (this.level >= 15) return { leveledUp: false, newLevel: this.level, rewards: {} };
     
     this.xp += amount;
@@ -25,17 +26,18 @@ export class ProgressionSystem {
       
       this.freeAttributePoints += 3;
       this.talentPoints += 1;
-      this.skillPoints += 1;
+      this.skillPoints += 2;
       
       rewards.freeAttributePoints += 3;
       rewards.talentPoints += 1;
-      rewards.skillPoints += 1;
+      rewards.skillPoints += 2;
     }
     
     if (this.level >= 15) {
       this.xp = 0;
     }
     
+    if (leveledUp) this.onLevelUp?.({ level: this.level, rewards });
     return { leveledUp, newLevel: this.level, rewards };
   }
   

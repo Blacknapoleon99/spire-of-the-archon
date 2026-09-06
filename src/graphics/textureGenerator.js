@@ -13,6 +13,12 @@ export class TextureGenerator {
         if (value.diffuseMap && !value.diffuseTex) value.diffuseTex = value.diffuseMap;
         if (value.normalTex && !value.normalMap) value.normalMap = value.normalTex;
         if (value.normalMap && !value.normalTex) value.normalTex = value.normalMap;
+        for (const texture of [value.diffuseMap, value.diffuseTex, value.emissiveMap, value.material?.map, value.material?.emissiveMap]) {
+          if (texture?.isTexture) { texture.colorSpace = THREE.SRGBColorSpace; texture.anisotropy = 4; }
+        }
+        for (const texture of [value.normalMap, value.normalTex, value.material?.normalMap, value.material?.roughnessMap, value.material?.metalnessMap]) {
+          if (texture?.isTexture) { texture.colorSpace = THREE.NoColorSpace; texture.anisotropy = 4; }
+        }
       }
       target[prop] = value;
       return true;
@@ -300,10 +306,10 @@ export class TextureGenerator {
     const material = new THREE.MeshStandardMaterial({
       map: diffuseTex,
       normalMap: normalTex,
-      normalScale: new THREE.Vector2(0.85, 0.85),
+      normalScale: new THREE.Vector2(0.16, 0.16),
       roughnessMap: roughTex,
       roughness: 0.72,
-      metalness: 0.15
+      metalness: 0.0
     });
 
     this.cache.stoneBrick = { diffuseTex, normalTex, roughTex, material };
@@ -2563,7 +2569,7 @@ export class TextureGenerator {
     const material = new THREE.MeshStandardMaterial({
       map: diffuseMap,
       normalMap,
-      normalScale: new THREE.Vector2(1.2, 1.2),
+      normalScale: new THREE.Vector2(0.3, 0.3),
       roughness: 0.38,
       metalness: 0.15
     });
@@ -2621,4 +2627,3 @@ export class TextureGenerator {
     return this.cache.leatherWrap;
   }
 }
-

@@ -110,17 +110,35 @@ def pbr_material(name, color, pattern='stone', metallic=0.0, roughness=0.45,
     # single flat numeric roughness value. Blender's glTF exporter preserves
     # these image links in the packed GLB for Three.js PBR materials.
     detail = baked_scalar(f'{name}_Detail', pattern, max(128, int(texture_size // 2)), seed + 19.0,
-                          low=0.22 if pattern in ('metal', 'crystal') else 0.34,
-                          high=0.82 if pattern in ('cloth', 'leather') else 0.68)
+                          low=max(0.04, roughness - 0.12),
+                          high=min(1.0, roughness + 0.12))
     detail_tex = nodes.new('ShaderNodeTexImage')
     detail_tex.image = detail
     detail_tex.interpolation = 'Linear'
     detail_tex.location = (-220, -150)
     links.new(detail_tex.outputs['Color'], bsdf.inputs['Roughness'])
+    # Tangent-space normals encode XYZ directions, never grayscale height.
+    # Derive a normalized vector from wrapped height gradients for UV seams.
+    width, height = detail.size
+    height_pixels = list(detail.pixels)
+    normal_pixels = [0.0] * (width * height * 4)
+    for y in range(height):
+        for x in range(width):
+            dx = height_pixels[(y * width + (x + 1) % width) * 4] - height_pixels[(y * width + (x - 1) % width) * 4]
+            dy = height_pixels[(((y + 1) % height) * width + x) * 4] - height_pixels[(((y - 1) % height) * width + x) * 4]
+            length = math.sqrt(dx * dx + dy * dy + 1.0)
+            idx = (y * width + x) * 4
+            normal_pixels[idx:idx + 4] = [0.5 - dx / length * 0.5, 0.5 - dy / length * 0.5, 0.5 + 0.5 / length, 1.0]
+    normal_image = bpy.data.images.new(f'{name}_Normal', width=width, height=height, alpha=False)
+    normal_image.colorspace_settings.name = 'Non-Color'
+    normal_image.pixels = normal_pixels
+    normal_image.pack()
+    normal_tex = nodes.new('ShaderNodeTexImage')
+    normal_tex.image = normal_image
     normal = nodes.new('ShaderNodeNormalMap')
     normal.inputs['Strength'].default_value = 0.24 if pattern in ('cloth', 'leather') else 0.16
     normal.location = (40, -150)
-    links.new(detail_tex.outputs['Color'], normal.inputs['Color'])
+    links.new(normal_tex.outputs['Color'], normal.inputs['Color'])
     links.new(normal.outputs['Normal'], bsdf.inputs['Normal'])
     bsdf.inputs['Metallic'].default_value = metallic
     bsdf.inputs['Roughness'].default_value = roughness

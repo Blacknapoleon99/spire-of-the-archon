@@ -3,6 +3,7 @@
  * Replaces generic unicode emojis with high-definition, glowing gothic vector artwork.
  */
 
+import { ADVANCED_BY_ID } from '../shared/spellMastery.js';
 export const CUSTOM_ICONS = {
   // === SPELLS: PYROMANCER ===
   ember_bolt: `
@@ -532,5 +533,18 @@ export const CUSTOM_ICONS = {
 };
 
 export function getCustomIcon(iconKey) {
+  const spell=ADVANCED_BY_ID[iconKey];
+  if (spell) {
+    const color={fire:'#ff913b',frost:'#8fe7ff',light:'#ffe39a',chrono:'#c8a1ff'}[spell.element];
+    const glyphs={
+      lance:'<path d="M19 45L40 18L45 19L43 24L23 48Z"/><path d="M17 33L27 40M26 25L36 32"/>',
+      burst:'<path d="M32 13L36 24L48 17L41 30L51 35L39 38L42 49L31 42L21 50L23 38L12 33L24 28Z"/>',
+      field:'<path d="M22 17C53 16 9 28 43 28C56 33 12 33 28 40L33 48M19 49C8 44 51 42 48 49"/>',
+      ward:'<path d="M32 12L48 19L45 37Q41 47 32 51Q23 47 19 37L16 19Z"/><path d="M32 22V41M24 30H40"/>',
+      heal:'<path d="M27 17H37V27H47V37H37V47H27V37H17V27H27Z"/>',
+      wave:'<path d="M14 23Q23 14 32 23T50 23M14 33Q23 24 32 33T50 33M14 43Q23 34 32 43T50 43"/>',
+    };
+    return `<svg viewBox="0 0 64 64" class="custom-icon" xmlns="http://www.w3.org/2000/svg"><circle cx="32" cy="32" r="29" fill="#111a22" stroke="${color}"/><g fill="none" stroke="${color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">${glyphs[spell.kind]}</g>${Array.from({length:spell.rank},(_,i)=>`<circle cx="${32+(i-(spell.rank-1)/2)*6}" cy="56" r="1.5" fill="${color}"/>`).join('')}</svg>`;
+  }
   return CUSTOM_ICONS[iconKey] || `<span style="font-size:1.4rem;">✨</span>`;
 }

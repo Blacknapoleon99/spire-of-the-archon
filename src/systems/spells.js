@@ -1,6 +1,8 @@
 /**
  * Holy Trinity Magic Classes (DPS, Tank, Healer, Support) and Spell Definitions
  */
+import { FIRE_TORNADO_CONFIG } from '../shared/combatRules.js';
+import { ADVANCED_SPELLS, ADVANCED_BY_ID } from '../shared/spellMastery.js';
 export const CLASS_SPELLS = {
   pyromancer: {
     avatar: '🔥',
@@ -10,7 +12,13 @@ export const CLASS_SPELLS = {
     basic: { id: 'ember_bolt', name: 'Ember Bolt', key: 'LMB', icon: '🔥', mana: 0, cd: 0.35, damage: 28, element: 'fire' },
     skill1: { id: 'fireball', name: 'Fireball', key: 'Q', icon: '☄️', mana: 25, cd: 4.0, damage: 75, element: 'fire', isAoe: true },
     skill2: { id: 'flame_wave', name: 'Flame Wave', key: 'E', icon: '🌋', mana: 35, cd: 6.0, damage: 55, element: 'fire' },
-    ult: { id: 'fire_tornado', name: 'Infernal Fire Tornado', key: 'R', icon: '🌪️', mana: 60, cd: 12.0, damage: 32, tickRate: 0.4, duration: 5.0, element: 'fire', isAoe: true, isVortex: true },
+    ult: {
+      id: 'fire_tornado', name: 'Infernal Fire Tornado', key: 'R', icon: '🌪️',
+      mana: FIRE_TORNADO_CONFIG.mana, cd: FIRE_TORNADO_CONFIG.cooldown,
+      damage: FIRE_TORNADO_CONFIG.damage, tickRate: FIRE_TORNADO_CONFIG.tickRate,
+      duration: FIRE_TORNADO_CONFIG.duration, aoeRadius: FIRE_TORNADO_CONFIG.aoeRadius,
+      element: FIRE_TORNADO_CONFIG.element, isAoe: true, isVortex: true
+    },
     unlockables: [
       { id: 'inferno_beam', name: 'Inferno Beam', icon: '🔥', cost: 1, desc: 'Channels an intense beam of flame piercing all targets.' },
       { id: 'phoenix_ward', name: 'Phoenix Ward', icon: '🦅', cost: 2, desc: 'Surrounds the caster in flame that burns attacking foes.' }
@@ -59,6 +67,17 @@ export const CLASS_SPELLS = {
     ]
   }
 };
+
+for (const [cls, config] of Object.entries(CLASS_SPELLS)) config.unlockables = ADVANCED_SPELLS[cls];
+export function getEquippedSpells(player = {}) {
+  const config = CLASS_SPELLS[player.wizardClass] || CLASS_SPELLS.pyromancer;
+  const result = { ...config };
+  for (const [slot, key] of [['skill1', 'Q'], ['skill2', 'E'], ['ult', 'R']]) {
+    const spell = ADVANCED_BY_ID[player.equippedSpells?.[slot]];
+    if (spell && config.unlockables.includes(spell) && player.learnedSpells?.includes(spell.id)) result[slot] = { ...spell, key };
+  }
+  return result;
+}
 
 export class CooldownManager {
   constructor() {

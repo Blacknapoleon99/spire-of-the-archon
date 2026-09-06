@@ -231,6 +231,10 @@ export class TowerEnvironment {
 
     // Outer Gothic Weathered Stone Walls (with open archway doorway leading into Awakening Vault)
     const wallGeo = new THREE.CylinderGeometry(22.5, 22.5, 12, 32, 1, true, -Math.PI / 2 + 0.18, Math.PI * 2 - 0.36);
+    // Masonry repeats around the circumference, rather than four giant bricks
+    // stretched across the entire 140m wall.
+    const wallUV = wallGeo.attributes.uv;
+    for (let i=0;i<wallUV.count;i++) wallUV.setXY(i,wallUV.getX(i)*24,wallUV.getY(i)*2);
     const wall = new THREE.Mesh(wallGeo, stonePBR.material);
     wall.position.y = 6;
     this.roomGroup.add(wall);
@@ -535,6 +539,13 @@ export class TowerEnvironment {
    * 4 interactive magic books on pedestals, awakening stone cot, and Arcane Vault Runegate.
    */
   buildAwakeningVault(stonePBR, marblePBR) {
+    // Tile all PBR channels together through UVs. Stretching four bricks over
+    // an 18m wall magnified the normal-map fissures into bright horizontal bars.
+    const tileStone = geometry => {
+      const uv = geometry.attributes.uv;
+      for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 3, uv.getY(i) * 1.5);
+      return geometry;
+    };
     const runicPBR = TextureGenerator.createRunicWallTexturePBR();
     const prisonFloorPBR = TextureGenerator.createPrisonFloorPBR();
     const vaultGroup = new THREE.Group();
@@ -548,13 +559,13 @@ export class TowerEnvironment {
     vaultGroup.add(floor);
 
     // 2. Vault Ceiling
-    const ceilingGeo = new THREE.BoxGeometry(16.5, 1, 18.5);
+    const ceilingGeo = tileStone(new THREE.BoxGeometry(16.5, 1, 18.5));
     const ceiling = new THREE.Mesh(ceilingGeo, stonePBR.material);
     ceiling.position.set(0, 8.5, 27);
     vaultGroup.add(ceiling);
 
     // 3. South Prison Wall (Back Wall where Keybindings are inscribed)
-    const southWallGeo = new THREE.BoxGeometry(16, 8, 1.2);
+    const southWallGeo = tileStone(new THREE.BoxGeometry(16, 8, 1.2));
     const southWall = new THREE.Mesh(southWallGeo, stonePBR.material);
     southWall.position.set(0, 4, 36);
     southWall.castShadow = true;
@@ -569,24 +580,24 @@ export class TowerEnvironment {
     vaultGroup.add(runicTablet);
 
     // 5. West Prison Wall
-    const westWallGeo = new THREE.BoxGeometry(1.2, 8, 18);
+    const westWallGeo = tileStone(new THREE.BoxGeometry(1.2, 8, 18));
     const westWall = new THREE.Mesh(westWallGeo, stonePBR.material);
     westWall.position.set(-8, 4, 27);
     vaultGroup.add(westWall);
 
     // 6. East Prison Wall
-    const eastWallGeo = new THREE.BoxGeometry(1.2, 8, 18);
+    const eastWallGeo = tileStone(new THREE.BoxGeometry(1.2, 8, 18));
     const eastWall = new THREE.Mesh(eastWallGeo, stonePBR.material);
     eastWall.position.set(8, 4, 27);
     vaultGroup.add(eastWall);
 
     // 7. North Archway Doorway leading into the Archives (z = 18)
-    const archLeftGeo = new THREE.BoxGeometry(5.2, 8, 1.2);
+    const archLeftGeo = tileStone(new THREE.BoxGeometry(5.2, 8, 1.2));
     const archLeft = new THREE.Mesh(archLeftGeo, stonePBR.material);
     archLeft.position.set(-5.4, 4, 18);
     vaultGroup.add(archLeft);
 
-    const archRightGeo = new THREE.BoxGeometry(5.2, 8, 1.2);
+    const archRightGeo = tileStone(new THREE.BoxGeometry(5.2, 8, 1.2));
     const archRight = new THREE.Mesh(archRightGeo, stonePBR.material);
     archRight.position.set(5.4, 4, 18);
     vaultGroup.add(archRight);
@@ -2226,7 +2237,7 @@ export class TowerEnvironment {
     const mat = new THREE.MeshBasicMaterial({
       color: new THREE.Color(color),
       transparent: true,
-      opacity: 0.12,
+      opacity: 0.025,
       side: THREE.DoubleSide,
       blending: THREE.AdditiveBlending,
       depthWrite: false
@@ -2237,7 +2248,7 @@ export class TowerEnvironment {
     this.animatedProps.push({
       type: 'god_rays',
       mesh,
-      baseOpacity: 0.12
+      baseOpacity: 0.025
     });
     return mesh;
   }

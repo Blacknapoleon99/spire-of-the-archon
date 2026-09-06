@@ -171,6 +171,7 @@ export class WebRTCNetwork {
     this.socket.on('action_rejected', (d) => this.trigger('action_rejected', d));
     this.socket.on('action_accepted', (d) => this.trigger('action_accepted', d));
     this.socket.on('profile_applied', (d) => this.trigger('profile_applied', d));
+    this.socket.on('mastery_updated', (d) => this.trigger('mastery_updated', d));
     this.socket.on('floating_text', (d) => this.trigger('floating_text', d));
     this.socket.on('puzzle_update', (d) => this.trigger('puzzle_update', d));
     this.socket.on('quiz_start', (d) => this.trigger('quiz_start', d));

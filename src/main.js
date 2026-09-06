@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { resolveLocalPlayerId } from './shared/playerIdentity.js';
 import { EngineScene } from './engine/scene.js';
 import { PhysicsController } from './engine/physics.js';
 import { TowerEnvironment } from './graphics/towerEnvironment.js';
@@ -19,7 +20,7 @@ import { MinimapRenderer } from './ui/minimapRenderer.js';
 import { ShopUI } from './ui/shopUI.js';
 import { MagicBookUI } from './ui/magicBookUI.js';
 import { ChunkLoader } from './engine/chunkLoader.js';
-import { CLASS_SPELLS, CooldownManager } from './systems/spells.js';
+import { CLASS_SPELLS, CooldownManager, getEquippedSpells } from './systems/spells.js';
 import { ProgressionSystem, XP_SOURCES } from './systems/progressionSystem.js';
 import { rollLoot } from './systems/lootTables.js';
 import { TutorialSystem } from './systems/tutorialSystem.js';
@@ -38,6 +39,7 @@ import { GroundSpellManager } from './graphics/groundSpells.js';
 import { animationPackManager } from './graphics/animationPack.js';
 import { accountClient } from './state/accountClient.js';
 import { firstWorldHit, firstWorldHitAlongRay, resolveGroundTarget } from './shared/worldCollision.js';
+import { getFloorBundle } from './shared/assetManifest.js';
 
 const CLIENT_GROUND_AIMED_SPELLS = new Set(['fire_tornado', 'frost_nova', 'divine_sanctuary', 'time_dilation', 'temporal_stasis']);
 const CLIENT_SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION = new Set(['glacial_bulwark', 'radiant_heal', 'cleansing_wave', 'temporal_rewind']);
@@ -110,6 +112,13 @@ class GameApp {
     this.inventory = new InventorySystem(this.engineScene.scene);
     this.inventoryUI = new InventoryUI(this.inventory);
     this.grimoireUI = new GrimoireUI();
+    this.grimoireUI.getPlayer = () => this.localPlayer;
+    this.grimoireUI.onAction = data => onlineNetwork.socket?.emit('change_mastery', data);
+    this.progression.onLevelUp = () => {
+      if (!this.localPlayer) return;
+      onlineNetwork.syncProfile({ level: this.progression.level, xp: this.progression.xp,
+        attributes: this.inventory.getAttributes() });
+    };
     this.questJournalUI = new QuestJournalUI(this.questManager);
     this.shopUI = new ShopUI(this);
     this.magicBookUI = new MagicBookUI();
@@ -146,6 +155,21 @@ class GameApp {
     this.boss = null;
     this.currentFloor = 1;
     this.isGameActive = false;
+    // Server snapshots continue to flow while a session is being prepared,
+    // but movement, casts, HUD controls and simulation stay locked until the
+    // actual scene/entity/viewmodel/GPU readiness barrier completes.
+    this._sessionLoading = false;
+    this._sessionReady = false;
+    this._sessionLoadState = 'idle';
+    this._sessionLoadToken = 0;
+    this._sessionSnapshotSeen = false;
+    this._sessionSnapshotPromise = null;
+    this._resolveSessionSnapshot = null;
+    this._sessionFloorPromise = null;
+    this._sessionStartData = null;
+    this._sessionFailureCount = 0;
+    this._sessionSafeFallback = false;
+    this._sessionMetrics = null;
     this.basicAttackCount = 0;
     this.gameTime = 0;
 
@@ -172,6 +196,7 @@ class GameApp {
     this.currentFps = 60;
     this.targetFps = 0; // 0 = unlimited, or 60, 120, 144, 240
     this.lastRenderTime = performance.now();
+    this._lastDiagnosticsAt = 0;
     this.saveRevision = 0;
     this.saveQueue = Promise.resolve();
     this.lastSavedFloor = 0;
@@ -198,11 +223,11 @@ class GameApp {
     let isPreloadFinished = false;
     let isLoadComplete = false;
 
-    // Safety fallback timeout ensuring loading screen unlocks even on slow networks
+    // Never expose controls while assets/shaders are still being prepared.
+    // The old eight-second bypass moved the remaining loading into gameplay.
     setTimeout(() => {
       if (!isPreloadFinished) {
-        isPreloadFinished = true;
-        console.log('[Loading] Preload safety timeout reached; proceeding.');
+        console.info('[Loading] Still preparing core assets and shaders; keeping the loading screen visible.');
       }
     }, 8000);
 
@@ -217,18 +242,23 @@ class GameApp {
     this.engineScene.setFloorLighting(1);
 
     // Core-only preloading. Floor 2 and later are requested on demand.
+    this._preparingCore = true;
     Promise.allSettled([
       assetLoader.preloadFloor1(),
       assetLoader.preloadViewmodelWand(),
       animationPackManager.loadPack(),
       this.spellVfx.preloadHeroAssets().then(() => this.spellVfx.warmup(this.engineScene.renderer, this.engineScene.camera)),
       Promise.resolve()
-    ]).then(() => {
+    ]).then(async () => {
+      await assetLoader.prepareCoreGPU(this.engineScene.renderer, this.engineScene.camera, this.engineScene.scene);
+      await this.engineScene.warmupShaders();
+      this.engineScene.render(); // Allocate post-processing targets before entry.
+      this._preparingCore = false;
       isPreloadFinished = true;
-      try { this.engineScene.warmupShaders(); } catch (e) {}
       console.log('[SpireGame] Core assets ready; remaining floors stream on demand.');
     }).catch(err => {
       console.warn('[Preload] Non-critical warning:', err);
+      this._preparingCore = false;
       isPreloadFinished = true;
     });
 
@@ -274,6 +304,246 @@ class GameApp {
 
     // Start 60fps render loop
     requestAnimationFrame((t) => this.loop(t));
+  }
+
+  /**
+   * Start a real, post-server session readiness barrier. The server is still
+   * authoritative while this runs: snapshots are accepted and entities are
+   * constructed, but the main loop deliberately skips local simulation/input.
+   */
+  beginSessionLoading(data, playersList = []) {
+    this._sessionLoadToken += 1;
+    const token = this._sessionLoadToken;
+    this._sessionStartData = data;
+    this._sessionFailureCount = 0;
+    this._sessionSafeFallback = false;
+    this._sessionMetrics = {
+      floor: data?.floor || this.currentFloor || 1,
+      startedAt: performance.now(),
+      firstPlayableMs: null,
+      fallback: false
+    };
+    this._sessionLoading = true;
+    this._sessionReady = false;
+    this._sessionLoadState = 'loading';
+    this._sessionSnapshotSeen = false;
+    this._sessionSnapshotPromise = new Promise(resolve => {
+      this._resolveSessionSnapshot = resolve;
+    });
+    this.ui.beginSessionLoading({
+      floor: data?.floor || 1,
+      onRetry: () => this.retrySessionLoading()
+    });
+
+    // A room can send the initial snapshot before the floor stream finishes;
+    // keep the promise around so the readiness task can await the same work.
+    this._sessionFloorPromise = this.chunkLoader.preloadFloor(this.currentFloor || data?.floor || 1);
+    this._sessionFloorPromise.catch(() => {});
+    return this.prepareSessionEntry(token, playersList);
+  }
+
+  markSessionSnapshotReady() {
+    if (this._sessionSnapshotSeen) return;
+    this._sessionSnapshotSeen = true;
+    const resolve = this._resolveSessionSnapshot;
+    this._resolveSessionSnapshot = null;
+    if (resolve) resolve();
+  }
+
+  async awaitSessionReadiness(value, label, timeoutMs = 30000) {
+    let timeoutId = null;
+    const timeout = new Promise((resolve, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(`${label} did not finish within ${Math.round(timeoutMs / 1000)} seconds.`)), timeoutMs);
+    });
+    try {
+      return await Promise.race([Promise.resolve(value), timeout]);
+    } finally {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+    }
+  }
+
+  getSessionEntityPromises() {
+    const entities = [...this.players.values(), ...this.enemies.values()];
+    if (this.boss) entities.push(this.boss);
+    return entities.map(entity => entity?.ready).filter(Boolean);
+  }
+
+  getSessionCriticalAssetUrls() {
+    const urls = new Set(getFloorBundle(this.currentFloor || this._sessionStartData?.floor || 1));
+    const playerCandidates = {
+      pyromancer: ['/models/player_pyromancer.glb', '/models/sorcerer.glb'],
+      cryomancer: ['/models/player_sunsteel_vanguard.glb', '/models/player_cryomancer.glb', '/models/knight.glb'],
+      luminary: ['/models/player_luminary.glb', '/models/druid.glb'],
+      chronomancer: ['/models/player_chronomancer.glb', '/models/elf_mage.glb']
+    };
+    for (const player of this.players.values()) {
+      const authored = player?.modelRoot?.userData?.assetUrl;
+      if (authored) urls.add(authored);
+      for (const url of playerCandidates[player?.wizardClass] || playerCandidates.pyromancer) urls.add(url);
+    }
+    for (const enemy of this.enemies.values()) if (enemy?.glbUrl) urls.add(enemy.glbUrl);
+    if (this.boss?.glbUrl) urls.add(this.boss.glbUrl);
+    // The focus kit and authored spell shells are small, shared critical
+    // assets. Missing optional GLBs simply fall back to the pooled procedural
+    // VFX without expanding the session gate.
+    urls.add('/models/fp_wand_hero.glb');
+    urls.add('/models/fp_viewmodel_wand.glb');
+    for (const url of [
+      '/models/spell_fire_tornado_core.glb',
+      '/models/spell_fireball.glb',
+      '/models/spell_frost_crystal.glb',
+      '/models/spell_luminary_halo.glb',
+      '/models/spell_chrono_astrolabe.glb'
+    ]) urls.add(url);
+    return [...urls];
+  }
+
+  queueNextFloorStream() {
+    const nextFloor = Number(this.currentFloor || 1) + 1;
+    if (nextFloor > 15) return Promise.resolve({ floor: nextFloor, ready: false, terminal: true });
+    return this.chunkLoader.scheduleBackgroundPreload(nextFloor, {
+      priority: 1,
+      delayMs: 1200,
+      onComplete: result => console.log(`[Streaming] Floor ${result.floor} ready (${result.loaded}/${result.total} assets).`)
+    }).catch(error => {
+      console.warn('[Streaming] Next floor asset note:', error);
+      return { floor: nextFloor, ready: false, errors: [error?.message || 'stream failed'] };
+    });
+  }
+
+  applySessionSafeFallback() {
+    this._sessionSafeFallback = true;
+    if (this._sessionMetrics) this._sessionMetrics.fallback = true;
+    this.engineScene.setGraphicsQuality('performance');
+    this.spellVfx.setQualityProfile('performance');
+    this.ui.settings.graphicsQuality = 'performance';
+    this.ui.saveSettings?.();
+  }
+
+  async prepareSessionEntry(token, playersList = []) {
+    try {
+      this.ui.setSessionLoadingStage('Loading the active floor geometry', 14,
+        `Floor ${this.currentFloor || this._sessionStartData?.floor || 1} is being staged for its first frame.`);
+      const floorResult = await this.awaitSessionReadiness(this._sessionFloorPromise, 'Floor scene assets');
+      if (floorResult?.errors?.length && !this._sessionSafeFallback) {
+        throw new Error(`Floor ${floorResult.floor} assets failed: ${floorResult.errors.join('; ')}`);
+      }
+      if (floorResult?.errors?.length && this._sessionSafeFallback) {
+        this.ui.setSessionLoadingStage('Using the safe visual fallback', 20,
+          'One optional floor asset did not arrive; procedural PBR geometry is taking its place.');
+      }
+      if (token !== this._sessionLoadToken) return;
+
+      this.ui.setSessionLoadingStage('Binding the covenant avatars', 37,
+        'Player meshes, nameplates and first-person materials are being resolved.');
+      const playerPromises = [...this.players.values()]
+        .map(entity => entity?.ready)
+        .filter(Boolean);
+      // Keep this explicit list as a fallback for a test/network adapter that
+      // creates entities lazily after game_started but before its first snap.
+      for (const player of playersList) {
+        if (player?.ready) playerPromises.push(player.ready);
+      }
+      await this.awaitSessionReadiness(Promise.all(playerPromises), 'Player assets');
+      if (token !== this._sessionLoadToken) return;
+
+      this.ui.setSessionLoadingStage('Receiving the first world snapshot', 54,
+        'Holding local input while the server publishes the room actors.');
+      await this.awaitSessionReadiness(this._sessionSnapshotPromise, 'Initial world snapshot');
+      if (token !== this._sessionLoadToken) return;
+      if (!this.localPlayer) throw new Error('The covenant did not identify a local wizard in its first snapshot.');
+      if (!this.fpViewmodel?.ready) throw new Error('The first-person focus kit was not created for the local wizard.');
+      await this.awaitSessionReadiness(this.fpViewmodel.ready, 'First-person focus kit');
+
+      this.ui.setSessionLoadingStage('Warming live actor meshes', 70,
+        'Enemy and boss entities are compiling their authored animation rigs.');
+      await this.awaitSessionReadiness(Promise.all(this.getSessionEntityPromises()), 'Live actor assets');
+      if (token !== this._sessionLoadToken) return;
+
+      this.ui.setSessionLoadingStage('Compiling the leyline GPU path', 88,
+        'Uploading textures and compiling the materials used by this scene.');
+      await this.awaitSessionReadiness(
+        assetLoader.prepareCoreGPU(
+          this.engineScene.renderer,
+          this.engineScene.camera,
+          this.engineScene.scene,
+          { urls: this.getSessionCriticalAssetUrls(), uploadBudgetMs: this._sessionSafeFallback ? 2 : 4 }
+        ),
+        'GPU texture upload'
+      );
+      const shaderWarmupResult = await this.awaitSessionReadiness(this.engineScene.warmupShaders(), 'GPU shader compile');
+      if (shaderWarmupResult === false) throw new Error('The GPU shader warm-up did not complete.');
+      if (this.engineScene.renderer?.getContext?.()?.isContextLost?.()) {
+        throw new Error('The WebGL context was lost during the session warm-up.');
+      }
+      if (token !== this._sessionLoadToken) return;
+
+      this.ui.setSessionLoadingStage('Rendering the first playable frame', 97,
+        'Finalizing camera state and checking the resident world.');
+      this.engineScene.updateCameraPosition(this.localPlayer.position, 0);
+      this.engineScene.render();
+      if (token !== this._sessionLoadToken) return;
+
+      this._sessionLoading = false;
+      this._sessionReady = true;
+      this._sessionLoadState = 'ready';
+      // Do not let time spent behind the gate count as a low-FPS gameplay
+      // sample or immediately trigger adaptive quality changes.
+      const now = performance.now();
+      this.lastTime = now;
+      this.lastRenderTime = now;
+      this._performanceTime = now;
+      this.fpsFrameCount = 0;
+      this.fpsLastCalc = now;
+      this._lowFpsCounter = 0;
+      if (this._sessionMetrics) {
+        this._sessionMetrics.firstPlayableMs = Math.round(now - this._sessionMetrics.startedAt);
+        this._sessionMetrics.gpu = this.engineScene.getPerformanceInfo?.();
+        this._sessionMetrics.assets = assetLoader.getStats?.().gpu;
+        if (typeof window !== 'undefined') window.__spireSessionMetrics = { ...this._sessionMetrics };
+      }
+      this.ui.setSessionLoadingStage('ASCENSION READY', 100,
+        'The first frame is live. Controls are now attuned to your wizard.');
+      this.ui.finishSessionLoading();
+      this.chunkLoader.startBackgroundPreload();
+      this.queueNextFloorStream();
+    } catch (error) {
+      if (token !== this._sessionLoadToken) return;
+      this._sessionFailureCount += 1;
+      if (this._sessionFailureCount >= 2 && !this._sessionSafeFallback) {
+        console.warn('[SessionLoading] Repeated readiness failure; enabling safe visual fallback.', error);
+        this.applySessionSafeFallback();
+        this.ui.beginSessionLoading({
+          floor: this.currentFloor || this._sessionStartData?.floor || 1,
+          onRetry: () => this.retrySessionLoading()
+        });
+        this.ui.setSessionLoadingStage('Retrying with the safe visual path', 8,
+          'The room is intact. Optional high-cost materials are being replaced with the pooled fallback.');
+        return this.prepareSessionEntry(token, playersList);
+      }
+      this._sessionLoading = true;
+      this._sessionReady = false;
+      this._sessionLoadState = 'error';
+      console.error('[SessionLoading] Readiness barrier failed:', error);
+      this.ui.showSessionLoadingError(error, () => this.retrySessionLoading());
+    }
+  }
+
+  retrySessionLoading() {
+    if (!this._sessionStartData) return Promise.reject(new Error('No active session is available to retry.'));
+    const data = this._sessionStartData;
+    const token = ++this._sessionLoadToken;
+    this._sessionLoading = true;
+    this._sessionReady = false;
+    this._sessionLoadState = 'loading';
+    this._sessionFloorPromise = this.chunkLoader.preloadFloor(this.currentFloor || data.floor || 1);
+    this._sessionFloorPromise.catch(() => {});
+    if (!this._sessionSnapshotSeen) {
+      this._sessionSnapshotPromise = new Promise(resolve => { this._resolveSessionSnapshot = resolve; });
+    } else {
+      this._sessionSnapshotPromise = Promise.resolve();
+    }
+    return this.prepareSessionEntry(token, data.players || []);
   }
 
   clearEncounterEntities() {
@@ -347,6 +617,8 @@ class GameApp {
       wizardClass: this.localPlayer.wizardClass,
       talents: this.localPlayer.talents,
       talentPoints: this.localPlayer.talentPoints,
+      learnedSpells: this.localPlayer.learnedSpells,
+      equippedSpells: this.localPlayer.equippedSpells,
       objective: this.questManager.getServerObjective?.() || null,
       ascensionTier: onlineNetwork.ascensionTier || 0
     };
@@ -364,6 +636,13 @@ class GameApp {
   }
 
   setupUIButtons() {
+    // Choose the initial shader path before loading, not via a disruptive
+    // quality switch immediately after entering on integrated/software GPUs.
+    let hasSavedGraphicsQuality = false;
+    try { hasSavedGraphicsQuality = Boolean(JSON.parse(localStorage.getItem('spire_settings'))?.graphicsQuality); } catch {}
+    if (!hasSavedGraphicsQuality && this.engineScene.deviceTier === 'integrated') {
+      this.ui.settings.graphicsQuality = 'performance';
+    }
     // Wire Graphics Quality settings to EngineScene
     this.ui.onGraphicsQualityChange((quality) => {
       this.engineScene.setGraphicsQuality(quality);
@@ -392,7 +671,7 @@ class GameApp {
 
     // Keyboard shortcuts for modals & Voice Chat Mute
     window.addEventListener('keydown', (e) => {
-      if (!this.isGameActive || document.activeElement.tagName === 'INPUT') return;
+      if (!this.isGameActive || this._sessionLoading || document.activeElement.tagName === 'INPUT') return;
 
       if (e.code === 'KeyI' || e.code === 'KeyC') {
         this.inventoryUI.toggle();
@@ -418,6 +697,13 @@ class GameApp {
       }
     });
     onlineNetwork.on('network_error', (data) => {
+      if (this._sessionLoading || this.ui._sessionLoadingActive) {
+        const retry = this._sessionLoading
+          ? () => this.retrySessionLoading()
+          : () => window.location.reload();
+        this.ui.showSessionLoadingError(new Error(data?.message || 'The covenant relay rejected the ascent request.'),
+          retry);
+      }
       this.ui.setAccountStatus(data?.message || 'The covenant relay is unavailable.', true);
     });
     onlineNetwork.on('error_message', (data) => {
@@ -573,10 +859,28 @@ class GameApp {
       this.localPlayer.maxMana = data.maxMana || this.localPlayer.maxMana;
       if (data.talents) this.localPlayer.talents = data.talents;
       if (Number.isFinite(Number(data.talentPoints))) this.localPlayer.talentPoints = data.talentPoints;
+      for (const key of ['learnedSpells', 'equippedSpells', 'skillPoints', 'level']) if (data[key] !== undefined) this.localPlayer[key] = data[key];
       this.ui.updatePlayerHUD(this.localPlayer);
+    });
+    onlineNetwork.on('mastery_updated', data => {
+      if (!this.localPlayer) return;
+      Object.assign(this.localPlayer, data);
+      this.grimoireUI.render(this.localPlayer.wizardClass);
+      this.ui.updateSpellLoadout(this.localPlayer);
+      this.saveCampaignCheckpoint();
+    });
+    onlineNetwork.on('talent_updated', data => {
+      if (!this.localPlayer) return;
+      Object.assign(this.localPlayer, data);
+      this.ui.updatePlayerHUD(this.localPlayer);
+      this.ui.renderTalents(this.localPlayer.wizardClass);
+      this.saveCampaignCheckpoint();
     });
 
     onlineNetwork.on('game_started', (data) => {
+      const reusePreparedFloor = !this.isGameActive
+        && this.tower.currentFloor === (data.floor || 1)
+        && this.tower.roomGroup.children.length > 0;
       console.log('[Client] Spire ascent initiated! Floor:', data.floor, 'Players:', data.players);
       this.clearEncounterEntities();
       for (const entity of this.players.values()) entity.destroy?.();
@@ -584,11 +888,10 @@ class GameApp {
       this.localPlayer = null;
       this.isGameActive = true;
       this.currentFloor = data.floor || 1;
-      this.tower.buildFloor(this.currentFloor);
+      if (!reusePreparedFloor) this.tower.buildFloor(this.currentFloor);
       this.chunkLoader.preloadFloor(this.currentFloor).catch(error => console.warn('[Streaming] Current floor asset note:', error));
-      this.chunkLoader.preloadFloor(this.currentFloor + 1, {
-        onComplete: result => console.log(`[Streaming] Floor ${result.floor} ready (${result.loaded}/${result.total} assets).`)
-      }).catch(error => console.warn('[Streaming] Next floor asset note:', error));
+      // Do not decode the next floor's models while the first playable frames
+      // are uploading player/viewmodel textures. Transitions load on demand.
       this.ambientParticles.setFloor(this.currentFloor);
       this.questManager.setFloor(this.currentFloor);
       if (data.objective) this.questManager.setServerObjective(data.objective);
@@ -606,17 +909,15 @@ class GameApp {
       this.applyPuzzleSnapshot(data.puzzles);
 
       const playersList = data.players || [];
-      let localPData = playersList.find(p =>
-        p.id === onlineNetwork.localPlayerId ||
-        p.id === onlineNetwork.socket?.id ||
-        (onlineNetwork.localPlayerName && p.name === onlineNetwork.localPlayerName)
-      );
-      if (!localPData && playersList.length > 0) {
-        localPData = playersList[0];
-      }
+      // Keep the server snapshot live, but place a hard UI/input gate before
+      // any player HUD is exposed. The readiness task waits for the first
+      // state_snapshot as well, so live enemies/bosses are included.
+      this.beginSessionLoading(data, playersList);
+      const localId = resolveLocalPlayerId(playersList, onlineNetwork.socket?.id, onlineNetwork.localPlayerId);
+      this.localPlayer = null;
 
       playersList.forEach(pData => {
-        const isLocal = (pData === localPData || pData.id === onlineNetwork.localPlayerId || pData.id === onlineNetwork.socket?.id);
+        const isLocal = pData.id === localId;
         const player = new PlayerEntity(this.engineScene.scene, pData, isLocal);
         this.players.set(pData.id, player);
 
@@ -629,17 +930,6 @@ class GameApp {
           this.ui.startGameHUD(player);
         }
       });
-
-      if (!this.localPlayer && this.players.size > 0) {
-        const first = this.players.values().next().value;
-        this.localPlayer = first;
-        onlineNetwork.localPlayerId = first.id;
-        first.isLocal = true;
-        first.setVisualVisibility(false);
-        if (this.fpViewmodel) this.fpViewmodel.destroy();
-        this.fpViewmodel = new FPViewmodel(this.engineScene.camera, first.wizardClass);
-        this.ui.startGameHUD(first);
-      }
 
       // Show initial tutorial & achievements
       this.tutorial.tryShowTip('movement');
@@ -691,6 +981,8 @@ class GameApp {
               level: this.progression.level,
               xp: this.progression.xp,
               attributes: this.inventory.baseAttributes,
+              learnedSpells: save.payload.learnedSpells || [],
+              equippedSpells: save.payload.equippedSpells || {},
               talents: this.localPlayer?.talents,
               talentPoints: this.localPlayer?.talentPoints
             });
@@ -713,9 +1005,18 @@ class GameApp {
       if (data.objective) this.questManager.setServerObjective(data.objective);
       this.applyPuzzleSnapshot(data.puzzles);
 
+      const snapshotLocalId = resolveLocalPlayerId(data.players, onlineNetwork.socket?.id, onlineNetwork.localPlayerId);
       data.players.forEach(pData => {
-        const isLocal = (pData.id === onlineNetwork.localPlayerId || (this.localPlayer && this.localPlayer.id === pData.id));
+        const isLocal = pData.id === snapshotLocalId;
         const existing = this.players.get(pData.id);
+        if (existing) existing.isLocal = isLocal;
+        if (existing && isLocal && this.localPlayer !== existing) {
+          this.localPlayer = existing;
+          onlineNetwork.localPlayerId = existing.id;
+          this.fpViewmodel?.destroy();
+          this.fpViewmodel = new FPViewmodel(this.engineScene.camera, existing.wizardClass);
+          this.ui.startGameHUD(existing);
+        }
         if (existing) {
           existing.peerId = pData.peerId || existing.peerId || null;
           if (isLocal && existing.health > pData.health) {
@@ -738,7 +1039,14 @@ class GameApp {
           }
           existing.health = pData.health;
           existing.mana = pData.mana;
+          existing.maxMana = pData.maxMana;
+          existing.speed = pData.speed;
+          existing.fireCostReduction = pData.fireCostReduction || 0;
           existing.talentPoints = pData.talentPoints;
+          existing.level = pData.level || 1;
+          existing.learnedSpells = pData.learnedSpells || [];
+          existing.equippedSpells = pData.equippedSpells || {};
+          existing.skillPoints = pData.skillPoints ?? 2;
           existing.talents = pData.talents;
           existing.isAlive = pData.isAlive;
           existing.serverConnected = pData.connected !== false;
@@ -891,6 +1199,11 @@ class GameApp {
           }
         }
       });
+
+      // Resolve the one-shot barrier only after this snapshot has created all
+      // live actors. prepareSessionEntry then awaits their individual `ready`
+      // promises before compiling the complete scene.
+      if (this._sessionLoading) this.markSessionSnapshotReady();
     });
 
     onlineNetwork.on('spell_cast', (data) => {
@@ -1095,9 +1408,11 @@ class GameApp {
 
       this.tower.buildFloor(this.currentFloor);
       this.chunkLoader.preloadFloor(this.currentFloor).catch(error => console.warn('[Streaming] Current floor asset note:', error));
-      this.chunkLoader.preloadFloor(this.currentFloor + 1, {
-        onComplete: result => console.log(`[Streaming] Floor ${result.floor} ready (${result.loaded}/${result.total} assets).`)
-      }).catch(error => console.warn('[Streaming] Next floor asset note:', error));
+      // Keep the next floor out of the critical transition path. It is queued
+      // behind the first playable frame and runs one floor at a time during
+      // idle periods so a checkpoint never competes with combat rendering.
+      this.chunkLoader.startBackgroundPreload();
+      this.queueNextFloorStream();
       this.ambientParticles.setFloor(this.currentFloor);
       this.engineScene.setFloorLighting(this.currentFloor);
       this.questManager.setFloor(this.currentFloor);
@@ -1413,7 +1728,7 @@ class GameApp {
 
   initCombatInputs() {
     window.addEventListener('keydown', (e) => {
-      if (!this.isGameActive || !this.localPlayer) return;
+      if (!this.isGameActive || this._sessionLoading || !this.localPlayer) return;
       if (document.activeElement.tagName === 'INPUT') return;
 
       if (this.isDead) {
@@ -1424,7 +1739,7 @@ class GameApp {
         return;
       }
 
-      const spells = CLASS_SPELLS[this.localPlayer.wizardClass] || CLASS_SPELLS.pyromancer;
+      const spells = getEquippedSpells(this.localPlayer);
 
       if (e.code === 'KeyQ') {
         this.tryCastSpell('skill1', spells.skill1);
@@ -1450,7 +1765,7 @@ class GameApp {
   resolveSpellCollision(spellConfig, origin, direction) {
     const floor = this.tower?.currentFloor || this.currentFloor || 1;
     const colliders = this.tower?.colliders || [];
-    if (CLIENT_GROUND_AIMED_SPELLS.has(spellConfig?.id)) {
+    if (CLIENT_GROUND_AIMED_SPELLS.has(spellConfig?.id) || spellConfig?.kind === 'field') {
       const target = resolveGroundTarget(origin, direction, spellConfig.id === 'time_dilation' ? 7 : 10, { floor, colliders });
       return {
         target: new THREE.Vector3(target.point.x, target.point.y, target.point.z),
@@ -1463,9 +1778,9 @@ class GameApp {
       };
     }
 
-    const ranged = !CLIENT_SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION.has(spellConfig?.id);
+    const ranged = !['ward', 'heal', 'wave'].includes(spellConfig?.kind) && !CLIENT_SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION.has(spellConfig?.id);
     if (!ranged) return { target: null, worldImpact: null };
-    const range = spellConfig?.id === 'flame_wave' ? 18 : 42;
+    const range = spellConfig?.range || (spellConfig?.id === 'flame_wave' ? 18 : 42);
     const hit = firstWorldHitAlongRay(origin, direction, range, { floor, colliders, radius: spellConfig?.id === 'fireball' ? 0.52 : 0.22 });
     return {
       target: null,
@@ -1479,15 +1794,17 @@ class GameApp {
   }
 
   tryCastSpell(slot, spellConfig) {
+    if (this._sessionLoading || !this.localPlayer) return;
     if (!this.cooldowns.isReady(slot)) return;
-    if (this.localPlayer.mana < spellConfig.mana) {
+    const predictedCost=Math.max(0,(spellConfig.mana || 0)-(spellConfig.element === 'fire' ? this.localPlayer.fireCostReduction || 0 : 0));
+    if (this.localPlayer.mana < predictedCost) {
       this.particles.spawnFloatingText(this.localPlayer.position, 'NOT ENOUGH MANA!', '#448aff');
       return;
     }
 
     const derived = this.inventory.getDerivedStats();
     this.cooldowns.trigger(slot, spellConfig.cd, derived.cdr);
-    this.localPlayer.mana = Math.max(0, this.localPlayer.mana - (spellConfig.mana || 0));
+    this.localPlayer.mana = Math.max(0, this.localPlayer.mana - predictedCost);
 
     const dir = this.physics.updateCrosshairAim();
     const origin = this.engineScene.camera.position.clone();
@@ -1635,6 +1952,7 @@ class GameApp {
   }
 
   tryJump() {
+    if (this._sessionLoading || !this.localPlayer) return;
     if (!this.isGrounded) return;
     this.isGrounded = false;
     this.playerVelocityY = 8.5; // Crisp, responsive upward leap
@@ -1645,6 +1963,7 @@ class GameApp {
   }
 
   tryDash() {
+    if (this._sessionLoading || !this.localPlayer) return;
     if (!this.cooldowns.isReady('dash')) return;
     if (this.localPlayer.mana < 15) return;
 
@@ -1676,6 +1995,7 @@ class GameApp {
   }
 
   tryInteract() {
+    if (this._sessionLoading || !this.localPlayer) return;
     if (this.puzzleArena && this.localPlayer) {
       const pRes = this.puzzleArena.interactPedestal(this.localPlayer.position);
       if (pRes && pRes.handled) {
@@ -1802,6 +2122,13 @@ class GameApp {
 
   loop(currentTime) {
     requestAnimationFrame((t) => this.loop(t));
+    // The loading screen has its own DOM animation. Rendering the hidden
+    // world competes with GPU uploads and can also expire warm-up effects.
+    if (this._preparingCore || this._sessionLoading) {
+      this.lastTime = currentTime;
+      this._performanceTime = currentTime;
+      return;
+    }
 
     // Target Frame Rate Limiter (60, 120, 144, 240 Hz or Unlimited)
     if (this.targetFps > 0) {
@@ -1818,7 +2145,9 @@ class GameApp {
 
     const deltaTime = Math.min(0.1, (currentTime - this.lastTime) / 1000);
     this.lastTime = currentTime;
-    this.engineScene.updatePerformance(deltaTime);
+    const frameDeltaMs = Math.max(0, currentTime - (this._performanceTime || currentTime - 16.7));
+    this.engineScene.updatePerformance(Math.min(1, frameDeltaMs / 1000), frameDeltaMs);
+    this._performanceTime = currentTime;
     this.spellVfx?.update(deltaTime, {
       quality: this.ui.settings.graphicsQuality || 'balanced',
       reducedMotion: Boolean(this.ui.settings.reducedVfx)
@@ -1837,20 +2166,26 @@ class GameApp {
         this._lowFpsCounter = (this._lowFpsCounter || 0) + 1;
         if (this._lowFpsCounter >= 3) {
           this._hasAdaptedPerformance = true;
-          this.engineScene.setGraphicsQuality('performance');
-          this.ui.settings.graphicsQuality = 'performance';
-          this.ui.saveSettings();
-          const btnGfxPerf = document.getElementById('btn-gfx-perf');
-          const btnGfxBal = document.getElementById('btn-gfx-balanced');
-          if (btnGfxPerf && btnGfxBal) {
-            btnGfxPerf.classList.add('active');
-            btnGfxBal.classList.remove('active');
-          }
-          this.ui.showStoryMessage('⚡ Auto-adapted to High-Performance mode (60+ FPS)');
+          // The render controller already lowers resolution from its p95
+          // frame-time window. Keep material/post-process variants stable
+          // during play so this warning cannot cause a shader hitch of its
+          // own; the player can still opt into Performance in Settings.
+          this.ui.showStoryMessage('Adaptive resolution engaged to stabilize frame pacing.');
         }
       } else if (this.currentFps >= 45) {
         this._lowFpsCounter = 0;
       }
+    }
+
+    if (typeof window !== 'undefined' && currentTime - this._lastDiagnosticsAt >= 1000) {
+      this._lastDiagnosticsAt = currentTime;
+      window.__spirePerf = {
+        fps: this.currentFps,
+        render: this.engineScene.getPerformanceInfo?.(),
+        assets: assetLoader.getStats?.(),
+        streaming: { ...this.chunkLoader.streamStats },
+        session: this._sessionMetrics ? { ...this._sessionMetrics } : null
+      };
     }
 
     this.animations.update(deltaTime);
@@ -1863,7 +2198,7 @@ class GameApp {
     // Tower animated props (torches, orrery, chandeliers, cauldrons, etc.)
     if (this.tower.updateProps) this.tower.updateProps(deltaTime);
 
-    if (this.isGameActive && this.localPlayer) {
+    if (this.isGameActive && !this._sessionLoading && this.localPlayer) {
       this.gameTime += deltaTime;
 
       // Update 3D Proximity Voice Chat spatial panning and distance rolloff
@@ -1876,8 +2211,16 @@ class GameApp {
 
       if (this.localPlayer.isAlive && !this.isDead) {
         const derived = this.inventory.getDerivedStats();
-        this.localPlayer.maxHealth = derived.maxHealth;
-        this.localPlayer.maxMana = derived.maxMana;
+        if (currentTime > (this.nextAttributeSync || 0)) {
+          this.nextAttributeSync = currentTime + 500;
+          const signature = JSON.stringify(derived.attributes);
+          if (signature !== this.lastAttributeSignature) {
+            this.lastAttributeSignature = signature;
+            onlineNetwork.syncProfile({level:this.progression.level,xp:this.progression.xp,attributes:derived.attributes});
+          }
+        }
+        // Maximum resources and movement include server-owned talent bonuses.
+        const moveSpeed = this.localPlayer.speed || derived.moveSpeed;
 
         // Low-health heartbeat pulse
         const hpRatio = this.localPlayer.health / (this.localPlayer.maxHealth || 1);
@@ -1896,14 +2239,14 @@ class GameApp {
         this.localPlayer.isMoving = moveVec.lengthSq() > 0;
 
         if (this.localPlayer.isMoving) {
-          this.localPlayer.position.addScaledVector(moveVec, derived.moveSpeed * deltaTime);
+          this.localPlayer.position.addScaledVector(moveVec, moveSpeed * deltaTime);
           const maxRadius = this.tower.currentFloor === 2 ? 64.0 : (this.tower.currentFloor === 3 ? 43.0 : 21.0);
           this.physics.resolveCollision(this.localPlayer.position, 0.7, this.tower.colliders, maxRadius, this.tower.currentFloor);
 
           // Footstep audio synchronization
           if (this.isGrounded) {
             this.footstepTimer += deltaTime;
-            const cadence = 0.36 / Math.max(0.5, derived.moveSpeed / 6.0);
+            const cadence = 0.36 / Math.max(0.5, moveSpeed / 6.0);
             if (this.footstepTimer >= cadence) {
               this.footstepTimer = 0;
               const surface = this.currentFloor === 2 ? 'metal' : (this.currentFloor === 3 ? 'crystal' : 'stone');
@@ -1935,7 +2278,7 @@ class GameApp {
         // Standard gamepad mapping: A/basic, B/Q, X/E, Y/R, LB/dash, RB/interact.
         const padPress = index => this.physics.consumeGamepadPress?.(index);
         const pad = this.physics.gamepad;
-        const spells = CLASS_SPELLS[this.localPlayer.wizardClass] || CLASS_SPELLS.pyromancer;
+        const spells = getEquippedSpells(this.localPlayer);
         if (padPress(1)) this.tryCastSpell('skill1', spells.skill1);
         if (padPress(2)) this.tryCastSpell('skill2', spells.skill2);
         if (padPress(3)) this.tryCastSpell('ult', spells.ult);
@@ -2102,7 +2445,7 @@ class GameApp {
           if (!enemy.isAlive) continue;
           const dist = projectile.mesh.position.distanceTo(enemy.position);
           if (dist < 1.9) {
-            onlineNetwork.hitEnemy(enemy.id, projectile.spellType === 'ult' ? 140 : 50, projectile.element);
+            if (!projectile.visualOnly) onlineNetwork.hitEnemy(enemy.id, projectile.spellType === 'ult' ? 140 : 50, projectile.element);
             this.ui.triggerHitmarker();
             return true;
           }
@@ -2111,7 +2454,7 @@ class GameApp {
         if (this.boss && this.boss.isAlive) {
           const bossDist = projectile.mesh.position.distanceTo(this.boss.position);
           if (bossDist < 2.6) {
-            onlineNetwork.hitEnemy(this.boss.id, projectile.spellType === 'ult' ? 140 : 50, projectile.element);
+            if (!projectile.visualOnly) onlineNetwork.hitEnemy(this.boss.id, projectile.spellType === 'ult' ? 140 : 50, projectile.element);
             this.ui.triggerHitmarker();
             return true;
           }
@@ -2164,6 +2507,7 @@ class GameApp {
         return false;
       },
       (vortex) => {
+        if (vortex.visualOnly) return;
         if (vortex.type === 'fire_tornado') {
           for (const enemy of this.enemies.values()) {
             if (!enemy.isAlive) continue;

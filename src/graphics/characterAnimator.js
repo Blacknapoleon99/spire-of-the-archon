@@ -39,13 +39,15 @@ export class CharacterAnimator {
       model.position.y = this.options.yOffset;
 
       model.traverse((child) => {
+        if (child.isLight) child.visible = false;
         if (child.isMesh) {
           if (this.options.shadow) {
             child.castShadow = true;
             child.receiveShadow = true;
           }
           if (child.material) {
-            child.material.needsUpdate = true;
+            // Clones share the cached materials. Spawning another actor must
+            // not invalidate shader state for every existing instance.
             if (child.material.emissive) {
               child.material.emissiveIntensity = child.material.emissiveIntensity || 1.0;
             }

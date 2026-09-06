@@ -36,6 +36,7 @@ export class BossEntity {
       this.mesh = ModelFactory.createBossMesh();
     }
 
+    this.mesh.traverse(object => { if (object.isLight) object.visible = false; });
     this.mesh.position.copy(this.position);
     this.scene.add(this.mesh);
 
@@ -46,7 +47,7 @@ export class BossEntity {
       yOffset: 0
     });
 
-    this.animator.init().then(() => {
+    this.ready = this.animator.init().then(() => {
       this.animator.onReady((anim) => {
         if (this.destroyed) {
           anim.dispose();

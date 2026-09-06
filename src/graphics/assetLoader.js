@@ -4,6 +4,9 @@ import { DRACOLoader } from 'three/addons/loaders/DRACOLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
+// Unfingerprinted GLBs otherwise remain in browser caches across deployments.
+const runtimeAssetUrl = url => url.startsWith('/models/') ? `${url}${url.includes('?') ? '&' : '?'}v=20260905-clarity2` : url;
+
 /**
  * High-performance AssetLoader for local 3D .glb models.
  * Loads, caches, and clones textured 3D meshes with soft shadows and PBR lighting.
@@ -25,11 +28,20 @@ export class AssetLoader {
     this.loadingPromises = new Map();
     this.rawLoadingPromises = new Map();
     this.stats = { requests: 0, cacheHits: 0, bytesHint: 0, meshes: 0, materials: 0 };
+    this.gpuReadyTextures = new WeakSet();
+    this.gpuMetrics = {
+      lastPrepareMs: 0,
+      lastCompileMs: 0,
+      texturesUploaded: 0,
+      materialsCompiled: 0,
+      batches: 0
+    };
   }
 
   configureRenderer(renderer) {
     if (!renderer || this.renderer === renderer) return;
     this.renderer = renderer;
+    this.gpuReadyTextures = new WeakSet();
     try {
       // KTX2 transcoding needs the active WebGL capabilities. This is a
       // no-op for existing uncompressed assets and makes optimized local GLBs
@@ -49,10 +61,13 @@ export class AssetLoader {
     if (this.loadingPromises.has(url)) {
       return this.loadingPromises.get(url).then(scene => scene.clone());
     }
+    if (this.rawLoadingPromises.has(url)) {
+      return this.rawLoadingPromises.get(url).then(gltf => gltf.scene.clone());
+    }
 
     const p = new Promise((resolve, reject) => {
       this.loader.load(
-        url,
+        runtimeAssetUrl(url),
         (gltf) => {
           gltf.scene.traverse((child) => {
             if (child.isMesh) {
@@ -66,6 +81,8 @@ export class AssetLoader {
             }
           });
           this.cache.set(url, gltf.scene);
+          if (!this.rawCache) this.rawCache = new Map();
+          this.rawCache.set(url, gltf);
           resolve(gltf.scene.clone());
         },
         undefined,
@@ -97,10 +114,13 @@ export class AssetLoader {
       return Promise.resolve(this.rawCache.get(url));
     }
     if (this.rawLoadingPromises.has(url)) return this.rawLoadingPromises.get(url);
+    if (this.loadingPromises.has(url)) {
+      return this.loadingPromises.get(url).then(() => this.rawCache.get(url));
+    }
 
     const promise = new Promise((resolve, reject) => {
       this.loader.load(
-        url,
+        runtimeAssetUrl(url),
         (gltf) => {
           gltf.scene.traverse((child) => {
             if (child.isMesh) {
@@ -128,7 +148,20 @@ export class AssetLoader {
   }
 
   getStats() {
-    return { ...this.stats, cachedModels: this.cache.size, pending: this.loadingPromises.size + this.rawLoadingPromises.size };
+    return {
+      ...this.stats,
+      cachedModels: this.cache.size,
+      pending: this.loadingPromises.size + this.rawLoadingPromises.size,
+      gpu: { ...this.gpuMetrics }
+    };
+  }
+
+  /** Return logical URLs whose decoded roots are resident in the shared cache. */
+  getCachedUrls() {
+    return [...new Set([
+      ...this.cache.keys(),
+      ...(this.rawCache ? this.rawCache.keys() : [])
+    ])];
   }
 
   /**
@@ -169,7 +202,7 @@ export class AssetLoader {
           .catch(() => ({}))
           .then(manifest => Promise.all((Array.isArray(manifest.players) ? manifest.players : [])
             .filter(classId => ['pyromancer', 'cryomancer', 'luminary', 'chronomancer'].includes(classId))
-            .map(classId => this.loadGLTF(`/models/player_${classId}.glb`))))
+            .map(classId => this.loadGLTF(classId === 'cryomancer' ? '/models/player_sunsteel_vanguard.glb' : `/models/player_${classId}.glb`))))
       : Promise.resolve([]);
     return Promise.allSettled([...floor1Urls.map(u => this.loadGLTF(u)), optional]);
   }
@@ -181,6 +214,70 @@ export class AssetLoader {
       '/models/gatehouse.glb'
     ];
     return Promise.allSettled(floor2Urls.map(u => this.loadGLTF(u)));
+  }
+
+  async prepareCoreGPU(renderer, camera, worldScene, options = {}) {
+    // Decoding a GLB only prepares CPU data. Upload only the requested critical
+    // roots before play; deferred floors must never extend the first-frame gate.
+    const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const config = Array.isArray(options) ? { urls: options } : (options || {});
+    const requested = Array.isArray(config.urls) && config.urls.length
+      ? new Set(config.urls)
+      : null;
+    const uploadBudgetMs = Math.max(1, Number(config.uploadBudgetMs) || 4);
+    const staging = new THREE.Scene();
+    const roots = new Set();
+    const cached = requested
+      ? [...requested].map(url => this.cache.get(url) || this.rawCache?.get(url)?.scene).filter(Boolean)
+      : [...this.cache.values(), ...(this.rawCache ? [...this.rawCache.values()].map(gltf => gltf.scene) : [])];
+    cached.forEach(root => roots.add(root));
+    const textures = new Set();
+    let materialCount = 0;
+    for (const root of roots) {
+      if (!root) continue;
+      staging.add(root.clone(true));
+      root.traverse(object => {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materialCount += materials.filter(Boolean).length;
+        for (const material of materials) {
+          for (const value of Object.values(material || {})) if (value?.isTexture) textures.add(value);
+        }
+      });
+    }
+    let batchStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    let uploaded = 0;
+    let batchCount = textures.size ? 1 : 0;
+    for (const texture of textures) {
+      if (!this.gpuReadyTextures.has(texture)) {
+        renderer.initTexture?.(texture);
+        this.gpuReadyTextures.add(texture);
+        uploaded += 1;
+      }
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now - batchStarted >= uploadBudgetMs) {
+        // Let the loading UI paint between upload batches. During gameplay the
+        // same yield keeps deferred work from monopolizing the main thread.
+        await new Promise(resolve => {
+          if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => resolve());
+          else setTimeout(resolve, 0);
+        });
+        batchStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        batchCount += 1;
+      }
+    }
+    const compileStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (renderer.compileAsync) await renderer.compileAsync(staging, camera, worldScene);
+    else renderer.compile(staging, camera, worldScene);
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    this.gpuMetrics = {
+      lastPrepareMs: now - started,
+      lastCompileMs: now - compileStarted,
+      texturesUploaded: uploaded,
+      materialsCompiled: materialCount,
+      batches: batchCount
+    };
+    staging.clear(); // Shared cached geometry/materials must not be disposed.
+    return { ...this.gpuMetrics, roots: roots.size, textures: textures.size };
   }
 
   preloadFloor3() {

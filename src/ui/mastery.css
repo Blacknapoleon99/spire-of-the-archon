@@ -1,0 +1,15 @@
+/* An indexed spell atlas: quiet vellum text, oxidized bronze, elemental ink. */
+#grimoire-modal .modal-card, #talent-modal .modal-card { width:min(1180px,94vw); max-height:88vh; overflow-y:auto; }
+.mastery-loadout { grid-column:1/-1; padding:18px; background:#182b32; border:1px solid #697e80; color:#f0e5c9; }
+.mastery-loadout h3 { margin:0 0 8px; font-family:Georgia,serif; }
+.mastery-loadout p { color:#bdcacc; font-size:13px; line-height:1.6; }
+.mastery-loadout button, .mastery-actions button { padding:8px 10px; margin:3px; border:1px solid #9a8252; border-radius:4px; color:#f0e5c9; background:#24343e; cursor:pointer; font:inherit; font-size:12px; }
+.mastery-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; max-width:220px; }
+.mastery-actions button:disabled { opacity:.45; cursor:default; }
+.mastery-actions button:focus-visible, .mastery-loadout button:focus-visible { outline:2px solid #89d5cf; outline-offset:3px; }
+.mastery-heading { grid-column:1/-1; color:#d0ba82; font:small-caps 18px Georgia,serif; border-bottom:1px solid #65583e; padding:12px 0 6px; margin:8px 0; }
+.grimoire-spell-card .spell-grimoire-icon { width:42px; height:42px; flex-shrink:0; }
+.grimoire-spell-card .spell-info small { color:#b8c7cc; font-size:10px; white-space:nowrap; }
+.grimoire-spell-card .spell-info { min-width:0; }
+@media(max-width:600px) { .grimoire-spell-card { flex-wrap:wrap; } .mastery-actions { max-width:none; width:100%; } }
+@media(prefers-reduced-motion:reduce) { .grimoire-spell-card, .talent-node-card { transition:none; animation:none; } }

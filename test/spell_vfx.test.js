@@ -6,7 +6,7 @@ import { SPELL_VFX_PROFILES, getSpellVfxProfile, hashVfxSeed } from '../src/grap
 
 test('every live class spell has a dedicated VFX profile', () => {
   const ids = Object.values(CLASS_SPELL_IDS).flat();
-  assert.equal(ids.length, 16);
+  assert.equal(ids.length, 112);
   for (const spellId of ids) {
     const profile = getSpellVfxProfile(spellId);
     assert.equal(profile, SPELL_VFX_PROFILES[spellId]);

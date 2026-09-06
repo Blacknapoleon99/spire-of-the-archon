@@ -1,7 +1,8 @@
 import { CLASS_IDS, getDifficulty, getFloorObjective, MAX_FLOORS } from '../src/shared/gameData.js';
-import { CLASS_SPELL_IDS, PLAYER_CLASS_CONFIG, SPELL_RULES, clampNumber, getSpellRule, sanitizeDirection } from '../src/shared/combatRules.js';
+import { CLASS_SPELL_IDS, FIRE_TORNADO_CONFIG, PLAYER_CLASS_CONFIG, SPELL_RULES, clampNumber, getSpellRule, sanitizeDirection } from '../src/shared/combatRules.js';
 import { getAllClassTalents } from '../src/systems/talents.js';
-import { firstWorldHitAlongRay, getWorldFloorConfig, resolveGroundTarget } from '../src/shared/worldCollision.js';
+import { ADVANCED_BY_ID, sanitizeMastery, masteryBudget } from '../src/shared/spellMastery.js';
+import { firstWorldHit, firstWorldHitAlongRay, getWorldFloorConfig, resolveGroundTarget } from '../src/shared/worldCollision.js';
 
 const GROUND_AIMED_SPELLS = new Set(['fire_tornado', 'frost_nova', 'divine_sanctuary', 'time_dilation', 'temporal_stasis']);
 const FIELD_DAMAGE_SPELLS = new Set(['fire_tornado', 'frost_nova', 'time_dilation', 'temporal_stasis']);
@@ -347,6 +348,9 @@ export class GameState {
     this.enemies.clear();
     this.projectiles = [];
     this.activeHazards = [];
+    // Persistent spell fields belong to the floor encounter that spawned
+    // them; never let a retry/transition carry an old tornado into a new map.
+    this.masteryFields = [];
     this.currentQuiz = null;
     this.quizVotes.clear();
     this.lastHitAt.clear();
@@ -689,6 +693,7 @@ export class GameState {
       mana: config.maxMana,
       maxMana: config.maxMana,
       talentPoints: 1,
+      learnedSpells: [], equippedSpells: {}, skillPoints: 2,
       level: 1,
       xp: 0,
       talents: {
@@ -741,6 +746,11 @@ export class GameState {
       mastery: clampNumber(attributes.mastery, 0, 999, 10)
     };
     player.level = level;
+    if (level > (player.progressionRewardLevel || 1)) {
+      player.talentPoints += Math.floor(level) - (player.progressionRewardLevel || 1);
+      player.progressionRewardLevel = Math.floor(level);
+    }
+    Object.assign(player, sanitizeMastery(player.wizardClass, level, profile.learnedSpells ?? player.learnedSpells, profile.equippedSpells ?? player.equippedSpells));
     player.xp = xp;
     player.attributes = bounded;
     player.speed = (PLAYER_CLASS_CONFIG[player.wizardClass]?.speed || player.speed || 6.5) + bounded.haste * 0.035;
@@ -752,14 +762,18 @@ export class GameState {
     player.cooldownMultiplier = Math.max(0.55, 1 - bounded.haste * 0.003 - bounded.mastery * 0.001);
     const currentHealth = Number.isFinite(Number(player.health)) ? Number(player.health) : player.maxHealth;
     const currentMana = Number.isFinite(Number(player.mana)) ? Number(player.mana) : player.maxMana;
-    player.health = Math.min(player.maxHealth, Math.max(0, currentHealth));
-    player.mana = Math.min(player.maxMana, Math.max(0, currentMana));
-    if (profile.talents && typeof profile.talents === 'object') {
-      const requested = profile.talents;
+    player.health = Math.max(0, currentHealth);
+    player.mana = Math.max(0, currentMana);
+    {
+      const requested = profile.talents && typeof profile.talents === 'object' ? profile.talents : player.talents;
+      for (const talent of getAllClassTalents(player.wizardClass)) for (const key of Object.keys(talent.stats || {})) {
+        if (!['maxHealth', 'maxMana', 'speed'].includes(key)) delete player[key];
+      }
       const unlocked = {};
-      const maxUnlocks = Math.min(24, Math.max(1, Math.floor(level) + 3));
+      const maxUnlocks = Math.min(24, Math.max(1, Math.floor(level) + 8));
       for (const talent of getAllClassTalents(player.wizardClass)) {
         if (Object.keys(unlocked).length >= maxUnlocks || !requested[talent.key]) continue;
+        if (level < (talent.level || 1)) continue;
         if (talent.requires && !unlocked[talent.requires]) continue;
         unlocked[talent.key] = true;
         this.applyTalentPassive(player, talent.key);
@@ -768,6 +782,8 @@ export class GameState {
       const requestedPoints = clampNumber(profile.talentPoints, 0, 32, Math.max(0, player.talentPoints || 0));
       player.talentPoints = Math.min(requestedPoints, Math.max(0, level + 8 - Object.keys(unlocked).length));
     }
+    player.health = Math.min(player.maxHealth, player.health);
+    player.mana = Math.min(player.maxMana, player.mana);
     this.io.to(socketId).emit('profile_applied', {
       level: player.level,
       xp: player.xp,
@@ -776,7 +792,8 @@ export class GameState {
       speed: player.speed,
       attributes: player.attributes,
       talents: player.talents,
-      talentPoints: player.talentPoints
+      talentPoints: player.talentPoints,
+      learnedSpells: player.learnedSpells, equippedSpells: player.equippedSpells, skillPoints: player.skillPoints
     });
     return true;
   }
@@ -931,7 +948,7 @@ export class GameState {
   resolveSpellWorldData(spellId, rule, origin, direction) {
     const colliders = this.getServerSpellColliders();
     const config = getWorldFloorConfig(this.floor);
-    if (GROUND_AIMED_SPELLS.has(spellId)) {
+    if (GROUND_AIMED_SPELLS.has(spellId) || rule.kind === 'field') {
       const ground = resolveGroundTarget(origin, direction, spellId === 'time_dilation' ? 7 : 10, {
         floor: this.floor,
         config,
@@ -948,7 +965,7 @@ export class GameState {
       };
     }
 
-    const ranged = Boolean(rule?.range) && !SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION.has(spellId);
+    const ranged = Boolean(rule?.range) && !['ward', 'heal', 'wave'].includes(rule.kind) && !SUPPORT_SPELLS_WITHOUT_WORLD_COLLISION.has(spellId);
     if (!ranged) return { target: null, worldImpact: null };
     const hit = firstWorldHitAlongRay(origin, direction, rule.range, {
       floor: this.floor,
@@ -974,6 +991,10 @@ export class GameState {
     const spell = spellData && typeof spellData.spellId === 'string' ? spellData.spellId : '';
     const rule = getSpellRule(spell, player.wizardClass);
     if (!rule || !CLASS_SPELL_IDS[player.wizardClass]?.includes(spell)) return;
+    if (ADVANCED_BY_ID[spell] && (!player.learnedSpells?.includes(spell) || !Object.values(player.equippedSpells || {}).includes(spell))) {
+      this.io.to(socketId).emit('action_rejected', { action: 'cast_spell', reason: 'spell_not_equipped' });
+      return;
+    }
 
     const now = Date.now();
     const cooldowns = this.playerCooldowns.get(socketId) || new Map();
@@ -1012,7 +1033,9 @@ export class GameState {
       : { x: player.x, y: player.y + 1.7, z: player.z };
     const direction = sanitizeDirection(spellData?.direction);
     const worldData = this.resolveSpellWorldData(spell, rule, origin, direction);
-    const serverDamage = Math.round(rule.damage
+    const family = rule.kind || (GROUND_AIMED_SPELLS.has(spell) ? 'field' : rule.shield ? 'ward' : rule.aoeHeal ? 'wave' : rule.heal ? 'heal' : rule.aoeRadius ? 'burst' : 'lance');
+    const familyScale = 1 + clampNumber(player[`${family}Bonus`], 0, 1, 0);
+    const serverDamage = Math.round(rule.damage * familyScale
       * clampNumber(player.spellPowerMultiplier, 0.5, 4, 1)
       * (1 + clampNumber(player.spellPowerBonus, 0, 1, 0)));
     player.lastSpell = {
@@ -1044,17 +1067,185 @@ export class GameState {
     });
 
     // Resolve non-projectile support effects on the authority immediately.
-    if (rule.heal) this.applyPlayerHeal(player, rule.heal * (Number(player.healingMultiplier) || 1) * (1 + clampNumber(player.healingPowerBonus, 0, 1, 0)), 'self', rule.element);
-    if (rule.aoeHeal || rule.regenAura) this.applyPartyEffect(player, rule);
+    if (rule.heal) this.applyPlayerHeal(player, rule.heal * familyScale * (Number(player.healingMultiplier) || 1) * (1 + clampNumber(player.healingPowerBonus, 0, 1, 0)), 'self', rule.element);
+    if ((rule.aoeHeal || rule.regenAura) && family !== 'field') this.applyPartyEffect(player, { ...rule, aoeHeal: rule.aoeHeal ? rule.aoeHeal * familyScale : undefined });
     if (rule.shield) {
-      player.shield = Math.max(Number(player.shield) || 0, rule.shield);
+      player.shield = Math.max(Number(player.shield) || 0, rule.shield * familyScale);
       player.statusEffects.shield = { amount: player.shield, expiresAt: now + (rule.duration || 5) * 1000 };
       this.io.to(this.roomId).emit('player_effect', { playerId: player.id, effect: 'shield', amount: player.shield, duration: rule.duration || 5 });
+    }
+    // Advanced impacts are resolved on the authority, never from client damage claims.
+    if ((ADVANCED_BY_ID[spell] || family === 'field') && (rule.damage > 0 || rule.regenAura)) {
+      if (family === 'field') {
+        this.masteryFields ||= [];
+        if (this.masteryFields.length < 32) this.masteryFields.push({
+          owner: socketId,
+          cast: { ...player.lastSpell },
+          until: now + (rule.duration || rule.stasis || rule.freeze || 3) * 1000,
+          next: now,
+          floor: this.floor,
+          // Boss pull is capped per field; keep this bookkeeping server-only.
+          pullDistanceByEnemy: new Map()
+        });
+      } else this.resolveMasteryImpact(player, rule);
     }
 
     // Check interaction with Floor 2 crucibles
     if (this.floor === 2 && spellData.targetType === 'crucible') {
       this.handleCrucibleInteraction(spellData.crucibleIndex, rule.element, socketId);
+    }
+  }
+
+  changeMastery(socketId, { action, spellId, slot } = {}) {
+    const player = this.players.get(socketId);
+    if (!player || !player.isAlive || player.connected === false) return false;
+    const spell = ADVANCED_BY_ID[spellId];
+    if (action === 'learn') {
+      if (!spell || !CLASS_SPELL_IDS[player.wizardClass].includes(spellId) || spell.level > player.level || player.learnedSpells.includes(spellId) || player.learnedSpells.length >= masteryBudget(player.level)) return false;
+      player.learnedSpells.push(spellId);
+    } else if (action === 'equip') {
+      if (!['skill1', 'skill2', 'ult'].includes(slot) || (spellId && !player.learnedSpells.includes(spellId))) return false;
+      // Loadout swapping cannot bypass cooldowns.
+      if ([...(this.playerCooldowns.get(socketId)?.values() || [])].some(until => until > Date.now())) return false;
+      if (spellId) player.equippedSpells[slot] = spellId;
+      else delete player.equippedSpells[slot];
+    } else return false;
+    player.skillPoints = masteryBudget(player.level) - player.learnedSpells.length;
+    this.io.to(socketId).emit('mastery_updated', { learnedSpells: player.learnedSpells, equippedSpells: player.equippedSpells, skillPoints: player.skillPoints });
+    return true;
+  }
+
+  resolveMasteryImpact(player, rule) {
+    const cast = player.lastSpell;
+    const origin = cast.origin, direction = cast.direction;
+    let center = cast.target || cast.worldImpact?.point;
+    if (rule.kind !== 'field' && !GROUND_AIMED_SPELLS.has(cast.id)) {
+      let nearest = Math.min(rule.range || 36, cast.worldImpact?.distance ?? Infinity);
+      let target = null;
+      for (const enemy of this.enemies.values()) {
+        if (!enemy.isAlive) continue;
+        const dx=enemy.x-origin.x, dy=(enemy.y || 0)+1-origin.y, dz=enemy.z-origin.z;
+        const along=dx*direction.x+dy*direction.y+dz*direction.z;
+        const lateral=Math.hypot(dx-direction.x*along, dy-direction.y*along, dz-direction.z*along);
+        if (along >= 0 && along < nearest && lateral < 1.8) { target=enemy; nearest=along; }
+      }
+      center = { x: origin.x+direction.x*nearest, y: origin.y+direction.y*nearest, z: origin.z+direction.z*nearest };
+      if (target && !rule.aoeRadius) this.handleDamageToEnemy(target.id, cast.damage, rule.element, player.id, true);
+      if (!rule.aoeRadius) return;
+    }
+    if (!center) return;
+    for (const enemy of this.enemies.values()) {
+      if (!enemy.isAlive || Math.hypot(enemy.x-center.x, enemy.z-center.z) > (rule.aoeRadius || 3)) continue;
+      const delta={x:enemy.x-center.x,y:(enemy.y||0)+1-(center.y+0.2),z:enemy.z-center.z};
+      const distance=Math.hypot(delta.x,delta.y,delta.z);
+      const occlusion=firstWorldHitAlongRay({...center,y:center.y+0.2},{x:delta.x/(distance||1),y:delta.y/(distance||1),z:delta.z/(distance||1)},distance,{floor:this.floor,colliders:this.getServerSpellColliders(),radius:0.05});
+      if (!occlusion || occlusion.distance >= distance-0.3) this.handleDamageToEnemy(enemy.id,cast.damage,rule.element,player.id,true);
+    }
+  }
+
+  updateMasteryFields(now) {
+    this.masteryFields = (this.masteryFields || []).filter(field => field.until > now && field.floor === this.floor);
+    for (const field of this.masteryFields) {
+      const owner=this.players.get(field.owner);
+      if (!owner?.isAlive || owner.connected === false || now < field.next) continue;
+      field.next=now+500;
+      const current=owner.lastSpell;
+      owner.lastSpell={...field.cast,at:now};
+      const rule=SPELL_RULES[field.cast.id];
+      if(rule.regenAura) {
+        for(const ally of this.players.values()) if(Math.hypot(ally.x-field.cast.target.x,ally.z-field.cast.target.z)<=rule.aoeRadius) this.applyPlayerHeal(ally,4*(1+(owner.healingPowerBonus||0))*(1+(owner.fieldBonus||0)),'field',rule.element);
+      } else this.resolveMasteryImpact(owner,rule);
+      owner.lastSpell=current;
+    }
+  }
+
+  /**
+   * Apply the base Fire Tornado's gentle inward force after enemy AI has
+   * moved.  This is intentionally server-owned: clients may animate a
+   * vortex, but only this segment-checked displacement reaches snapshots.
+   *
+   * A pull is a short movement segment, never a position assignment.  The
+   * world collision helper inflates walls by the enemy's radius and trims a
+   * blocked segment before the first hit, so a tornado cannot pull an enemy
+   * through an interior blocker or the room boundary.
+   */
+  updateFireTornadoSuction(deltaTime, now = Date.now()) {
+    const fields = this.masteryFields || [];
+    if (!fields.length) return;
+    const dt = clampNumber(deltaTime, 0, 0.25, 0);
+    if (dt <= 0) return;
+
+    const config = getWorldFloorConfig(this.floor);
+    const colliders = this.getServerSpellColliders();
+    const radius = FIRE_TORNADO_CONFIG.suctionRadius;
+    const restDistance = FIRE_TORNADO_CONFIG.suctionRestDistance;
+    const maxStep = FIRE_TORNADO_CONFIG.suctionMaxStep;
+    const radiusSpan = Math.max(0.001, radius - restDistance);
+
+    for (const field of fields) {
+      if (field.floor !== this.floor || field.until <= now || field.cast?.id !== 'fire_tornado') continue;
+      const owner = this.players.get(field.owner);
+      const center = field.cast?.target;
+      if (!owner?.isAlive || owner.connected === false || !center) continue;
+      if (!Number.isFinite(Number(center.x)) || !Number.isFinite(Number(center.z))) continue;
+
+      field.pullDistanceByEnemy ||= new Map();
+      for (const enemy of this.enemies.values()) {
+        if (!enemy.isAlive) continue;
+
+        const dx = Number(center.x) - Number(enemy.x);
+        const dz = Number(center.z) - Number(enemy.z);
+        const distance = Math.hypot(dx, dz);
+        if (!Number.isFinite(distance) || distance <= restDistance || distance > radius) continue;
+
+        const isBoss = enemy.type === 'boss';
+        const forceScale = isBoss ? FIRE_TORNADO_CONFIG.suctionBossMultiplier : 1;
+        if (forceScale <= 0) continue;
+        const alreadyPulled = Number(field.pullDistanceByEnemy.get(enemy.id) || 0);
+        const remainingBossPull = isBoss
+          ? Math.max(0, FIRE_TORNADO_CONFIG.suctionBossMaxDistance - alreadyPulled)
+          : Infinity;
+        if (remainingBossPull <= 0) continue;
+
+        // Fall off smoothly as an enemy reaches the tornado's center.  The
+        // hard step cap remains in force even if a caller supplies a large
+        // deltaTime, preventing a test hitch or stalled tab from snapping it.
+        const falloff = Math.max(0, Math.min(1, (distance - restDistance) / radiusSpan));
+        let travel = Math.min(
+          maxStep,
+          FIRE_TORNADO_CONFIG.suctionSpeed * forceScale * dt * falloff,
+          distance - restDistance,
+          remainingBossPull
+        );
+        if (travel <= 0) continue;
+
+        const direction = { x: dx / distance, y: 0, z: dz / distance };
+        const start = { x: Number(enemy.x) || 0, y: Number(enemy.y) || 0, z: Number(enemy.z) || 0 };
+        const proposed = {
+          x: start.x + direction.x * travel,
+          y: start.y,
+          z: start.z + direction.z * travel
+        };
+        const collisionRadius = isBoss
+          ? Math.max(FIRE_TORNADO_CONFIG.suctionEnemyRadius, 1.25)
+          : FIRE_TORNADO_CONFIG.suctionEnemyRadius;
+        const obstruction = firstWorldHit(start, proposed, {
+          floor: this.floor,
+          config,
+          colliders,
+          radius: collisionRadius
+        });
+        if (obstruction && obstruction.distance < travel) {
+          // Leave a small margin outside the inflated collider; never move to
+          // the hit point itself where numerical drift could cross a wall.
+          travel = Math.max(0, obstruction.distance - 0.04);
+        }
+        if (travel <= 0) continue;
+
+        enemy.x = start.x + direction.x * travel;
+        enemy.z = start.z + direction.z * travel;
+        if (isBoss) field.pullDistanceByEnemy.set(enemy.id, alreadyPulled + travel);
+      }
     }
   }
 
@@ -1107,7 +1298,7 @@ export class GameState {
     return actual;
   }
 
-  handleDamageToEnemy(enemyId, damage, element, attackerId) {
+  handleDamageToEnemy(enemyId, damage, element, attackerId, authoritative = false) {
     const enemy = this.enemies.get(enemyId);
     if (!enemy || !enemy.isAlive) return;
     const attacker = this.players.get(attackerId);
@@ -1120,10 +1311,12 @@ export class GameState {
     if (!recentSpell) return;
     const hitKey = `${attackerId}:${enemyId}:${recentSpell.token}`;
     const lastHit = Number(this.lastHitAt.get(hitKey) || 0);
-    if (now - lastHit < 120) return;
-    this.lastHitAt.set(hitKey, now);
+    const fieldHit = FIELD_DAMAGE_SPELLS.has(recentSpell.id) || SPELL_RULES[recentSpell.id]?.kind === 'field';
+    if (lastHit && (!fieldHit || now-lastHit < 400)) return;
     const rule = SPELL_RULES[recentSpell.id];
     if (!rule || rule.damage <= 0) return;
+    if ((ADVANCED_BY_ID[recentSpell.id] || fieldHit) && !authoritative) return;
+    this.lastHitAt.set(hitKey, now);
 
     if (FIELD_DAMAGE_SPELLS.has(recentSpell.id) && recentSpell.target) {
       const fieldRadius = Number(rule.aoeRadius) || (recentSpell.id === 'time_dilation' ? 5.5 : 6.5);
@@ -1131,7 +1324,7 @@ export class GameState {
       if (fieldDistance > fieldRadius + 1.2) return;
     }
 
-    if (recentSpell.origin && recentSpell.direction && rule?.range) {
+    if (!authoritative && recentSpell.origin && recentSpell.direction && rule?.range) {
       const toTarget = { x: enemy.x - recentSpell.origin.x, y: enemy.y - recentSpell.origin.y, z: enemy.z - recentSpell.origin.z };
       const along = toTarget.x * recentSpell.direction.x + toTarget.y * recentSpell.direction.y + toTarget.z * recentSpell.direction.z;
       const nearest = {
@@ -1149,8 +1342,7 @@ export class GameState {
       });
       if (worldHit && along > worldHit.distance + 1.1) return;
     }
-    damage = Math.max(1, Math.min(300, Number(damage) || 1));
-    damage = Math.min(damage, Math.max(1, recentSpell.damage));
+    damage = Math.max(1, Math.min(300, recentSpell.damage));
     element = recentSpell.element;
 
     // Check boss shields during simultaneous combat puzzles
@@ -1788,6 +1980,11 @@ export class GameState {
 
   applyTalentPassive(player, talentKey) {
     if (!player) return;
+    const talent = getAllClassTalents(player.wizardClass).find(t => t.key === talentKey);
+    if (talent?.generic) {
+      for (const [key, value] of Object.entries(talent.stats)) player[key] = (Number(player[key]) || 0) + value;
+      return;
+    }
     // Pyromancer
     if (talentKey === 'pyro_ignite') { player.maxHealth += 35; player.health += 35; player.igniteBurn = true; }
     else if (talentKey === 'pyro_combustion') { player.maxMana += 45; player.mana += 45; player.deathExplosion = true; }
@@ -1834,6 +2031,10 @@ export class GameState {
     }
     if (talent.requires && !player.talents[talent.requires]) {
       this.io.to(socketId).emit('action_rejected', { action: 'upgrade_talent', reason: 'prerequisite_required', talentKey: key });
+      return false;
+    }
+    if (player.level < (talent.level || 1)) {
+      this.io.to(socketId).emit('action_rejected', {action:'upgrade_talent', reason:'level_required'});
       return false;
     }
 
@@ -1896,6 +2097,7 @@ export class GameState {
   tick(deltaTime) {
     this.serverTick += 1;
     const now = Date.now();
+    this.updateMasteryFields(now);
 
     // Boss fields are simulated by the authority. Clients render the
     // telegraph, but never decide whether a player was inside the damaging
@@ -1964,6 +2166,11 @@ export class GameState {
         this.updateStandardEnemyAI(enemy, closestPlayer, closestDist, aiDeltaTime);
       }
     }
+
+    // Resolve Fire Tornado movement after AI so the authoritative pull is the
+    // final enemy displacement for this tick (and is replicated in the next
+    // snapshot without clients deciding gameplay positions).
+    this.updateFireTornadoSuction(deltaTime, now);
 
     // Floor 10 Meltdown Fail-Safe Loop
     if (this.floor === 10 && this.puzzles.floor10?.meltdownActive) {

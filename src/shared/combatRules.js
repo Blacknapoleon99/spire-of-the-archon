@@ -4,19 +4,45 @@
  * cooldowns, effects and class access.
  */
 import { CLASS_IDS } from './gameData.js';
+import { ADVANCED_SPELLS, ADVANCED_BY_ID } from './spellMastery.js';
 
-export const CLASS_SPELL_IDS = Object.freeze({
+const BASE_CLASS_SPELL_IDS = Object.freeze({
   pyromancer: Object.freeze(['ember_bolt', 'fireball', 'flame_wave', 'fire_tornado']),
   cryomancer: Object.freeze(['frost_shard', 'ice_lance', 'glacial_bulwark', 'frost_nova']),
   luminary: Object.freeze(['sacred_spark', 'radiant_heal', 'cleansing_wave', 'divine_sanctuary']),
   chronomancer: Object.freeze(['chrono_dart', 'temporal_rewind', 'time_dilation', 'temporal_stasis'])
 });
+export const CLASS_SPELL_IDS = Object.freeze(Object.fromEntries(Object.entries(BASE_CLASS_SPELL_IDS).map(([cls, ids]) => [cls, Object.freeze([...ids, ...ADVANCED_SPELLS[cls].map(s => s.id)])])));
+
+// Fire Tornado is a persistent field, so its gameplay contract is shared by
+// the relay, browser spell bar and VFX profile.  The cooldown increase is
+// intentionally literal: the previous 12s base cooldown plus 10s = 22s.
+// Suction is deliberately a velocity-like effect rather than a teleport:
+// each server tick has a small movement cap and bosses have both reduced force
+// and a per-field distance cap.
+export const FIRE_TORNADO_CONFIG = Object.freeze({
+  mana: 60,
+  damage: 32,
+  element: 'fire',
+  cooldown: 22.0,
+  duration: 5.0,
+  aoeRadius: 5.0,
+  tickRate: 0.5,
+  suctionRadius: 5.0,
+  suctionSpeed: 1.2,
+  suctionMaxStep: 0.08,
+  suctionRestDistance: 0.8,
+  suctionEnemyRadius: 0.65,
+  suctionBossMultiplier: 0.2,
+  suctionBossMaxDistance: 0.6
+});
 
 export const SPELL_RULES = Object.freeze({
+  ...ADVANCED_BY_ID,
   ember_bolt: Object.freeze({ mana: 0, damage: 28, element: 'fire', cooldown: 0.35, range: 42 }),
   fireball: Object.freeze({ mana: 25, damage: 75, element: 'fire', cooldown: 4.0, range: 42, aoeRadius: 3.5 }),
   flame_wave: Object.freeze({ mana: 35, damage: 55, element: 'fire', cooldown: 6.0, range: 18 }),
-  fire_tornado: Object.freeze({ mana: 60, damage: 32, element: 'fire', cooldown: 12.0, duration: 5.0, aoeRadius: 5.0 }),
+  fire_tornado: FIRE_TORNADO_CONFIG,
   frost_shard: Object.freeze({ mana: 0, damage: 22, element: 'frost', cooldown: 0.35, range: 42 }),
   ice_lance: Object.freeze({ mana: 25, damage: 60, element: 'frost', cooldown: 4.0, range: 42, slow: 0.5 }),
   glacial_bulwark: Object.freeze({ mana: 30, damage: 0, element: 'frost', cooldown: 7.0, shield: 120, duration: 5.0 }),
@@ -57,4 +83,3 @@ export function sanitizeDirection(direction = {}) {
   const length = Math.hypot(x, y, z) || 1;
   return { x: x / length, y: y / length, z: z / length };
 }
-

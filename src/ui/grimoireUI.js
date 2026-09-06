@@ -1,96 +1,66 @@
-import { CLASS_SPELLS } from '../systems/spells.js';
+import { CLASS_SPELLS, getEquippedSpells } from '../systems/spells.js';
 import { soundEngine } from '../engine/audio.js';
-import { CUSTOM_ICONS, getCustomIcon } from './customIcons.js';
+import { getCustomIcon } from './customIcons.js';
 
-/**
- * Spell Grimoire UI Manager (Hotkey: K)
- * Shows equipped abilities and unlockable class spells with custom vector icons.
- */
+/** Authoritative learning and equipped loadout state. */
 export class GrimoireUI {
   constructor() {
-    this.isOpen = false;
-    this.modal = document.getElementById('grimoire-modal');
-    this.btnClose = document.getElementById('btn-close-grimoire');
-    this.spellsListContainer = document.getElementById('grimoire-spells-list');
-    this.skillPointsText = document.getElementById('grimoire-skill-points');
-
-    this.unlockedSpells = new Set();
-    this.skillPoints = 2; // Starting points to unlock advanced spells
-
-    this.setupListeners();
+    this.isOpen=false;
+    this.modal=document.getElementById('grimoire-modal');
+    this.spellsListContainer=document.getElementById('grimoire-spells-list');
+    this.skillPointsText=document.getElementById('grimoire-skill-points');
+    document.getElementById('btn-close-grimoire')?.addEventListener('click',()=>this.toggle(false));
   }
-
-  setupListeners() {
-    this.btnClose?.addEventListener('click', () => this.toggle(false));
-    // Note: Global keydown for 'KeyK' is centralized in main.js to prevent double-toggle bugs.
+  toggle(force=null) {
+    this.isOpen=force ?? !this.isOpen;
+    this.modal?.classList.toggle('hidden',!this.isOpen);
+    if(this.isOpen) { this.render(); soundEngine.playMenuOpen(); }
+    else soundEngine.playMenuClose();
   }
-
-  toggle(force = null) {
-    this.isOpen = force !== null ? force : !this.isOpen;
-    if (this.isOpen) {
-      this.modal?.classList.remove('hidden');
-      soundEngine.playMenuOpen();
-    } else {
-      this.modal?.classList.add('hidden');
-      soundEngine.playMenuClose();
+  render(wizardClass='pyromancer') {
+    const player=this.getPlayer?.() || {wizardClass,level:1,skillPoints:2};
+    const config=CLASS_SPELLS[player.wizardClass] || CLASS_SPELLS.pyromancer;
+    const loadout=getEquippedSpells(player);
+    if(this.skillPointsText) this.skillPointsText.textContent=player.skillPoints ?? 2;
+    const list=this.spellsListContainer;
+    if(!list) return;
+    list.replaceChildren();
+    const header=document.createElement('section');
+    header.className='mastery-loadout';
+    header.innerHTML=`<h3>${config.title} · Level ${player.level || 1}/15</h3><p>28 spells · 2 spell points per level · Equip Q / E / R after cooldowns end.</p>`;
+    for(const slot of ['skill1','skill2','ult']) {
+      const button=document.createElement('button');
+      button.textContent=`${loadout[slot].key} · ${loadout[slot].name} ↺`;
+      button.title='Restore the starting spell in this slot';
+      button.addEventListener('click',()=>this.onAction?.({action:'equip',slot,spellId:null}));
+      header.appendChild(button);
     }
-  }
-
-  render(wizardClass = 'pyromancer') {
-    const config = CLASS_SPELLS[wizardClass] || CLASS_SPELLS.pyromancer;
-    if (this.skillPointsText) this.skillPointsText.textContent = this.skillPoints;
-    if (!this.spellsListContainer) return;
-    this.spellsListContainer.innerHTML = '';
-
-    // Render Base Kit with Custom Vector SVG Icons
-    const baseKit = [config.basic, config.skill1, config.skill2, config.ult];
-    baseKit.forEach(s => {
-      const card = document.createElement('div');
-      card.className = 'grimoire-spell-card active';
-      const iconSvg = CUSTOM_ICONS[s.id] || getCustomIcon(s.id);
-      card.innerHTML = `
-        <div class="spell-grimoire-icon" style="width:46px;height:46px;">${iconSvg}</div>
-        <div class="spell-info">
-          <h4>${s.name} <small style="color: var(--arcane-cyan);">[${s.key}]</small></h4>
-          <p>${s.damage ? `Damage: ${s.damage}` : ''} ${s.heal ? `Heal: ${s.heal}` : ''} | Mana: ${s.mana || 'None'} | CD: ${s.cd}s</p>
-        </div>
-        <span class="unlocked-badge">EQUIPPED</span>
-      `;
-      this.spellsListContainer.appendChild(card);
-    });
-
-    // Render Unlockable Mastery Spells
-    (config.unlockables || []).forEach(s => {
-      const isUnlocked = this.unlockedSpells.has(s.id);
-      const card = document.createElement('div');
-      card.className = `grimoire-spell-card ${isUnlocked ? 'active' : 'locked'}`;
-      const iconSvg = CUSTOM_ICONS[s.id] || getCustomIcon(s.id);
-
-      card.innerHTML = `
-        <div class="spell-grimoire-icon" style="width:46px;height:46px;">${iconSvg}</div>
-        <div class="spell-info">
-          <h4>${s.name}</h4>
-          <p>${s.desc}</p>
-        </div>
-        ${isUnlocked
-          ? '<span class="unlocked-badge">MASTERED</span>'
-          : `<button class="unlock-spell-btn" ${this.skillPoints < s.cost ? 'disabled' : ''}>Learn (${s.cost} SP)</button>`
-        }
-      `;
-
-      if (!isUnlocked) {
-        const btn = card.querySelector('.unlock-spell-btn');
-        btn?.addEventListener('click', () => {
-          if (this.skillPoints >= s.cost) {
-            this.skillPoints -= s.cost;
-            this.unlockedSpells.add(s.id);
-            soundEngine.playLevelUp();
-            this.render(wizardClass);
+    list.appendChild(header);
+    const kinds=['lance','burst','field','ward','heal','wave'];
+    const labels=['Focused attacks','Impact explosions','Persistent fields','Defensive wards','Personal recovery','Party restoration'];
+    kinds.forEach((kind,i)=>{
+      const heading=document.createElement('h3'); heading.className='mastery-heading'; heading.textContent=labels[i]; list.appendChild(heading);
+      for(const spell of config.unlockables.filter(s=>s.kind===kind)) {
+        const learned=player.learnedSpells?.includes(spell.id);
+        const available=(player.level||1)>=spell.level;
+        const card=document.createElement('article');
+        card.className=`grimoire-spell-card ${learned?'active':'locked'}`;
+        card.innerHTML=`<div class="spell-grimoire-icon">${getCustomIcon(spell.id)}</div><div class="spell-info"><h4>${spell.name}<small> LEVEL ${spell.level}</small></h4><p>${spell.desc}</p><p>${spell.mana} mana · ${spell.cd}s cooldown</p></div>`;
+        const controls=document.createElement('div'); controls.className='mastery-actions';
+        if(learned) {
+          for(const [slot,key] of [['skill1','Q'],['skill2','E'],['ult','R']]) {
+            const button=document.createElement('button');
+            button.textContent=player.equippedSpells?.[slot]===spell.id?`${key} ✓`:`Equip ${key}`;
+            button.disabled=player.equippedSpells?.[slot]===spell.id;
+            button.addEventListener('click',()=>this.onAction?.({action:'equip',slot,spellId:spell.id})); controls.appendChild(button);
           }
-        });
+        } else {
+          const button=document.createElement('button'); button.textContent=available?'Learn · 1 SP':`Requires level ${spell.level}`;
+          button.disabled=!available || !(player.skillPoints>0);
+          button.addEventListener('click',()=>this.onAction?.({action:'learn',spellId:spell.id})); controls.appendChild(button);
+        }
+        card.appendChild(controls); list.appendChild(card);
       }
-
-      this.spellsListContainer.appendChild(card);
     });
   }
 }

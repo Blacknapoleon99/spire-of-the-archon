@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { softParticleTexture } from './softParticle.js';
 import { TextureGenerator } from './textureGenerator.js';
 import { assetLoader } from './assetLoader.js';
 
@@ -307,6 +309,10 @@ export class FPViewmodel {
 
     // Dynamic Staff PointLight
     this.staffLight = new THREE.PointLight(colorConfig.light, 2.8, 11);
+    // Emissive tip meshes provide the idle glow. Adding/removing viewmodel
+    // lights changes NUM_POINT_LIGHTS and recompiles the whole world at spawn.
+    // Casting illumination comes from ParticleSystem's permanent light pool.
+    this.staffLight.visible = false;
     this.staffLight.position.set(0, 1.27, -1.11);
     this.staffGroup.add(this.staffLight);
 
@@ -415,6 +421,7 @@ export class FPViewmodel {
 
     // Channeling Light
     this.leftHandLight = new THREE.PointLight(colorConfig.light, 1.4, 6);
+    this.leftHandLight.visible = false;
     this.leftHandLight.position.set(0, 0.07, 0);
     this.leftHand.add(this.leftHandLight);
 
@@ -474,7 +481,7 @@ export class FPViewmodel {
     this.proceduralGroup.add(this.leftArmGroup);
 
     // Asynchronously load the 3D local rigged viewmodel & wand
-    this.loadRiggedModel(colorConfig);
+    this.ready = this.loadRiggedModel(colorConfig);
   }
 
   loadRiggedModel(colorConfig) {
@@ -496,9 +503,10 @@ export class FPViewmodel {
       throw lastError || new Error('No first-person wand asset available');
     };
 
-    loadCandidate()
+    return loadCandidate()
       .then(({ gltf, url }) => {
-        const model = gltf.scene;
+        if (this.destroyed) return;
+        const model = SkeletonUtils.clone(gltf.scene);
         // Position and scale first-person viewmodel in front of camera
         // The authored first-person rig is centered around the hips. Lift and
         // enlarge it slightly so both gauntleted hands and the focus wand sit
@@ -514,6 +522,7 @@ export class FPViewmodel {
         // Customize materials and glowing crystal / runes safely
         model.traverse((child) => {
           if (child.isMesh) {
+            child.material = Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone();
             child.castShadow = true;
             child.receiveShadow = true;
             if (child.material && (child.name.includes('Crystal') || child.name.includes('Gem') || child.name.includes('Shard') || child.name.includes('Rune'))) {
@@ -536,6 +545,7 @@ export class FPViewmodel {
           || model.getObjectByName('WandShaft')
           || model;
         const wandLight = new THREE.PointLight(colorConfig.light, 3.4, 4.5);
+        wandLight.visible = false;
         wandTip.add(wandLight);
         this.riggedWandLight = wandLight;
 
@@ -546,7 +556,7 @@ export class FPViewmodel {
           transparent: true,
           opacity: 0.65,
           blending: THREE.AdditiveBlending,
-          wireframe: true
+          depthWrite: false
         });
         const auraMesh = new THREE.Mesh(auraGeo, auraMat);
         wandTip.add(auraMesh);
@@ -565,6 +575,7 @@ export class FPViewmodel {
         }
         sparkGeo.setAttribute('position', new THREE.BufferAttribute(sparkPos, 3));
         const sparkMat = new THREE.PointsMaterial({
+          map: softParticleTexture(),
           color: colorConfig.light,
           size: 0.024,
           transparent: true,
@@ -941,6 +952,13 @@ export class FPViewmodel {
   }
 
   destroy() {
+    this.destroyed = true;
+    this.mixer?.stopAllAction();
+    this.riggedGroup.traverse(child => {
+      if (!child.material) return;
+      const materials=Array.isArray(child.material)?child.material:[child.material];
+      materials.forEach(material=>material.dispose());
+    });
     this.camera.remove(this.group);
   }
 }

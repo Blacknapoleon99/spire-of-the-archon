@@ -6,7 +6,7 @@ import { disposeObjectGeometries, disposeSprite } from '../graphics/resourceUtil
 
 const PLAYER_MODEL_URLS = Object.freeze({
   pyromancer: ['/models/player_pyromancer.glb', '/models/sorcerer.glb'],
-  cryomancer: ['/models/player_cryomancer.glb', '/models/knight.glb'],
+  cryomancer: ['/models/player_sunsteel_vanguard.glb', '/models/player_cryomancer.glb', '/models/knight.glb'],
   luminary: ['/models/player_luminary.glb', '/models/druid.glb'],
   chronomancer: ['/models/player_chronomancer.glb', '/models/elf_mage.glb']
 });
@@ -29,12 +29,16 @@ export class PlayerEntity {
     this.serverConnected = data.connected !== false;
     this.destroyed = false;
 
-    this.health = data.health || 180;
+    this.health = data.health ?? 180;
     this.maxHealth = data.maxHealth || 180;
-    this.mana = data.mana || 140;
+    this.mana = data.mana ?? 140;
     this.maxMana = data.maxMana || 140;
     this.speed = data.speed || 6.5;
-    this.talentPoints = data.talentPoints || 1;
+    this.talentPoints = data.talentPoints ?? 1;
+    this.level = data.level || 1;
+    this.learnedSpells = data.learnedSpells || [];
+    this.equippedSpells = data.equippedSpells || {};
+    this.skillPoints = data.skillPoints ?? 2;
     this.talents = data.talents || { t1: false, t2: false, t3: false };
     this.isAlive = data.isAlive !== undefined ? data.isAlive : true;
     this.score = data.score || 0;
@@ -54,6 +58,7 @@ export class PlayerEntity {
     // rigged character is resolved. The GLBs are preloaded during the boot
     // screen, so this normally upgrades before the first frame of the ascent.
     this.mesh = ModelFactory.createWizardMesh(this.wizardClass, data.color);
+    this.mesh.traverse(object => { if (object.isLight) object.visible = false; });
     this.mesh.position.copy(this.position);
     this.mesh.rotation.y = this.rotationY;
     this.mesh.visible = !this.isLocal;
@@ -66,7 +71,7 @@ export class PlayerEntity {
     this.hasRiggedModel = false;
     this.modelRoot = null;
     this.visualVisible = !this.isLocal && this.serverConnected && this.isAlive;
-    this.loadRiggedModel();
+    this.ready = this.loadRiggedModel();
   }
 
   getVisualRoot() {
@@ -114,11 +119,9 @@ export class PlayerEntity {
       model.name = `PlayerRig_${this.wizardClass}`;
       model.userData.assetUrl = loadedUrl;
       model.scale.setScalar(1.0);
-      // The Blender recipes author the face toward Blender -Y, which becomes
-      // runtime -Z after glTF's Z-up to Y-up conversion. The older fallback
-      // models use the opposite convention, so retain their historical half-
-      // turn without rotating the new authored heroes onto their backs.
-      const visualYawOffset = loadedUrl.includes('/models/player_') ? 0 : Math.PI;
+      // Blender -Y becomes glTF +Z under (x, y, z) -> (x, z, -y).
+      // Network yaw zero looks down -Z, so the authored face needs a half turn.
+      const visualYawOffset = Math.PI;
       model.rotation.y = visualYawOffset;
       model.userData.visualYawOffset = visualYawOffset;
       // These generated humanoids are authored around their hip (roughly
@@ -130,19 +133,18 @@ export class PlayerEntity {
         child.castShadow = true;
         child.receiveShadow = true;
         child.frustumCulled = true;
+        child.material = Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone();
         const materials = Array.isArray(child.material) ? child.material : [child.material];
         materials.forEach(material => {
           if (!material) return;
           material.envMapIntensity = Math.max(1, Number(material.envMapIntensity) || 0);
           if (material.map) material.map.colorSpace = THREE.SRGBColorSpace;
-          if (material.color) material.color.lerp(new THREE.Color(0xffffff), material.map ? 0.08 : 0.22);
           if (material.emissive) {
-            material.emissive.lerp(new THREE.Color(this.color), 0.12);
             // Blender-authored glow maps are intentionally bright for the
             // isolated asset preview. Clamp them in the shared scene so bloom
             // preserves robe/skin/metal detail instead of washing the whole
             // remote wizard into one red/blue silhouette.
-            material.emissiveIntensity = Math.min(2.6, Math.max(0.08, Number(material.emissiveIntensity) || 0.08));
+            material.emissiveIntensity = Math.min(1.4, Number(material.emissiveIntensity) || 0);
           }
           material.needsUpdate = true;
         });
@@ -360,7 +362,7 @@ export class PlayerEntity {
       // Smooth interpolation for remote wizards
       const dist = this.position.distanceTo(this.targetPos);
       this.isMoving = dist > 0.1;
-      this.position.lerp(this.targetPos, 14 * deltaTime);
+      this.position.lerp(this.targetPos, 1 - Math.exp(-14 * deltaTime));
       if (!this.hasRiggedModel) {
         this.mesh.position.copy(this.position);
         this.mesh.rotation.y = THREE.MathUtils.lerp(this.mesh.rotation.y, this.rotationY, Math.min(1.0, 14 * deltaTime));
@@ -373,7 +375,7 @@ export class PlayerEntity {
     }
 
     if (this.hasRiggedModel && this.modelRoot) {
-      this.setVisualVisibility(this.visualVisible);
+      this.setVisualVisibility(true);
       this.modelRoot.position.set(this.position.x, this.position.y + 1.0, this.position.z);
       const yawOffset = Number(this.modelRoot.userData.visualYawOffset) || 0;
       const currentYaw = this.modelRoot.rotation.y - yawOffset;
@@ -384,7 +386,7 @@ export class PlayerEntity {
       this.modelRoot.position.y += bob;
       if (this.isCasting) this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, -0.08, Math.min(1, deltaTime * 14));
       else this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, 0, Math.min(1, deltaTime * 8));
-    } else this.setVisualVisibility(this.visualVisible);
+    } else this.setVisualVisibility(true);
 
     if (this.castTimer > 0) {
       this.castTimer -= deltaTime;
@@ -424,7 +426,13 @@ export class PlayerEntity {
     if (this.destroyed) return;
     this.destroyed = true;
     if (this.speechBubbleTimeout) clearTimeout(this.speechBubbleTimeout);
-    if (this.modelRoot) this.scene.remove(this.modelRoot);
+    if (this.modelRoot) {
+      this.modelRoot.traverse(child => {
+        if (!child.isMesh) return;
+        (Array.isArray(child.material) ? child.material : [child.material]).forEach(m => m.dispose());
+      });
+      this.scene.remove(this.modelRoot);
+    }
     disposeSprite(this.nameplate);
     disposeSprite(this.speakingBadge);
     disposeSprite(this.speechBubble);
