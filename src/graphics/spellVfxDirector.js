@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { getSpellVfxProfile, hashVfxSeed } from './spellVfxProfiles.js';
+import { getSpellPresentation } from './spellPresentationRegistry.js';
 import { assetLoader } from './assetLoader.js';
 import { ADVANCED_BY_ID } from '../shared/spellMastery.js';
 
@@ -93,11 +94,13 @@ export class SpellVfxDirector {
     duration = null,
     source = 'local',
     seed = null,
-    worldImpact = null
+    worldImpact = null,
+    visualOrigin = null
   }) {
     if (!spellId || !origin || !direction) return null;
     const started = typeof performance !== 'undefined' ? performance.now() : 0;
     const profile = getSpellVfxProfile(spellId);
+    const presentation = getSpellPresentation(spellId);
     const safeDirection = direction.clone().normalize();
     const visualSeed = seed ?? `${spellId}:${source}:${this.castSequence++}`;
     const reduced = this.reducedMotion || this.qualityProfile === 'performance';
@@ -107,6 +110,7 @@ export class SpellVfxDirector {
     else this.stats.remoteCasts += 1;
 
     const advanced = ADVANCED_BY_ID[spellId];
+    const vfxOrigin = visualOrigin?.isVector3 ? visualOrigin : origin;
     const vortexCount = this.particles.vortices.length;
     if (advanced && ['field','ward','heal','wave'].includes(advanced.kind)) {
       const ground=target || new THREE.Vector3(origin.x,0,origin.z);
@@ -167,7 +171,7 @@ export class SpellVfxDirector {
       // models already owned by ParticleSystem, plus a cheap directional flare.
       const travelDistance = Number(worldImpact?.distance);
       this.particles.spawnProjectile(
-        origin,
+        vfxOrigin,
         safeDirection,
         spellType,
         element,
@@ -175,7 +179,9 @@ export class SpellVfxDirector {
         Number.isFinite(travelDistance) ? Math.max(0.5, travelDistance) : 35,
         worldImpact,
         {
-          offset: source === 'local' && this.engineScene?.camera ? new THREE.Vector3(0.38, -0.32, -0.85).applyQuaternion(this.engineScene.camera.quaternion) : null,
+          spellId,
+          vfxKey: presentation.vfxKey,
+          offset: source === 'local' && this.engineScene?.camera ? new THREE.Vector3(0.02, -0.02, -0.08).applyQuaternion(this.engineScene.camera.quaternion) : null,
           kind: advanced?.kind || profile.cast,
           rank: advanced?.rank || 1,
           visualOnly: Boolean(advanced) || source !== 'local'
@@ -185,8 +191,8 @@ export class SpellVfxDirector {
       // wall; the gameplay origin above stays on the crosshair ray.
       if (source !== 'local' || !worldImpact || travelDistance > 1.2) {
         const flash = source === 'local' && this.engineScene?.camera
-          ? origin.clone().add(new THREE.Vector3(0.38, -0.32, -0.85).applyQuaternion(this.engineScene.camera.quaternion)) : origin;
-        this.particles.spawnMuzzleFlash(flash, safeDirection, element);
+          ? vfxOrigin.clone().add(new THREE.Vector3(0.02, -0.02, -0.08).applyQuaternion(this.engineScene.camera.quaternion)) : vfxOrigin;
+        this.particles.spawnMuzzleFlash(flash, safeDirection, element, spellId);
       }
     }
 

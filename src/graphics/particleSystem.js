@@ -4,6 +4,7 @@ import { DecalManager } from './shaders/impactDecals.js';
 import { createFireVolume } from './shaders/fireVolume.js';
 import { softParticleTexture } from './softParticle.js';
 import { arcaneSurface, arcaneTime } from './shaders/arcaneSurface.js';
+import { getSpellPresentation } from './spellPresentationRegistry.js';
 
 const AIR_IMPACT_NORMAL = Object.freeze({ x: 0, y: 0, z: 0 });
 
@@ -1110,26 +1111,75 @@ export class ParticleSystem {
 
     const normDir = direction.clone().normalize();
     const rotQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normDir);
+    const spellId = presentation?.spellId || null;
 
     let lightColor = this.elementColors[element] || 0xff5722;
 
     if (element === 'fire') {
-      const fireVolume = this.fireballVolumePool.find(volume => !volume.userData.active);
-      if (fireVolume) {
-        fireVolume.userData.active = true;
-        fireVolume.material.uniforms.uTime.value = 0;
-        fireVolume.scale.set(1, 1, 1);
-        fireVolume.quaternion.identity();
-        if (presentation?.kind === 'lance') {
-          fireVolume.scale.set(0.6, 1.9, 0.6);
-          fireVolume.quaternion.copy(rotQuat);
-        } else if (presentation?.kind === 'wave' || (!presentation?.kind && spellType === 'skill2')) fireVolume.scale.set(2.4, 0.6, 0.55);
-        else if (presentation?.kind === 'burst') fireVolume.scale.setScalar(1.15 + (presentation.rank || 1)*0.08);
-        group.add(fireVolume);
-        group.userData = { fireVolume };
+      // Pyromancer spells deliberately do not share one silhouette.  They use
+      // the same pooled textures/materials, but each signature has its own
+      // geometry stack so LMB, Q, and E read immediately in motion.
+      if (spellId === 'ember_bolt') {
+        const bolt = new THREE.Mesh(this.geoEmberBolt, this.matFirePlasmaCore);
+        bolt.quaternion.copy(rotQuat);
+        bolt.scale.set(0.62, 1.25, 0.62);
+        const core = new THREE.Mesh(this.geoCore, this.matFireballShell);
+        core.scale.setScalar(0.32);
+        const spiral = new THREE.Mesh(this.geoEmberSpiral, this.matFireRuneRing);
+        spiral.quaternion.copy(rotQuat);
+        spiral.scale.setScalar(0.42);
+        const flare = new THREE.Mesh(this.geoCrossFlare, this.matFireballFlameCard);
+        flare.quaternion.copy(rotQuat);
+        flare.scale.set(0.7, 0.42, 0.7);
+        group.add(bolt, core, spiral, flare);
+        group.userData = { emberBolt: bolt, emberCore: core, spiral, flare };
+      } else if (spellId === 'flame_wave') {
+        const wave = new THREE.Mesh(this.geoFlameWave, this.matFireWave);
+        wave.quaternion.copy(rotQuat);
+        wave.scale.set(1.05, 0.58, 1.05);
+        const inner = new THREE.Mesh(this.geoFlameWave, this.matFireballShell);
+        inner.quaternion.copy(rotQuat);
+        inner.scale.set(0.74, 0.34, 0.74);
+        const crest = new THREE.Mesh(this.geoEmberSpiral, this.matFireRuneRing);
+        crest.quaternion.copy(rotQuat);
+        crest.scale.set(1.15, 0.35, 1.15);
+        group.add(wave, inner, crest);
+        group.userData = { wave, waveInner: inner, waveCrest: crest };
       } else {
-        // Preserve the projectile and its collision even if all volumes are busy.
-        group.add(new THREE.Mesh(this.geoSparkSphere, this.matFirePlasmaCore));
+        const fireVolume = this.fireballVolumePool.find(volume => !volume.userData.active);
+        if (fireVolume) {
+          fireVolume.userData.active = true;
+          fireVolume.material.uniforms.uTime.value = 0;
+          fireVolume.scale.set(1, 1, 1);
+          fireVolume.quaternion.identity();
+          fireVolume.scale.set(1.05, 1.05, 1.05);
+          group.add(fireVolume);
+          group.userData = { fireVolume };
+        } else {
+          // Preserve the projectile and its collision even if all volumes are busy.
+          group.add(new THREE.Mesh(this.geoSparkSphere, this.matFirePlasmaCore));
+          group.userData = {};
+        }
+
+        // Fireball has a readable molten shell, orbiting rune ring, and flame
+        // fins in addition to the volumetric core.  These are shared geometry
+        // and materials, so a burst never allocates GPU resources.
+        const shell = new THREE.Mesh(this.geoFireballShell, this.matFireballShell);
+        shell.scale.setScalar(0.72);
+        const ring = new THREE.Mesh(this.geoTorusFire, this.matFireRuneRing);
+        ring.quaternion.copy(rotQuat);
+        ring.scale.setScalar(0.9);
+        const flameCards = [];
+        for (let i = 0; i < 4; i++) {
+          const card = new THREE.Mesh(this.geoFireballFlameCard, this.matFireballFlameCard);
+          card.rotation.y = (i * Math.PI) / 2;
+          card.rotation.z = i % 2 ? 0.14 : -0.14;
+          card.userData.phase = i * 1.7;
+          card.scale.set(0.82, 0.88 + (i % 2) * 0.14, 1);
+          flameCards.push(card);
+        }
+        group.add(shell, ring, ...flameCards);
+        Object.assign(group.userData, { shell, ring, flameCards });
       }
     } else if (element === 'frost') {
       if (presentation?.kind === 'lance' || (!presentation?.kind && spellType === 'skill1')) {
@@ -1202,7 +1252,9 @@ export class ParticleSystem {
     const visual = new THREE.Group();
     visual.name = 'ProjectileVisual';
     for (const child of [...group.children]) visual.add(child);
-    const visualScale = spellType === 'basic' ? 0.22 : spellType === 'skill2' ? 0.42 : 0.3;
+    const visualScale = Number.isFinite(Number(presentation?.visualScale))
+      ? Number(presentation.visualScale)
+      : spellType === 'basic' ? 0.22 : spellType === 'skill2' ? 0.42 : 0.3;
     visual.scale.setScalar(visualScale);
     const launchOffset = presentation?.offset?.clone() || new THREE.Vector3();
     visual.position.copy(launchOffset);
@@ -1225,6 +1277,7 @@ export class ParticleSystem {
       maxDist,
       element,
       spellType,
+      spellId,
       visualOnly: presentation?.visualOnly || false,
       worldImpact,
       collisionRadius: spellType === 'skill1' ? 0.52 : (spellType === 'skill2' ? 0.38 : 0.22),
@@ -1238,8 +1291,22 @@ export class ParticleSystem {
    * receive the full decal/shockwave treatment; wall and ceiling hits still
    * get the burst without placing a floor decal at the wrong height.
    */
-  spawnSurfaceImpact(pos, element = 'fire', normal = null) {
+  spawnSurfaceImpact(pos, element = 'fire', normal = null, spellId = null) {
     const isGround = !normal || Math.abs(Number(normal.y) || 0) > 0.55;
+    if (element === 'fire' && spellId === 'flame_wave') {
+      this.spawnImpactShockwave(pos, 0xff4b10, isGround ? 3.4 : 2.1, this.qualityProfile === 'performance' ? 0.28 : 0.46);
+      this.spawnBurst(pos, element, this.qualityProfile === 'ultra' ? 24 : 14, { addDecal: isGround });
+      return;
+    }
+    if (element === 'fire' && spellId === 'fireball') {
+      this.spawnImpactShockwave(pos, 0xff8a22, isGround ? 3.8 : 2.4, this.qualityProfile === 'performance' ? 0.3 : 0.52);
+      this.spawnBurst(pos, element, this.qualityProfile === 'ultra' ? 36 : 22, { addDecal: isGround });
+      return;
+    }
+    if (element === 'fire' && spellId === 'ember_bolt') {
+      this.spawnBurst(pos, element, this.qualityProfile === 'performance' ? 8 : 12, { addDecal: false });
+      return;
+    }
     if (isGround) {
       this.spawnBurst(pos, element, this.qualityProfile === 'ultra' ? 32 : 22, { addDecal: true });
     } else {
@@ -1830,7 +1897,7 @@ export class ParticleSystem {
   /**
    * Spawns a high-energy elemental muzzle flash flare at the casting point (zero-allocation)
    */
-  spawnMuzzleFlash(origin, direction, element = 'fire') {
+  spawnMuzzleFlash(origin, direction, element = 'fire', spellId = null) {
     const col = this.elementColors[element] || 0xff5722;
 
     // Modulate persistent light without mutating scene graph
@@ -1843,7 +1910,8 @@ export class ParticleSystem {
     const normDir = direction ? direction.clone().normalize() : new THREE.Vector3(0, 0, -1);
     const mat = this.softTrailMats[element] || this.softTrailMats.fire;
 
-    for (let s = 0; s < 4; s++) {
+    const sparkCount = spellId === 'fire_tornado' ? 10 : spellId === 'fireball' ? 7 : spellId === 'flame_wave' ? 6 : 4;
+    for (let s = 0; s < sparkCount; s++) {
       const spark = this._acquireParticleMesh(this.geoSoftSpark, mat);
       if (!spark) break;
       spark.position.copy(origin);
@@ -1909,6 +1977,33 @@ export class ParticleSystem {
         if (ud.halo) ud.halo.rotation.z += deltaTime * 6;
         if (ud.flareH) ud.flareH.rotation.z += deltaTime * 4;
         if (ud.flareV) ud.flareV.rotation.z += deltaTime * 4;
+        if (ud.emberBolt) {
+          ud.emberBolt.rotation.z += deltaTime * 5.5;
+          ud.emberBolt.rotation.x += deltaTime * 2.2;
+        }
+        if (ud.emberCore) {
+          const pulse = 0.92 + Math.sin(p.distanceTraveled * 10) * 0.1;
+          ud.emberCore.scale.setScalar(0.32 * pulse);
+        }
+        if (ud.wave) {
+          ud.wave.rotation.y += deltaTime * 7.5;
+          ud.wave.rotation.z += deltaTime * 2.2;
+          const wavePulse = 1 + Math.sin(p.distanceTraveled * 8.0) * 0.08;
+          ud.wave.scale.x = 1.05 * wavePulse;
+          ud.wave.scale.z = 1.05 * wavePulse;
+        }
+        if (ud.waveInner) {
+          ud.waveInner.rotation.y -= deltaTime * 9.0;
+          ud.waveInner.rotation.z -= deltaTime * 1.8;
+        }
+        if (ud.waveCrest) {
+          ud.waveCrest.rotation.y += deltaTime * 11.0;
+          ud.waveCrest.rotation.x += deltaTime * 2.5;
+        }
+        if (ud.ring) {
+          ud.ring.rotation.z += deltaTime * 10.0;
+          ud.ring.rotation.y -= deltaTime * 4.0;
+        }
         if (ud.spiral) {
           ud.spiral.rotation.y += deltaTime * 16;
           ud.spiral.rotation.z += deltaTime * 8;
@@ -1966,7 +2061,7 @@ export class ParticleSystem {
       if (collision) {
         const impactPoint = collision.point || collision.position;
         if (impactPoint) p.mesh.position.copy(impactPoint);
-        this.spawnSurfaceImpact(p.mesh.position, p.element, collision === true ? AIR_IMPACT_NORMAL : (collision.normal || null));
+        this.spawnSurfaceImpact(p.mesh.position, p.element, collision === true ? AIR_IMPACT_NORMAL : (collision.normal || null), p.spellId);
         this._releaseProjectile(p);
         this.projectiles.splice(i, 1);
         continue;
@@ -1974,7 +2069,7 @@ export class ParticleSystem {
 
       if (p.distanceTraveled >= p.maxDist) {
         if (p.worldImpact?.point) p.mesh.position.set(p.worldImpact.point.x, p.worldImpact.point.y, p.worldImpact.point.z);
-        this.spawnSurfaceImpact(p.mesh.position, p.element, p.worldImpact?.normal || null);
+        this.spawnSurfaceImpact(p.mesh.position, p.element, p.worldImpact?.normal || null, p.spellId);
         this._releaseProjectile(p);
         this.projectiles.splice(i, 1);
       }
@@ -2293,6 +2388,29 @@ export class ParticleSystem {
         for (const st of spellTypes) {
           this.spawnProjectile(dummyOrigin, dummyDir, st, el, 1, 1);
         }
+      }
+
+      // The Pyromancer signature stack has three intentionally different
+      // projectile material/geometry graphs. Exercise each one during the
+      // loading gate so the first LMB/Q/E cast never pays shader compilation
+      // or GPU buffer setup on the gameplay frame.
+      for (const [spellId, spellType] of [
+        ['ember_bolt', 'basic'],
+        ['fireball', 'skill1'],
+        ['flame_wave', 'skill2']
+      ]) {
+        const presentation = getSpellPresentation(spellId);
+        this.spawnProjectile(
+          dummyOrigin,
+          dummyDir,
+          spellType,
+          'fire',
+          1,
+          1,
+          null,
+          { ...presentation, visualOnly: true }
+        );
+        this.spawnMuzzleFlash(dummyOrigin, dummyDir, 'fire', spellId);
       }
 
       // 2. Pre-instantiate particle bursts for all elements

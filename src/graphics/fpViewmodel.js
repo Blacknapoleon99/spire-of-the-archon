@@ -3,6 +3,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { softParticleTexture } from './softParticle.js';
 import { TextureGenerator } from './textureGenerator.js';
 import { assetLoader } from './assetLoader.js';
+import { getSpellPresentation } from './spellPresentationRegistry.js';
 
 /**
  * High-Fidelity First-Person Sorcerer Viewmodel (Anatomical Hands & Ornate Staff)
@@ -28,6 +29,15 @@ export class FPViewmodel {
     this.mixer = null;
     this.actions = {};
     this.currentAction = null;
+    this.activeCastAction = null;
+    this.castReturnAction = null;
+    this.currentSpellId = 'ember_bolt';
+    this.castAnimationTime = -1;
+    this.castAnimationDuration = 0;
+    this.castPresentation = getSpellPresentation('ember_bolt');
+    this.riggedModel = null;
+    this.riggedParts = {};
+    this.riggedPartBases = new Map();
 
     this.riggedGroup = new THREE.Group();
     this.riggedGroup.visible = false;
@@ -484,6 +494,120 @@ export class FPViewmodel {
     this.ready = this.loadRiggedModel(colorConfig);
   }
 
+  _cacheRiggedParts(model) {
+    this.riggedModel = model;
+    this.riggedParts = {};
+    this.riggedPartBases = new Map();
+    const names = [
+      'Sleeve_L', 'Sleeve_R', 'Bracer_L', 'Bracer_R', 'Palm_L', 'Palm_R',
+      'Hand_L', 'Hand_R', 'UpperArm_L', 'UpperArm_R', 'WandShaft', 'WandGrip',
+      'WandTip', 'WandCore'
+    ];
+    names.forEach(name => {
+      const object = model.getObjectByName(name);
+      if (!object) return;
+      this.riggedParts[name] = object;
+      this.riggedPartBases.set(name, {
+        position: object.position.clone(),
+        rotation: object.rotation.clone(),
+        scale: object.scale.clone()
+      });
+    });
+  }
+
+  _setRiggedPartPose(name, positionOffset = null, rotationOffset = null) {
+    const object = this.riggedParts?.[name];
+    const base = this.riggedPartBases?.get(name);
+    if (!object || !base) return;
+    object.position.copy(base.position);
+    object.rotation.copy(base.rotation);
+    object.scale.copy(base.scale);
+    if (positionOffset) object.position.add(positionOffset);
+    if (rotationOffset) {
+      object.rotation.x += rotationOffset.x || 0;
+      object.rotation.y += rotationOffset.y || 0;
+      object.rotation.z += rotationOffset.z || 0;
+    }
+  }
+
+  _restoreRiggedParts() {
+    if (!this.riggedParts) return;
+    for (const name of Object.keys(this.riggedParts)) this._setRiggedPartPose(name);
+  }
+
+  _updateRiggedCastPose(deltaTime) {
+    if (!this.hasRiggedModel || !this.riggedModel) return;
+    if (this.castAnimationDuration <= 0 || this.castAnimationTime < 0) return;
+    this.castAnimationTime += deltaTime;
+    const progress = Math.min(1, this.castAnimationTime / this.castAnimationDuration);
+    const envelope = Math.sin(Math.PI * progress);
+    const sustained = this.currentSpellId === 'fire_tornado'
+      ? Math.min(1, this.castAnimationTime / 0.38)
+      : envelope;
+    const right = new THREE.Vector3();
+    const left = new THREE.Vector3();
+
+    if (this.currentSpellId === 'ember_bolt') {
+      right.set(0.012 * envelope, 0.004 * envelope, -0.018 * envelope);
+      this._setRiggedPartPose('UpperArm_R', right, new THREE.Vector3(-0.20 * envelope, 0.08 * envelope, -0.28 * envelope));
+      this._setRiggedPartPose('Bracer_R', right, new THREE.Vector3(-0.28 * envelope, 0.12 * envelope, -0.34 * envelope));
+      this._setRiggedPartPose('Palm_R', right, new THREE.Vector3(-0.34 * envelope, 0.16 * envelope, -0.40 * envelope));
+      this._setRiggedPartPose('WandShaft', null, new THREE.Vector3(-0.28 * envelope, 0.08 * envelope, -0.42 * envelope));
+    } else if (this.currentSpellId === 'fireball') {
+      right.set(0.0, 0.028 * envelope, -0.045 * envelope);
+      left.set(0.0, 0.038 * envelope, -0.07 * envelope);
+      this._setRiggedPartPose('UpperArm_R', right, new THREE.Vector3(-0.34 * envelope, 0.05 * envelope, -0.14 * envelope));
+      this._setRiggedPartPose('Bracer_R', right, new THREE.Vector3(-0.48 * envelope, 0.12 * envelope, -0.22 * envelope));
+      this._setRiggedPartPose('Palm_R', right, new THREE.Vector3(-0.55 * envelope, 0.15 * envelope, -0.28 * envelope));
+      this._setRiggedPartPose('UpperArm_L', left, new THREE.Vector3(-0.22 * envelope, -0.06 * envelope, 0.24 * envelope));
+      this._setRiggedPartPose('Bracer_L', left, new THREE.Vector3(-0.36 * envelope, -0.12 * envelope, 0.34 * envelope));
+      this._setRiggedPartPose('Palm_L', left, new THREE.Vector3(-0.48 * envelope, -0.16 * envelope, 0.42 * envelope));
+      this._setRiggedPartPose('WandShaft', null, new THREE.Vector3(-0.42 * envelope, 0.10 * envelope, -0.18 * envelope));
+    } else if (this.currentSpellId === 'flame_wave') {
+      right.set(0.05 * envelope, 0.02 * envelope, 0.02 * envelope);
+      left.set(-0.05 * envelope, 0.028 * envelope, 0.03 * envelope);
+      this._setRiggedPartPose('UpperArm_R', right, new THREE.Vector3(0.10 * envelope, -0.46 * envelope, -0.50 * envelope));
+      this._setRiggedPartPose('Bracer_R', right, new THREE.Vector3(0.16 * envelope, -0.62 * envelope, -0.68 * envelope));
+      this._setRiggedPartPose('Palm_R', right, new THREE.Vector3(0.20 * envelope, -0.72 * envelope, -0.82 * envelope));
+      this._setRiggedPartPose('UpperArm_L', left, new THREE.Vector3(0.06 * envelope, 0.40 * envelope, 0.45 * envelope));
+      this._setRiggedPartPose('Bracer_L', left, new THREE.Vector3(0.10 * envelope, 0.56 * envelope, 0.60 * envelope));
+      this._setRiggedPartPose('Palm_L', left, new THREE.Vector3(0.12 * envelope, 0.68 * envelope, 0.72 * envelope));
+      this._setRiggedPartPose('WandShaft', null, new THREE.Vector3(0.24 * envelope, -0.42 * envelope, -0.56 * envelope));
+    } else if (this.currentSpellId === 'fire_tornado') {
+      right.set(0.04 * sustained, 0.055 * sustained, -0.02 * sustained);
+      left.set(-0.04 * sustained, 0.065 * sustained, -0.03 * sustained);
+      this._setRiggedPartPose('UpperArm_R', right, new THREE.Vector3(-0.28 * sustained, -0.18 * sustained, -0.22 * sustained));
+      this._setRiggedPartPose('Bracer_R', right, new THREE.Vector3(-0.42 * sustained, -0.28 * sustained, -0.34 * sustained));
+      this._setRiggedPartPose('Palm_R', right, new THREE.Vector3(-0.52 * sustained, -0.34 * sustained, -0.40 * sustained));
+      this._setRiggedPartPose('UpperArm_L', left, new THREE.Vector3(-0.26 * sustained, 0.18 * sustained, -0.20 * sustained));
+      this._setRiggedPartPose('Bracer_L', left, new THREE.Vector3(-0.38 * sustained, 0.28 * sustained, -0.31 * sustained));
+      this._setRiggedPartPose('Palm_L', left, new THREE.Vector3(-0.46 * sustained, 0.35 * sustained, -0.38 * sustained));
+      this._setRiggedPartPose('WandShaft', null, new THREE.Vector3(-0.18 * sustained, -0.08 * sustained, -0.18 * sustained));
+    }
+
+    if (progress >= 1) {
+      this.castAnimationTime = -1;
+      this.castAnimationDuration = 0;
+      this._restoreRiggedParts();
+    }
+  }
+
+  getCastOrigin(fallbackOrigin = null) {
+    const socket = this.riggedModel?.getObjectByName('WandTipSocket')
+      || this.riggedModel?.getObjectByName('WandTip')
+      || this.riggedModel?.getObjectByName('WandCore');
+    if (socket) {
+      this.riggedModel.updateMatrixWorld(true);
+      const origin = new THREE.Vector3();
+      socket.getWorldPosition(origin);
+      return origin;
+    }
+    if (fallbackOrigin?.isVector3 && this.camera) {
+      return fallbackOrigin.clone().add(new THREE.Vector3(0.34, -0.18, -0.68).applyQuaternion(this.camera.quaternion));
+    }
+    return fallbackOrigin?.isVector3 ? fallbackOrigin.clone() : null;
+  }
+
   loadRiggedModel(colorConfig) {
     const loadCandidate = async () => {
       const manifest = typeof fetch === 'function'
@@ -511,13 +635,17 @@ export class FPViewmodel {
         // The authored first-person rig is centered around the hips. Lift and
         // enlarge it slightly so both gauntleted hands and the focus wand sit
         // in the lower camera frustum instead of clipping below the HUD.
-        model.scale.set(0.9, 0.9, 0.9);
-        model.position.set(0, -0.04, -0.85);
+        model.scale.set(0.72, 0.72, 0.72);
+        // The authored GLB is hip-centered.  Raise and pull it toward the
+        // camera so the hands and wand sit in the lower view instead of
+        // intersecting the floor or disappearing below the HUD.
+        model.position.set(-0.15, 1.05, -0.85);
         // The authored hero wand is already camera-facing. The legacy
         // fallback was authored in the opposite convention and still needs
         // the historical half-turn.
         model.rotation.y = url.endsWith('/fp_wand_hero.glb') ? 0 : Math.PI;
         model.userData.assetUrl = url;
+        this._cacheRiggedParts(model);
 
         // Customize materials and glowing crystal / runes safely
         model.traverse((child) => {
@@ -599,12 +727,17 @@ export class FPViewmodel {
             this.currentAction.play();
           }
 
-          // Smoothly crossfade back to current locomotion action when cast animation finishes
+          // Smoothly crossfade back to current locomotion action when any
+          // signature cast animation finishes.
           this.mixer.addEventListener('finished', (e) => {
-            if (this.actions['Cast_Basic'] && e.action === this.actions['Cast_Basic']) {
-              if (this.currentAction) {
-                this.currentAction.reset().fadeIn(0.14).play();
+            if (this.activeCastAction && e.action === this.activeCastAction) {
+              const returnAction = this.castReturnAction || this.actions['Idle'] || this.actions['Walk'];
+              if (returnAction) {
+                returnAction.reset().fadeIn(0.14).play();
+                this.currentAction = returnAction;
               }
+              this.activeCastAction = null;
+              this.castReturnAction = null;
             }
           });
         }
@@ -625,50 +758,70 @@ export class FPViewmodel {
       });
   }
 
-  triggerCast(slot = 'basic', intensity = 1.0) {
+  triggerCast(slotOrConfig = 'basic', intensity = 1.0, legacySpellId = null) {
+    const config = typeof slotOrConfig === 'object'
+      ? slotOrConfig
+      : { slot: slotOrConfig, intensity, spellId: legacySpellId };
+    const slot = config.slot || 'basic';
+    const castIntensity = Number.isFinite(Number(config.intensity)) ? Number(config.intensity) : 1.0;
+    const spellId = config.spellId || ({ basic: 'ember_bolt', skill1: 'fireball', skill2: 'flame_wave', ult: 'fire_tornado' }[slot] || 'ember_bolt');
+    const presentation = getSpellPresentation(spellId);
     this.currentSlot = slot;
+    this.currentSpellId = spellId;
+    this.castPresentation = presentation;
+    this.castAnimationTime = 0;
+    this.castAnimationDuration = Math.max(0.18, presentation.duration || 0.35);
+    this.activeCastAction = null;
 
-    // Trigger rigged 3D skeletal animation
-    if (this.hasRiggedModel && this.actions && this.actions['Cast_Basic']) {
-      const cast = this.actions['Cast_Basic'];
-      cast.reset();
-      cast.setLoop(THREE.LoopOnce);
-      cast.clampWhenFinished = false;
-      cast.play();
+    // Prefer a dedicated authored clip, but retain Cast_Basic as a safe
+    // compatibility fallback for older locally generated GLBs.  The
+    // procedural hand/wand pose below still differentiates every spell.
+    if (this.hasRiggedModel && this.actions) {
+      const cast = this.actions[presentation.castClip] || this.actions['Cast_Basic'];
+      if (cast) {
+        this.castReturnAction = this.currentAction && this.currentAction !== cast ? this.currentAction : null;
+        if (this.currentAction && this.currentAction !== cast) this.currentAction.fadeOut(0.08);
+        cast.reset();
+        cast.setLoop(THREE.LoopOnce);
+        cast.clampWhenFinished = false;
+        cast.fadeIn(0.06).play();
+        this.activeCastAction = cast;
+        this.currentAction = cast;
+      }
     }
-    if (this.riggedWandLight) this.riggedWandLight.intensity = 6.8 * intensity;
+    if (this.riggedWandLight) this.riggedWandLight.intensity = 6.8 * castIntensity;
     if (this.riggedWandAura) this.riggedWandAura.scale.set(1.6, 1.6, 1.6);
 
     if (slot === 'ult') {
-      this.recoil = 0.26 * intensity;
+      this.recoil = 0.26 * castIntensity;
       this.castGesture = 1.8;
-      if (this.crystal) this.crystal.material.emissiveIntensity = 5.6 * intensity;
-      if (this.staffLight) this.staffLight.intensity = 7.2 * intensity;
-      if (this.leftHandLight) this.leftHandLight.intensity = 4.5 * intensity;
+      if (this.crystal) this.crystal.material.emissiveIntensity = 5.6 * castIntensity;
+      if (this.staffLight) this.staffLight.intensity = 7.2 * castIntensity;
+      if (this.leftHandLight) this.leftHandLight.intensity = 4.5 * castIntensity;
     } else if (slot === 'skill2') {
-      this.recoil = 0.18 * intensity;
+      this.recoil = 0.18 * castIntensity;
       this.castGesture = 1.35;
-      if (this.crystal) this.crystal.material.emissiveIntensity = 4.2 * intensity;
-      if (this.staffLight) this.staffLight.intensity = 5.2 * intensity;
-      if (this.leftHandLight) this.leftHandLight.intensity = 3.2 * intensity;
+      if (this.crystal) this.crystal.material.emissiveIntensity = 4.2 * castIntensity;
+      if (this.staffLight) this.staffLight.intensity = 5.2 * castIntensity;
+      if (this.leftHandLight) this.leftHandLight.intensity = 3.2 * castIntensity;
     } else if (slot === 'skill1') {
-      this.recoil = 0.14 * intensity;
+      this.recoil = 0.14 * castIntensity;
       this.castGesture = 1.15;
-      if (this.crystal) this.crystal.material.emissiveIntensity = 3.8 * intensity;
-      if (this.staffLight) this.staffLight.intensity = 4.6 * intensity;
-      if (this.leftHandLight) this.leftHandLight.intensity = 2.6 * intensity;
+      if (this.crystal) this.crystal.material.emissiveIntensity = 3.8 * castIntensity;
+      if (this.staffLight) this.staffLight.intensity = 4.6 * castIntensity;
+      if (this.leftHandLight) this.leftHandLight.intensity = 2.6 * castIntensity;
     } else {
       // Basic wand cast
-      this.recoil = 0.10 * intensity;
+      this.recoil = 0.10 * castIntensity;
       this.castGesture = 0.85;
-      if (this.crystal) this.crystal.material.emissiveIntensity = 3.2 * intensity;
-      if (this.staffLight) this.staffLight.intensity = 3.8 * intensity;
-      if (this.leftHandLight) this.leftHandLight.intensity = 1.9 * intensity;
+      if (this.crystal) this.crystal.material.emissiveIntensity = 3.2 * castIntensity;
+      if (this.staffLight) this.staffLight.intensity = 3.8 * castIntensity;
+      if (this.leftHandLight) this.leftHandLight.intensity = 1.9 * castIntensity;
     }
   }
 
-  triggerRecoil(intensity = 1.0) {
-    this.triggerCast('basic', intensity);
+  triggerRecoil(intensity = 1.0, spellId = 'ember_bolt') {
+    this.triggerCast({ slot: 'basic', intensity, spellId });
   }
 
   triggerJump() {
@@ -722,7 +875,7 @@ export class FPViewmodel {
       this.mixer.update(deltaTime);
 
       // Blend between Idle and Walk animations smoothly
-      const isCasting = this.actions['Cast_Basic'] && this.actions['Cast_Basic'].isRunning();
+      const isCasting = Boolean(this.activeCastAction?.isRunning() || this.castAnimationTime >= 0);
       if (!isCasting) {
         if (isMoving) {
           if (this.actions['Walk'] && this.currentAction !== this.actions['Walk']) {
@@ -764,6 +917,7 @@ export class FPViewmodel {
       if (this.riggedWandLight) {
         this.riggedWandLight.intensity = THREE.MathUtils.lerp(this.riggedWandLight.intensity, 3.4, deltaTime * 5);
       }
+      this._updateRiggedCastPose(deltaTime);
     } else {
       // Procedural Viewmodel updates (only when 3D rigged model is not active)
       if (this.crystal) {

@@ -185,6 +185,94 @@ export class SoundEngine {
     osc.stop(this.ctx.currentTime + 0.15);
   }
 
+  // Pyromancer signature cast layers.  These are intentionally synthesized so
+  // the new slots remain distinct even when optional authored MP3s are absent.
+  playPyroEmberBolt() {
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(760, now);
+    osc.frequency.exponentialRampToValueAtTime(1480, now + 0.075);
+    gain.gain.setValueAtTime(0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.15);
+  }
+
+  playPyroFlameWave() {
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(180, now);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 0.18);
+    osc.frequency.exponentialRampToValueAtTime(95, now + 0.46);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(720, now);
+    filter.frequency.exponentialRampToValueAtTime(180, now + 0.48);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(0.38, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.54);
+  }
+
+  playPyroFlameWaveImpact() {
+    if (this.isMuted) return;
+    this.ensureContext();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(120, now);
+    osc.frequency.exponentialRampToValueAtTime(42, now + 0.24);
+    gain.gain.setValueAtTime(0.34, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+    osc.connect(gain);
+    gain.connect(this.sfxGain);
+    osc.start(now);
+    osc.stop(now + 0.3);
+  }
+
+  /** Route a cast/impact by spell id so fire abilities never share one sound. */
+  playSpellSfx(spellId, phase = 'cast', element = null, spellType = null) {
+    if (phase === 'impact') {
+      if (spellId === 'fire_tornado') return this.playTornadoWindTick();
+      if (spellId === 'fireball') return this.playFlameExplosion();
+      if (spellId === 'flame_wave') return this.playPyroFlameWaveImpact();
+      if (spellId === 'ember_bolt') return this.playHitmarker();
+    }
+    if (spellId === 'ember_bolt') return this.playPyroEmberBolt();
+    if (spellId === 'fireball') return this.playFireball();
+    if (spellId === 'flame_wave') return this.playPyroFlameWave();
+    if (spellId === 'fire_tornado') {
+      this.playFlameExplosion();
+      return this.playTornadoWindRoar(5.0);
+    }
+    if (element === 'frost') {
+      if (spellType === 'ult' || spellType === 'skill1') return this.playFrostNova();
+      if (spellType === 'skill2') return this.playArcaneShield();
+      return this.playIceLance();
+    }
+    if (element === 'light') return spellType === 'ult' ? this.playDivineSanctuary() : this.playRadiantHeal();
+    if (element === 'chrono') return this.playChrono();
+    return this.playWandCast();
+  }
+
   /**
    * Preload and decode all studio SFX into Web Audio buffers in memory
    */

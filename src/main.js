@@ -1236,24 +1236,26 @@ class GameApp {
         source: 'remote'
       });
 
-      if (data.element === 'fire') {
-        if (data.spellType === 'ult') soundEngine.playFlameExplosion();
-        else soundEngine.playFireball();
-      } else if (data.element === 'frost') {
-        if (data.spellType === 'ult' || data.spellType === 'skill1') soundEngine.playFrostNova();
-        else if (data.spellType === 'skill2') soundEngine.playArcaneShield();
-        else soundEngine.playIceLance();
-      } else if (data.element === 'light') {
-        if (data.spellType === 'ult') soundEngine.playDivineSanctuary();
-        else soundEngine.playRadiantHeal();
-      } else if (data.element === 'chrono') {
-        soundEngine.playChrono();
-      } else {
-        soundEngine.playWandCast();
-      }
-
       const caster = this.players.get(data.casterId);
-      if (caster && !caster.isLocal) caster.triggerCastAnimation();
+      soundEngine.playSpellSfx?.(data.spellId, 'cast', data.element, data.spellType);
+      if (!soundEngine.playSpellSfx) {
+        if (data.element === 'fire') {
+          if (data.spellType === 'ult') soundEngine.playFlameExplosion();
+          else soundEngine.playFireball();
+        } else if (data.element === 'frost') {
+          if (data.spellType === 'ult' || data.spellType === 'skill1') soundEngine.playFrostNova();
+          else if (data.spellType === 'skill2') soundEngine.playArcaneShield();
+          else soundEngine.playIceLance();
+        } else if (data.element === 'light') {
+          if (data.spellType === 'ult') soundEngine.playDivineSanctuary();
+          else soundEngine.playRadiantHeal();
+        } else if (data.element === 'chrono') {
+          soundEngine.playChrono();
+        } else {
+          soundEngine.playWandCast();
+        }
+      }
+      if (caster && !caster.isLocal) caster.triggerCastAnimation(data.spellId, data.spellType);
     });
 
     onlineNetwork.on('enemy_attack', (data) => {
@@ -1808,6 +1810,7 @@ class GameApp {
 
     const dir = this.physics.updateCrosshairAim();
     const origin = this.engineScene.camera.position.clone();
+    const visualOrigin = this.fpViewmodel?.getCastOrigin(origin) || origin;
     const collision = this.resolveSpellCollision(spellConfig, origin, dir);
 
     const modifiedDamage = Math.round((spellConfig.damage || 0) * derived.spellPowerMultiplier);
@@ -1826,6 +1829,7 @@ class GameApp {
       spellId: spellConfig.id,
       spellType: slot,
       origin,
+      visualOrigin,
       direction: dir,
       target: collision.target,
       worldImpact: collision.worldImpact,
@@ -1836,8 +1840,6 @@ class GameApp {
     if (spellConfig.id === 'fire_tornado') {
       this.ui.showActiveSpellTimer('Infernal Fire Tornado', '🌪️', 5.0);
       this.activeVortexTimer = { remaining: 5.0, total: 5.0 };
-      soundEngine.playFlameExplosion();
-      soundEngine.playTornadoWindRoar(5.0);
     } else if (spellConfig.id === 'divine_sanctuary') {
       this.ui.showActiveSpellTimer('Divine Sanctuary', '🌟', 6.0);
       this.activeVortexTimer = { remaining: 6.0, total: 6.0 };
@@ -1865,10 +1867,14 @@ class GameApp {
     });
 
     // Audio SFX & Voiced Incantation
-    this.playSpellAudioAndVoice(this.localPlayer.wizardClass, slot, spellConfig.element);
+    this.playSpellAudioAndVoice(this.localPlayer.wizardClass, slot, spellConfig.element, spellConfig.id);
 
     if (this.fpViewmodel) {
-      this.fpViewmodel.triggerCast(slot, slot === 'ult' ? 1.8 : 1.2);
+      this.fpViewmodel.triggerCast({
+        spellId: spellConfig.id,
+        slot,
+        intensity: slot === 'ult' ? 1.8 : 1.2
+      });
     }
 
     // Dynamic camera screenshake on heavy spell cast
@@ -1889,9 +1895,16 @@ class GameApp {
     if (this.basicAttackCount === 3) this.tutorial.tryShowTip('abilities');
   }
 
-  playSpellAudioAndVoice(wizardClass, slot, element) {
-    // 1. Play Studio Sound Effect
-    if (element === 'fire') {
+  playSpellAudioAndVoice(wizardClass, slot, element, spellId = null) {
+    // 1. Play the spell-specific sound contract.  The fallback branch keeps
+    // older builds playable if SoundEngine is hot-reloaded without the new
+    // method, while the normal path never collapses Pyromancer slots.
+    const resolvedId = spellId || (wizardClass === 'pyromancer'
+      ? ({ basic: 'ember_bolt', skill1: 'fireball', skill2: 'flame_wave', ult: 'fire_tornado' }[slot] || null)
+      : null);
+    if (soundEngine.playSpellSfx) {
+      soundEngine.playSpellSfx(resolvedId, 'cast', element, slot);
+    } else if (element === 'fire') {
       if (slot === 'ult') soundEngine.playFlameExplosion();
       else soundEngine.playFireball();
     } else if (element === 'frost') {
@@ -2297,6 +2310,7 @@ class GameApp {
 
           const dir = this.physics.updateCrosshairAim();
           const origin = this.engineScene.camera.position.clone();
+          const visualOrigin = this.fpViewmodel?.getCastOrigin(origin) || origin;
           const basicDmg = Math.round(spells.basic.damage * derived.spellPowerMultiplier);
           const collision = this.resolveSpellCollision(spells.basic, origin, dir);
 
@@ -2305,6 +2319,7 @@ class GameApp {
             spellId: spells.basic.id,
             spellType: 'basic',
             origin,
+            visualOrigin,
             direction: dir,
             worldImpact: collision.worldImpact,
             element: spells.basic.element,
@@ -2324,9 +2339,9 @@ class GameApp {
           });
 
           // SFX & Voiced Incantation
-          this.playSpellAudioAndVoice(this.localPlayer.wizardClass, 'basic', spells.basic.element);
+          this.playSpellAudioAndVoice(this.localPlayer.wizardClass, 'basic', spells.basic.element, spells.basic.id);
 
-          if (this.fpViewmodel) this.fpViewmodel.triggerRecoil(0.85);
+          if (this.fpViewmodel) this.fpViewmodel.triggerRecoil(0.85, spells.basic.id);
           this.basicAttackCount++;
           if (this.basicAttackCount === 3) this.tutorial.tryShowTip('abilities');
         }
@@ -2438,6 +2453,7 @@ class GameApp {
           }
         );
         if (worldHit) {
+          if (projectile.spellId) soundEngine.playSpellSfx?.(projectile.spellId, 'impact', projectile.element, projectile.spellType);
           return { point: worldHit.point, normal: worldHit.normal, kind: worldHit.kind };
         }
 
@@ -2445,6 +2461,7 @@ class GameApp {
           if (!enemy.isAlive) continue;
           const dist = projectile.mesh.position.distanceTo(enemy.position);
           if (dist < 1.9) {
+            if (projectile.spellId) soundEngine.playSpellSfx?.(projectile.spellId, 'impact', projectile.element, projectile.spellType);
             if (!projectile.visualOnly) onlineNetwork.hitEnemy(enemy.id, projectile.spellType === 'ult' ? 140 : 50, projectile.element);
             this.ui.triggerHitmarker();
             return true;
@@ -2454,6 +2471,7 @@ class GameApp {
         if (this.boss && this.boss.isAlive) {
           const bossDist = projectile.mesh.position.distanceTo(this.boss.position);
           if (bossDist < 2.6) {
+            if (projectile.spellId) soundEngine.playSpellSfx?.(projectile.spellId, 'impact', projectile.element, projectile.spellType);
             if (!projectile.visualOnly) onlineNetwork.hitEnemy(this.boss.id, projectile.spellType === 'ult' ? 140 : 50, projectile.element);
             this.ui.triggerHitmarker();
             return true;

@@ -3,6 +3,7 @@ import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { ModelFactory } from '../graphics/modelFactory.js';
 import { assetLoader } from '../graphics/assetLoader.js';
 import { disposeObjectGeometries, disposeSprite } from '../graphics/resourceUtils.js';
+import { getSpellPresentation } from '../graphics/spellPresentationRegistry.js';
 
 const PLAYER_MODEL_URLS = Object.freeze({
   pyromancer: ['/models/player_pyromancer.glb', '/models/sorcerer.glb'],
@@ -53,6 +54,13 @@ export class PlayerEntity {
     this.isMoving = false;
     this.isCasting = false;
     this.castTimer = 0;
+    this.castAnimationTime = -1;
+    this.castAnimationDuration = 0;
+    this.castSpellId = null;
+    this.castPresentation = null;
+    this.castParts = {};
+    this.castPartBases = new Map();
+    this.worldWand = null;
 
     // Keep the procedural wizard as an immediate fallback while the local
     // rigged character is resolved. The GLBs are preloaded during the boot
@@ -92,6 +100,147 @@ export class PlayerEntity {
     if (this.mesh) this.mesh.visible = this.visualVisible && !this.hasRiggedModel;
     if (this.modelRoot) this.modelRoot.visible = this.visualVisible;
     return this.visualVisible;
+  }
+
+  cacheCastParts(model) {
+    const names = [
+      'UpperArm_L', 'UpperArm_R', 'Bracer_L', 'Bracer_R', 'Hand_L', 'Hand_R',
+      'Sleeve_L', 'Sleeve_R'
+    ];
+    this.castParts = {};
+    this.castPartBases = new Map();
+    names.forEach(name => {
+      const object = model.getObjectByName(name);
+      if (!object) return;
+      this.castParts[name] = object;
+      this.castPartBases.set(name, {
+        position: object.position.clone(),
+        rotation: object.rotation.clone(),
+        scale: object.scale.clone()
+      });
+    });
+  }
+
+  setCastPartPose(name, positionOffset = null, rotationOffset = null) {
+    const object = this.castParts?.[name];
+    const base = this.castPartBases?.get(name);
+    if (!object || !base) return;
+    object.position.copy(base.position);
+    object.rotation.copy(base.rotation);
+    object.scale.copy(base.scale);
+    if (positionOffset) object.position.add(positionOffset);
+    if (rotationOffset) {
+      object.rotation.x += rotationOffset.x || 0;
+      object.rotation.y += rotationOffset.y || 0;
+      object.rotation.z += rotationOffset.z || 0;
+    }
+  }
+
+  restoreCastParts() {
+    for (const name of Object.keys(this.castParts || {})) this.setCastPartPose(name);
+  }
+
+  createWorldWand(model) {
+    if (this.wizardClass !== 'pyromancer') return;
+    const hand = model.getObjectByName('Hand_R') || model.getObjectByName('CastSocket') || model;
+    const group = new THREE.Group();
+    group.name = 'RemotePyromancerWand';
+    group.position.set(0.02, -0.08, -0.08);
+    group.rotation.set(Math.PI * 0.28, 0, -Math.PI * 0.08);
+
+    const shaftMaterial = new THREE.MeshStandardMaterial({
+      color: 0x25100c,
+      roughness: 0.38,
+      metalness: 0.18
+    });
+    const brassMaterial = new THREE.MeshStandardMaterial({
+      color: 0xd18a2a,
+      roughness: 0.22,
+      metalness: 0.82,
+      emissive: 0x3a0e03,
+      emissiveIntensity: 0.35
+    });
+    const emberMaterial = new THREE.MeshStandardMaterial({
+      color: 0xff3d00,
+      emissive: 0xff3d00,
+      emissiveIntensity: 3.6,
+      roughness: 0.12,
+      metalness: 0.12
+    });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.032, 0.62, 12), shaftMaterial);
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.045, 0.17, 12), brassMaterial);
+    grip.position.y = -0.19;
+    const crown = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.009, 6, 16), brassMaterial);
+    crown.position.y = 0.30;
+    const tip = new THREE.Mesh(new THREE.IcosahedronGeometry(0.064, 1), emberMaterial);
+    tip.position.y = 0.36;
+    const halo = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 8), new THREE.MeshBasicMaterial({
+      color: 0xff6d28,
+      transparent: true,
+      opacity: 0.42,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    }));
+    halo.position.copy(tip.position);
+    group.add(shaft, grip, crown, tip, halo);
+    hand.add(group);
+    this.worldWand = group;
+    this.worldWandTip = tip;
+    this.worldWandHalo = halo;
+  }
+
+  updateCastPose(deltaTime) {
+    if (!this.hasRiggedModel || this.castAnimationDuration <= 0 || this.castAnimationTime < 0) return;
+    this.castAnimationTime += deltaTime;
+    const progress = Math.min(1, this.castAnimationTime / this.castAnimationDuration);
+    const envelope = Math.sin(Math.PI * progress);
+    const sustained = this.castSpellId === 'fire_tornado'
+      ? Math.min(1, this.castAnimationTime / 0.42)
+      : envelope;
+    const right = new THREE.Vector3();
+    const left = new THREE.Vector3();
+
+    if (this.castSpellId === 'ember_bolt') {
+      this.setCastPartPose('UpperArm_R', right.set(0.012 * envelope, 0.004 * envelope, -0.02 * envelope), new THREE.Vector3(-0.18 * envelope, 0.06 * envelope, -0.30 * envelope));
+      this.setCastPartPose('Bracer_R', null, new THREE.Vector3(-0.28 * envelope, 0.10 * envelope, -0.38 * envelope));
+      this.setCastPartPose('Hand_R', null, new THREE.Vector3(-0.34 * envelope, 0.12 * envelope, -0.46 * envelope));
+    } else if (this.castSpellId === 'fireball') {
+      this.setCastPartPose('UpperArm_R', right.set(0, 0.03 * envelope, -0.04 * envelope), new THREE.Vector3(-0.30 * envelope, 0.05 * envelope, -0.16 * envelope));
+      this.setCastPartPose('Bracer_R', null, new THREE.Vector3(-0.44 * envelope, 0.10 * envelope, -0.24 * envelope));
+      this.setCastPartPose('Hand_R', null, new THREE.Vector3(-0.52 * envelope, 0.14 * envelope, -0.30 * envelope));
+      this.setCastPartPose('UpperArm_L', left.set(0, 0.04 * envelope, -0.05 * envelope), new THREE.Vector3(-0.22 * envelope, -0.08 * envelope, 0.24 * envelope));
+      this.setCastPartPose('Bracer_L', null, new THREE.Vector3(-0.34 * envelope, -0.12 * envelope, 0.34 * envelope));
+      this.setCastPartPose('Hand_L', null, new THREE.Vector3(-0.42 * envelope, -0.16 * envelope, 0.42 * envelope));
+    } else if (this.castSpellId === 'flame_wave') {
+      this.setCastPartPose('UpperArm_R', right.set(0.05 * envelope, 0.02 * envelope, 0.02 * envelope), new THREE.Vector3(0.08 * envelope, -0.38 * envelope, -0.46 * envelope));
+      this.setCastPartPose('Bracer_R', null, new THREE.Vector3(0.14 * envelope, -0.54 * envelope, -0.62 * envelope));
+      this.setCastPartPose('Hand_R', null, new THREE.Vector3(0.18 * envelope, -0.64 * envelope, -0.76 * envelope));
+      this.setCastPartPose('UpperArm_L', left.set(-0.05 * envelope, 0.03 * envelope, 0.03 * envelope), new THREE.Vector3(0.08 * envelope, 0.36 * envelope, 0.42 * envelope));
+      this.setCastPartPose('Bracer_L', null, new THREE.Vector3(0.12 * envelope, 0.50 * envelope, 0.56 * envelope));
+      this.setCastPartPose('Hand_L', null, new THREE.Vector3(0.16 * envelope, 0.60 * envelope, 0.68 * envelope));
+    } else if (this.castSpellId === 'fire_tornado') {
+      this.setCastPartPose('UpperArm_R', right.set(0.04 * sustained, 0.05 * sustained, -0.02 * sustained), new THREE.Vector3(-0.25 * sustained, -0.16 * sustained, -0.22 * sustained));
+      this.setCastPartPose('Bracer_R', null, new THREE.Vector3(-0.38 * sustained, -0.26 * sustained, -0.34 * sustained));
+      this.setCastPartPose('Hand_R', null, new THREE.Vector3(-0.48 * sustained, -0.32 * sustained, -0.42 * sustained));
+      this.setCastPartPose('UpperArm_L', left.set(-0.04 * sustained, 0.06 * sustained, -0.02 * sustained), new THREE.Vector3(-0.24 * sustained, 0.16 * sustained, -0.18 * sustained));
+      this.setCastPartPose('Bracer_L', null, new THREE.Vector3(-0.36 * sustained, 0.26 * sustained, -0.29 * sustained));
+      this.setCastPartPose('Hand_L', null, new THREE.Vector3(-0.44 * sustained, 0.34 * sustained, -0.36 * sustained));
+    }
+
+    if (this.worldWand) {
+      this.worldWand.rotation.z += deltaTime * (this.castSpellId === 'fire_tornado' ? 3.8 : 1.2);
+      const pulse = 1 + envelope * 0.35;
+      this.worldWand.scale.setScalar(pulse);
+    }
+    if (this.worldWandHalo) this.worldWandHalo.scale.setScalar(1 + envelope * 0.55);
+
+    if (progress >= 1) {
+      this.castAnimationTime = -1;
+      this.castAnimationDuration = 0;
+      this.restoreCastParts();
+      if (this.worldWand) this.worldWand.scale.setScalar(1);
+      if (this.worldWandHalo) this.worldWandHalo.scale.setScalar(1);
+    }
   }
 
   async loadRiggedModel() {
@@ -149,6 +298,9 @@ export class PlayerEntity {
           material.needsUpdate = true;
         });
       });
+
+      this.cacheCastParts(model);
+      this.createWorldWand(model);
 
       this.modelRoot = model;
       this.hasRiggedModel = true;
@@ -386,6 +538,7 @@ export class PlayerEntity {
       this.modelRoot.position.y += bob;
       if (this.isCasting) this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, -0.08, Math.min(1, deltaTime * 14));
       else this.modelRoot.rotation.x = THREE.MathUtils.lerp(this.modelRoot.rotation.x, 0, Math.min(1, deltaTime * 8));
+      this.updateCastPose(deltaTime);
     } else this.setVisualVisibility(true);
 
     if (this.castTimer > 0) {
@@ -399,9 +552,14 @@ export class PlayerEntity {
     }
   }
 
-  triggerCastAnimation() {
+  triggerCastAnimation(spellId = 'ember_bolt', slot = 'basic') {
+    const resolvedSpellId = spellId || ({ basic: 'ember_bolt', skill1: 'fireball', skill2: 'flame_wave', ult: 'fire_tornado' }[slot] || 'ember_bolt');
+    this.castSpellId = resolvedSpellId;
+    this.castPresentation = getSpellPresentation(resolvedSpellId);
     this.isCasting = true;
-    this.castTimer = 0.35;
+    this.castAnimationTime = 0;
+    this.castAnimationDuration = Math.max(0.22, this.castPresentation.duration || 0.35);
+    this.castTimer = this.castAnimationDuration;
   }
 
   resurrect(pos = null) {
